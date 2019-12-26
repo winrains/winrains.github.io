@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="ActiveMQ消费消息有两种方式。一种是使用同步阻塞的MessageConsumer.receive()方法；另一种是使用消息监听器MessageListener。这里需要注意的是，在同一个session下，只能选择其中一种方式。">
+<meta name="keywords" content="ActiveMQ">
+<meta property="og:type" content="article">
+<meta property="og:title" content="ActiveMQ消费消息原理解析">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;26&#x2F;ActiveMQ%E6%B6%88%E8%B4%B9%E6%B6%88%E6%81%AF%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="ActiveMQ消费消息有两种方式。一种是使用同步阻塞的MessageConsumer.receive()方法；另一种是使用消息监听器MessageListener。这里需要注意的是，在同一个session下，只能选择其中一种方式。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190826144852-2d1b0.png">
+<meta property="og:updated_time" content="2019-12-26T11:51:05.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190826144852-2d1b0.png">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/26/ActiveMQ%E6%B6%88%E8%B4%B9%E6%B6%88%E6%81%AF%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>ActiveMQ消费消息原理解析 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">40</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">32</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">129</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/26/ActiveMQ%E6%B6%88%E8%B4%B9%E6%B6%88%E6%81%AF%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          ActiveMQ消费消息原理解析
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-26 19:51:05" itemprop="dateCreated datePublished" datetime="2019-12-26T19:51:05+08:00">2019-12-26</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">其它技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/%E6%B6%88%E6%81%AF%E9%98%9F%E5%88%97/" itemprop="url" rel="index">
+                    <span itemprop="name">消息队列</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>ActiveMQ消费消息有两种方式。一种是使用同步阻塞的MessageConsumer.receive()方法；另一种是使用消息监听器MessageListener。这里需要注意的是，在同一个session下，只能选择其中一种方式。</p>
+<a id="more"></a>
+
+<h3 id="消费消息流程图"><a href="#消费消息流程图" class="headerlink" title="消费消息流程图"></a>消费消息流程图</h3><p><img src="http://image.winrains.cn/2019/08/20190826144852-2d1b0.png" alt="img"></p>
+<h3 id="消费消息源码分析"><a href="#消费消息源码分析" class="headerlink" title="消费消息源码分析"></a>消费消息源码分析</h3><p><code>ActiveMQMessageConsumer.receive</code>，消费端同步接收消息的源码入口：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public Message receive<span class="literal">()</span> throws JMSException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    check<span class="constructor">Closed()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    check<span class="constructor">MessageListener()</span>; <span class="comment">// 检查receive和MessageListener是否同时配置在当前的会话中</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    send<span class="constructor">PullCommand(0)</span>; <span class="comment">// 如果PrefetchSizeSize为0并且unconsumerMessage为空，则发起pull命令</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    MessageDispatch md = dequeue<span class="number">(-1)</span>; <span class="comment">// 从unconsumerMessage出队列获取消息</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (md<span class="operator"> == </span>null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        return null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    before<span class="constructor">MessageIsConsumed(<span class="params">md</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    after<span class="constructor">MessageIsConsumed(<span class="params">md</span>, <span class="params">false</span>)</span>; <span class="comment">// 发送ack给到broker</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    return create<span class="constructor">ActiveMQMessage(<span class="params">md</span>)</span>;<span class="comment">// 获取消息并返回</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">public Message receive<span class="literal">()</span> throws JMSException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    check<span class="constructor">Closed()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    check<span class="constructor">MessageListener()</span>; <span class="comment">// 检查receive和MessageListener是否同时配置在当前的会话中</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    send<span class="constructor">PullCommand(0)</span>; <span class="comment">// 如果PrefetchSizeSize为0并且unconsumerMessage为空，则发起pull命令</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    MessageDispatch md = dequeue<span class="number">(-1)</span>; <span class="comment">// 从unconsumerMessage出队列获取消息</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (md<span class="operator"> == </span>null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        return null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">    before<span class="constructor">MessageIsConsumed(<span class="params">md</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    after<span class="constructor">MessageIsConsumed(<span class="params">md</span>, <span class="params">false</span>)</span>; <span class="comment">// 发送ack给到broker</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    return create<span class="constructor">ActiveMQMessage(<span class="params">md</span>)</span>;<span class="comment">// 获取消息并返回</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p><code>sendPullCommand()</code>，发送pull命令从broker上获取消息，前提是<code>prefetchSize=0</code>并且<code>unconsumedMessages</code>为空。<code>unconsumedMessage</code>表示未消费的消息，这里面预读取的消息大小为<code>prefetchSize</code>的值。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">protected void send<span class="constructor">PullCommand(<span class="params">long</span> <span class="params">timeout</span>)</span> throws JMSException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    clear<span class="constructor">DeliveredList()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (info.get<span class="constructor">CurrentPrefetchSize()</span><span class="operator"> == </span><span class="number">0</span><span class="operator"> &amp;&amp; </span>unconsumedMessages.is<span class="constructor">Empty()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        MessagePull messagePull = <span class="keyword">new</span> <span class="constructor">MessagePull()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        messagePull.configure(info);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        messagePull.set<span class="constructor">Timeout(<span class="params">timeout</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        session.async<span class="constructor">SendPacket(<span class="params">messagePull</span>)</span>; <span class="comment">// 向服务端异步发送messagePull指令</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p><code>clearDeliveredList()</code>，主要用来清理已经分发的消息链表<code>deliveredMessages</code>。<code>deliveredMessages</code>，存储分发给消费者但还为应答的消息链表。如果session是事务的，则会遍历<code>deliveredMessage</code>中的消息放入到<code>previouslyDeliveredMessage</code>中来做重发；如果session是非事务的，根据ACK的模式来选择不同的应答操作。<br><code>dequeue()</code>，从<code>unconsumedMessage</code>中取出一个消息，在创建一个消费者时，会对这个消费者创建一个未消费的消息通道，这个通道分为两种，一种是简单优先级队列分发通道<code>SimplePriorityMessageDispatchChannel</code> ；另一种是先进先出的分发通道<code>FifoMessageDispatchChannel</code>。<br>通过这样的设计可以允许session能够一次性将多条消息分发给一个消费者，而不用消费者每次消费完一个消息以后再去broker拿消息，提高效率。默认情况下对于queue来说，prefetchSize的值是1000。<br><code>beforeMessageIsConsumed()</code>，这里面主要是做消息消费之前的一些准备工作，如果ACK类型不是<code>DUPS_OK_ACKNOWLEDGE</code>或者队列模式（简单来说就是除了Topic和DupAck这两种情况），所有的消息先放到<code>deliveredMessages</code>链表的开头。并且如果当前是事务类型的会话，则判断<code>transactedIndividualAck</code>，如果为true，表示单条消息直接返回ack。否则，调用ackLater，批量应答, client端在消费消息后暂且不发送ACK，而是把它缓存下来(pendingACK)，等到这些消息的条数达到一定阀值时，只需要通过一个ACK指令把它们全部确认，这比对每条消息都逐个确认，在性能上要提高很多。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> void before<span class="constructor">MessageIsConsumed(MessageDispatch <span class="params">md</span>)</span> throws JMSException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">        md.set<span class="constructor">DeliverySequenceId(<span class="params">session</span>.<span class="params">getNextDeliveryId</span>()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        lastDeliveredSequenceId = md.get<span class="constructor">Message()</span>.get<span class="constructor">MessageId()</span>.get<span class="constructor">BrokerSequenceId()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (!is<span class="constructor">AutoAcknowledgeBatch()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">            synchronized (deliveredMessages) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">                deliveredMessages.add<span class="constructor">First(<span class="params">md</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (session.get<span class="constructor">Transacted()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (transactedIndividualAck) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">                    immediate<span class="constructor">IndividualTransactedAck(<span class="params">md</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">                &#125; <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">                    ack<span class="constructor">Later(<span class="params">md</span>, MessageAck.DELIVERED_ACK_TYPE)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr></table></figure>
+
+<p><code>afterMessageIsConsumed()</code>，这个方法的主要作用是执行应答操作，这里面做以下几个操作：<br>Ø 如果消息过期，则返回消息过期的ack<br>Ø 如果是事务类型的会话，则不做任何处理<br>Ø 如果是AUTOACK或者（DUPS_OK_ACK且是队列），并且是优化ack操作，则走批量确认ack<br>Ø 如果是DUPS_OK_ACK，则走ackLater逻辑<br>Ø 如果是CLIENT_ACK，则执行ackLater逻辑</p>
+<h3 id="消息的确认过程"><a href="#消息的确认过程" class="headerlink" title="消息的确认过程"></a>消息的确认过程</h3><p>消息确认有四种 <strong>ACK_MODE</strong>，分别是：<br>AUTO_ACKNOWLEDGE = 1 自动确认<br>CLIENT_ACKNOWLEDGE = 2 客户端手动确认<br>DUPS_OK_ACKNOWLEDGE = 3 自动批量确认<br>SESSION_TRANSACTED = 0 事务提交并确认<br>虽然 Client 端指定了 ACK 模式，但是在 Client 与 broker 在交换 ACK 指令的时候，还需要告知ACK_TYPE。ACK_TYPE 表示此确认指令的类型，不同的ACK_TYPE 将传递着消息的状态，broker 可以根据不同的 ACK_TYPE 对消息进行不同的操作。<br><strong>ACK_TYPE：</strong><br>DELIVERED_ACK_TYPE = 0 消息”已接收”，但尚未处理结束；<br>STANDARD_ACK_TYPE = 2 “标准”类型,通常表示为消息”处理成功”，broker 端可以删除消息；<br>POSION_ACK_TYPE = 1 消息”错误”,通常表示”抛弃”此消息，比如消息重发多次后，都无法正确处理时，消息将会被删除或者 DLQ(死信队列)；<br>REDELIVERED_ACK_TYPE = 3 消息需”重发”，比如 consumer 处理消息时抛出了异常，broker 稍后会重新发送此消息；<br>INDIVIDUAL_ACK_TYPE = 4 表示只确认”单条消息”,无论在任何 ACK_MODE ；<br>UNMATCHED_ACK_TYPE = 5 在 Topic 中，如果一条消息在转发给“订阅者”时，发现此消息不符合 Selector 过滤条件，那么此消息将 不会转发给订阅者，消息将会被存储引擎删除(相当于在 Broker 上确认了消息)。</p>
+<h3 id="消息的重发机制原理"><a href="#消息的重发机制原理" class="headerlink" title="消息的重发机制原理"></a>消息的重发机制原理</h3><p>在正常情况下，有几中情况会导致消息重新发送：<br>Ø 在事务性会话中，没有调用 session.commit 确认消息或者调用session.rollback 方法回滚消息；<br>Ø 在非事务性会话中，ACK 模式为 CLIENT_ACKNOWLEDGE 的情况下，没有调用 acknowledge 或者调用了 recover 方法。<br>一个消息被重发超过默认的最大重发次数（默认 6 次）时，消费端会给 broker 发送一个”poison ack，告诉 broker 不要再发了。这个时候 broker 会把这个消息放到 DLQ（死信队列）。</p>
+<h3 id="ActiveMQ-的优缺点"><a href="#ActiveMQ-的优缺点" class="headerlink" title="ActiveMQ 的优缺点"></a>ActiveMQ 的优缺点</h3><p>ActiveMQ 采用消息推送方式，所以最适合的场景是默认消息都可在短时间内被消费。数据量越大，查找和消费消息就越慢，消息积压程度与消息速度成反比。<br><strong>缺点：</strong><br>1.吞吐量低。由于 ActiveMQ 需要建立索引，导致吞吐量下降。<br>2.无分片功能。这是一个功能缺失，JMS 并没有规定消息中间件的集群、分片机制。而由于 ActiveMQ 是为企业级开发设计的消息中间件，初衷并不是为了处理海量消息和高并发请求。如果一台服务器不能承受更多消息，则需要横向拆分。ActiveMQ 官方不提供分片机制，需要自己实现。<br><strong>适用场景：</strong><br>对 TPS 要求比较低的系统，可以使用 ActiveMQ 来实现，一方面比较简单，能够快速上手开发，另一方面可控性也比较好，还有比较好的监控机制和界面。<br><strong>不适用的场景：</strong><br>消息量巨大的场景。ActiveMQ 不支持消息自动分片机制，如果消息量巨大，导致一台服务器不能处理全部消息，就需要自己开发消息分片功能。</p>
+<blockquote>
+<p>作者：匠丶</p>
+<p>来源：<a href="https://www.jianshu.com/p/8cf82006504e" target="_blank" rel="noopener">https://www.jianshu.com/p/8cf82006504e</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/ActiveMQ/" rel="tag"># ActiveMQ</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/26/Java%E7%BA%BF%E7%A8%8B%E6%B1%A0Executor%E6%A1%86%E6%9E%B6%E8%AF%A6%E8%A7%A3/" rel="prev" title="Java线程池Executor框架详解">
+      <i class="fa fa-chevron-left"></i> Java线程池Executor框架详解
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/26/ActiveMQ%E5%8F%91%E9%80%81%E6%B6%88%E6%81%AF%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90/" rel="next" title="ActiveMQ发送消息原理解析">
+      ActiveMQ发送消息原理解析 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-3"><a class="nav-link" href="#消费消息流程图"><span class="nav-number">1.</span> <span class="nav-text">消费消息流程图</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#消费消息源码分析"><span class="nav-number">2.</span> <span class="nav-text">消费消息源码分析</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#消息的确认过程"><span class="nav-number">3.</span> <span class="nav-text">消息的确认过程</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#消息的重发机制原理"><span class="nav-number">4.</span> <span class="nav-text">消息的重发机制原理</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#ActiveMQ-的优缺点"><span class="nav-number">5.</span> <span class="nav-text">ActiveMQ 的优缺点</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">129</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">32</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">40</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="本文将对ActiveMQ发送消息的源码进行解析，并分析ActiveMQ持久化消息和非持久化消息的发送策略和消息的存储策略。">
+<meta name="keywords" content="ActiveMQ">
+<meta property="og:type" content="article">
+<meta property="og:title" content="ActiveMQ发送消息原理解析">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;26&#x2F;ActiveMQ%E5%8F%91%E9%80%81%E6%B6%88%E6%81%AF%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="本文将对ActiveMQ发送消息的源码进行解析，并分析ActiveMQ持久化消息和非持久化消息的发送策略和消息的存储策略。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190826140519-f1b4d.png">
+<meta property="og:updated_time" content="2019-12-26T11:52:02.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190826140519-f1b4d.png">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/26/ActiveMQ%E5%8F%91%E9%80%81%E6%B6%88%E6%81%AF%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>ActiveMQ发送消息原理解析 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">40</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">32</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">129</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/26/ActiveMQ%E5%8F%91%E9%80%81%E6%B6%88%E6%81%AF%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          ActiveMQ发送消息原理解析
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-26 19:52:02" itemprop="dateCreated datePublished" datetime="2019-12-26T19:52:02+08:00">2019-12-26</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">其它技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/%E6%B6%88%E6%81%AF%E9%98%9F%E5%88%97/" itemprop="url" rel="index">
+                    <span itemprop="name">消息队列</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>本文将对ActiveMQ发送消息的源码进行解析，并分析ActiveMQ持久化消息和非持久化消息的发送策略和消息的存储策略。</p>
+<a id="more"></a>
+
+<h3 id="消息的发送原理"><a href="#消息的发送原理" class="headerlink" title="消息的发送原理"></a>消息的发送原理</h3><h4 id="消息同步发送和异步发送"><a href="#消息同步发送和异步发送" class="headerlink" title="消息同步发送和异步发送"></a>消息同步发送和异步发送</h4><p>ActiveMQ支持同步、异步两种发送模式将消息发送到broker上。<br>同步发送过程中，发送者发送一条消息会阻塞直到broker反馈一个确认消息，表示消息已经被broker处理。这个机制提供了消息的安全性保障，但是由于是阻塞的操作，会影响到客户端消息发送的性能。<br>异步发送的过程中，发送者不需要等待broker提供反馈，所以性能相对较高。但是可能会出现消息丢失的情况。所以使用异步发送的前提是在某些情况下允许出现数据丢失的情况。<br>默认情况下，非持久化消息是异步发送的，持久化消息并且是在非事务模式下是同步发送的。<br>但是在开启事务的情况下，消息都是异步发送。由于异步发送的效率会比同步发送性能更高。所以在发送持久化消息的时候，尽量去开启事务会话。<br>除了持久化消息和非持久化消息的同步和异步特性以外，我们还可以通过以下几种方式来设置异步发送：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">ConnectionFactory connectionFactory = <span class="keyword">new</span> <span class="constructor">ActiveMQConnectionFactory(<span class="string">"tcp://192.168.11.153:61616?jms.useAsyncSend=true"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">((ActiveMQConnectionFactory) connectionFactory).set<span class="constructor">UseAsyncSend(<span class="params">true</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">((ActiveMQConnection)connection).set<span class="constructor">UseAsyncSend(<span class="params">true</span>)</span>;</span></pre></td></tr></table></figure>
+
+<h4 id="消息发送源码分析"><a href="#消息发送源码分析" class="headerlink" title="消息发送源码分析"></a>消息发送源码分析</h4><p>消息发送的流程图如下：</p>
+<p><img src="http://image.winrains.cn/2019/08/20190826140519-f1b4d.png" alt="img"></p>
+<p>以<code>ActiveMQMessageProducer.send</code>为入口：</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">void</span> send(Destination destination, Message message, <span class="keyword">int</span> deliveryMode, <span class="keyword">int</span> priority, <span class="keyword">long</span> timeToLive,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">        AsyncCallback onComplete) <span class="keyword">throws</span> JMSException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    checkClosed(); <span class="comment">// 检查session的状态，如果session以关闭则抛异常</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (destination == <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (info.getDestination() == <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">throw</span> <span class="keyword">new</span> UnsupportedOperationException(<span class="string">"A destination must be specified."</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> InvalidDestinationException(<span class="string">"Don't understand null destinations"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    ActiveMQDestination dest;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (destination.equals(info.getDestination())) &#123;<span class="comment">// 检查destination的类型，如果符合要求，就转变为ActiveMQDestination</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        dest = (ActiveMQDestination) destination;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    &#125; <span class="keyword">else</span> <span class="keyword">if</span> (info.getDestination() == <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        dest = ActiveMQDestination.transform(destination);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    &#125; <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> UnsupportedOperationException(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">                <span class="string">"This producer can only send messages to: "</span> + <span class="keyword">this</span>.info.getDestination().getPhysicalName());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (dest == <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> JMSException(<span class="string">"No destination specified"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (transformer != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        Message transformedMessage = transformer.producerTransform(session, <span class="keyword">this</span>, message);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (transformedMessage != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">            message = transformedMessage;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (producerWindow != <span class="keyword">null</span>) &#123;<span class="comment">// 如果发送窗口大小不为空，则判断发送窗口的大小决定是否阻塞</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">            producerWindow.waitForSpace();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        &#125; <span class="keyword">catch</span> (InterruptedException e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">throw</span> <span class="keyword">new</span> JMSException(<span class="string">"Send aborted due to thread interrupt."</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 发送消息到broker的topic</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">this</span>.session.send(<span class="keyword">this</span>, dest, message, deliveryMode, priority, timeToLive, producerWindow, sendTimeout, onComplete);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">    stats.onMessage();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p><code>ActiveMQSession</code>的send方法（设置消息头、属性，并判断是同步发送还是异步发送）：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">protected void send(ActiveMQMessageProducer producer, ActiveMQDestination destination, Message message,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">int</span> deliveryMode, <span class="built_in">int</span> priority, long timeToLive, MemoryUsage producerWindow, <span class="built_in">int</span> sendTimeout,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        AsyncCallback onComplete) throws JMSException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    check<span class="constructor">Closed()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (destination.is<span class="constructor">Temporary()</span><span class="operator"> &amp;&amp; </span>connection.is<span class="constructor">Deleted(<span class="params">destination</span>)</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        throw <span class="keyword">new</span> <span class="constructor">InvalidDestinationException(<span class="string">"Cannot publish to a deleted Destination: "</span> + <span class="params">destination</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    synchronized (sendMutex) &#123; <span class="comment">// 互斥锁，如果一个session的多个producer发送消息到这里，会保证消息发送的有序性</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// tell the Broker we are about to start a new transaction</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">do</span><span class="constructor">StartTransaction()</span>;<span class="comment">// 告诉broker开始一个新事务，只有事务型会话中才会开启</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        TransactionId txid = transactionContext.get<span class="constructor">TransactionId()</span>;<span class="comment">// 从事务上下文中获取事务id</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        long sequenceNumber = producer.get<span class="constructor">MessageSequence()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// Set the "JMS" header fields on the original message, see 1.1 spec</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// section 3.4.11</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        message.set<span class="constructor">JMSDeliveryMode(<span class="params">deliveryMode</span>)</span>; <span class="comment">// 在JMS协议头中设置是否持久化标识</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        long expiration = <span class="number">0L</span>;<span class="comment">// 计算消息过期时间</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (!producer.get<span class="constructor">DisableMessageTimestamp()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">            long timeStamp = <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>current<span class="constructor">TimeMillis()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">            message.set<span class="constructor">JMSTimestamp(<span class="params">timeStamp</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (timeToLive &gt; <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">                expiration = timeToLive + timeStamp;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">        message.set<span class="constructor">JMSExpiration(<span class="params">expiration</span>)</span>;<span class="comment">// 设置消息过期时间</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">        message.set<span class="constructor">JMSPriority(<span class="params">priority</span>)</span>;<span class="comment">// 设置消息的优先级</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">        message.set<span class="constructor">JMSRedelivered(<span class="params">false</span>)</span>;<span class="comment">// 设置消息为非重发</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// transform to our own message format here</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 将不通的消息格式统一转化为ActiveMQMessage</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">        ActiveMQMessage msg = <span class="module-access"><span class="module"><span class="identifier">ActiveMQMessageTransformation</span>.</span></span>transform<span class="constructor">Message(<span class="params">message</span>, <span class="params">connection</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">        msg.set<span class="constructor">Destination(<span class="params">destination</span>)</span>;<span class="comment">// 设置目的地</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 生成并设置消息id</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">        msg.set<span class="constructor">MessageId(<span class="params">new</span> MessageId(<span class="params">producer</span>.<span class="params">getProducerInfo</span>()</span>.get<span class="constructor">ProducerId()</span>, sequenceNumber));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// Set the message id.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (msg != message) &#123;<span class="comment">// 如果消息是经过转化的，则更新原来的消息id和目的地</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">            message.set<span class="constructor">JMSMessageID(<span class="params">msg</span>.<span class="params">getMessageId</span>()</span>.<span class="keyword">to</span><span class="constructor">String()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// Make sure the JMS destination is set on the foreign messages</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// too.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">            message.set<span class="constructor">JMSDestination(<span class="params">destination</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// clear the brokerPath in case we are re-sending this message</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">        msg.set<span class="constructor">BrokerPath(<span class="params">null</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">        msg.set<span class="constructor">TransactionId(<span class="params">txid</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (connection.is<span class="constructor">CopyMessageOnSend()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line">            msg = (ActiveMQMessage) msg.copy<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line">        msg.set<span class="constructor">Connection(<span class="params">connection</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line">        msg.on<span class="constructor">Send()</span>;<span class="comment">// 把消息属性和消息体都设置为只读，防止被修改</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line">        msg.set<span class="constructor">ProducerId(<span class="params">msg</span>.<span class="params">getMessageId</span>()</span>.get<span class="constructor">ProducerId()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">49</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (<span class="module-access"><span class="module"><span class="identifier">LOG</span>.</span></span>is<span class="constructor">TraceEnabled()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">50</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">LOG</span>.</span></span>trace(get<span class="constructor">SessionId()</span> + <span class="string">" sending message: "</span> + msg);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">51</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">52</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 如果onComplete没有设置，且发送超时时间小于0，且消息不需要反馈，且连接器不是同步发送模式，且消息非持久化或者连接器是异步发送模式</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">53</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 或者存在事务id的情况下，走异步发送，否则走同步发送</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">54</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (onComplete<span class="operator"> == </span>null<span class="operator"> &amp;&amp; </span>sendTimeout &lt;= <span class="number">0</span><span class="operator"> &amp;&amp; </span>!msg.is<span class="constructor">ResponseRequired()</span><span class="operator"> &amp;&amp; </span>!connection.is<span class="constructor">AlwaysSyncSend()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">55</span></pre></td><td class="code"><pre><span class="line"><span class="operator">                &amp;&amp; </span>(!msg.is<span class="constructor">Persistent()</span><span class="operator"> || </span>connection.is<span class="constructor">UseAsyncSend()</span><span class="operator"> || </span>txid != null)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">56</span></pre></td><td class="code"><pre><span class="line">            this.connection.async<span class="constructor">SendPacket(<span class="params">msg</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">57</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (producerWindow != null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">58</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// Since we defer lots of the marshaling till we hit the</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">59</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// wire, this might not</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">60</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// provide and accurate size. We may change over to doing</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">61</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// more aggressive marshaling,</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">62</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// to get more accurate sizes.. this is more important once</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">63</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// users start using producer window</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">64</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// flow control.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">65</span></pre></td><td class="code"><pre><span class="line">                <span class="built_in">int</span> size = msg.get<span class="constructor">Size()</span>; <span class="comment">// 异步发送的情况下，需要设置producerWindow的大小</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">66</span></pre></td><td class="code"><pre><span class="line">                producerWindow.increase<span class="constructor">Usage(<span class="params">size</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">67</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">68</span></pre></td><td class="code"><pre><span class="line">        &#125; <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">69</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (sendTimeout &gt; <span class="number">0</span><span class="operator"> &amp;&amp; </span>onComplete<span class="operator"> == </span>null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">70</span></pre></td><td class="code"><pre><span class="line">                this.connection.sync<span class="constructor">SendPacket(<span class="params">msg</span>, <span class="params">sendTimeout</span>)</span>; <span class="comment">// 带超时时间的同步发送</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">71</span></pre></td><td class="code"><pre><span class="line">            &#125; <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">72</span></pre></td><td class="code"><pre><span class="line">                this.connection.sync<span class="constructor">SendPacket(<span class="params">msg</span>, <span class="params">onComplete</span>)</span>; <span class="comment">// 带回调的同步发送</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">73</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">74</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">75</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">76</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>当为异步发送时，走<code>ActiveMQConnection. doAsyncSendPacket</code>：</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="function"><span class="keyword">void</span> <span class="title">doAsyncSendPacket</span><span class="params">(Command command)</span> <span class="keyword">throws</span> JMSException </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">this</span>.transport.oneway(command);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    &#125; <span class="keyword">catch</span> (IOException e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> JMSExceptionSupport.create(e);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p><strong>transport</strong><br>这里调用了<code>transport</code>的方法，下面分析一下<code>transport</code>的实例化过程。在<code>ActiveMQConnectionFactory. createActiveMQConnection</code>这个方法中：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">protected ActiveMQConnection create<span class="constructor">ActiveMQConnection(String <span class="params">userName</span>, String <span class="params">password</span>)</span> throws JMSException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (brokerURL<span class="operator"> == </span>null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        throw <span class="keyword">new</span> <span class="constructor">ConfigurationException(<span class="string">"brokerURL not set."</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    ActiveMQConnection connection = null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        Transport transport = create<span class="constructor">Transport()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        connection = create<span class="constructor">ActiveMQConnection(<span class="params">transport</span>, <span class="params">factoryStats</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        connection.set<span class="constructor">UserName(<span class="params">userName</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        connection.set<span class="constructor">Password(<span class="params">password</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 省略后面的代码</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    &#125; catch (Exception e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        e.print<span class="constructor">StackTrace()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p><code>createTransport</code>，调用<code>ActiveMQConnectionFactory.createTransport</code>方法，去创建一个<code>transport</code>对象。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">protected Transport create<span class="constructor">Transport()</span> throws JMSException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        URI connectBrokerUL = brokerURL;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        String scheme = brokerURL.get<span class="constructor">Scheme()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (scheme<span class="operator"> == </span>null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            throw <span class="keyword">new</span> <span class="constructor">IOException(<span class="string">"Transport not scheme specified: ["</span> + <span class="params">brokerURL</span> + <span class="string">"]"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (scheme.equals(<span class="string">"auto"</span>)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">            connectBrokerUL = <span class="keyword">new</span> <span class="constructor">URI(<span class="params">brokerURL</span>.<span class="params">toString</span>()</span>.replace(<span class="string">"auto"</span>, <span class="string">"tcp"</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        &#125; <span class="keyword">else</span> <span class="keyword">if</span> (scheme.equals(<span class="string">"auto+ssl"</span>)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">            connectBrokerUL = <span class="keyword">new</span> <span class="constructor">URI(<span class="params">brokerURL</span>.<span class="params">toString</span>()</span>.replace(<span class="string">"auto+ssl"</span>, <span class="string">"ssl"</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        &#125; <span class="keyword">else</span> <span class="keyword">if</span> (scheme.equals(<span class="string">"auto+nio"</span>)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            connectBrokerUL = <span class="keyword">new</span> <span class="constructor">URI(<span class="params">brokerURL</span>.<span class="params">toString</span>()</span>.replace(<span class="string">"auto+nio"</span>, <span class="string">"nio"</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        &#125; <span class="keyword">else</span> <span class="keyword">if</span> (scheme.equals(<span class="string">"auto+nio+ssl"</span>)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            connectBrokerUL = <span class="keyword">new</span> <span class="constructor">URI(<span class="params">brokerURL</span>.<span class="params">toString</span>()</span>.replace(<span class="string">"auto+nio+ssl"</span>, <span class="string">"nio+ssl"</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        return <span class="module-access"><span class="module"><span class="identifier">TransportFactory</span>.</span></span>connect(connectBrokerUL);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    &#125; catch (Exception e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        throw <span class="module-access"><span class="module"><span class="identifier">JMSExceptionSupport</span>.</span></span>create(<span class="string">"Could not create Transport. Reason: "</span> + e, e);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<ol>
+<li>构建一个URI（默认使用的是tcp的协议）</li>
+<li>根据URI去创建一个连接TransportFactory.connect</li>
+</ol>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="built_in">public</span> static Transport <span class="keyword">connect</span>(URI <span class="keyword">location</span>) throws <span class="keyword">Exception</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    TransportFactory tf = findTransportFactory(<span class="keyword">location</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> tf.doConnect(<span class="keyword">location</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p><code>TransportFactory. findTransportFactory</code>会从<code>TRANSPORT_FACTORYS</code>这个Map集合中，根据scheme去获得一个<code>TransportFactory</code>指定的实例对象，如果Map集合中不存在，则通过<code>TRANSPORT_FACTORY_FINDER</code>去找一个并且构建实例。<br>这个地方又有点类似于Java SPI的思想。他会从<code>META-INF/services/org/apache/activemq/transport/</code> 这个路径下，根据URI组装的scheme去找到匹配的class对象并且实例化，所以根据tcp为key去对应的路径下可以找到<code>TcpTransportFactory</code>。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public static TransportFactory find<span class="constructor">TransportFactory(URI <span class="params">location</span>)</span> throws IOException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    String scheme = location.get<span class="constructor">Scheme()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (scheme<span class="operator"> == </span>null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        throw <span class="keyword">new</span> <span class="constructor">IOException(<span class="string">"Transport not scheme specified: ["</span> + <span class="params">location</span> + <span class="string">"]"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    TransportFactory tf = <span class="module-access"><span class="module"><span class="identifier">TRANSPORT_FACTORYS</span>.</span></span>get(scheme);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (tf<span class="operator"> == </span>null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// Try to load if from a META-INF property.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            tf = (TransportFactory) <span class="module-access"><span class="module"><span class="identifier">TRANSPORT_FACTORY_FINDER</span>.</span></span><span class="keyword">new</span><span class="constructor">Instance(<span class="params">scheme</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">TRANSPORT_FACTORYS</span>.</span></span>put(scheme, tf);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        &#125; catch (Throwable e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            throw <span class="module-access"><span class="module"><span class="identifier">IOExceptionSupport</span>.</span></span>create(<span class="string">"Transport scheme NOT recognized: ["</span> + scheme + <span class="string">"]"</span>, e);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    return tf;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>调用<code>TransportFactory.doConnect</code>去构建一个连接：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public Transport <span class="keyword">do</span><span class="constructor">Connect(URI <span class="params">location</span>)</span> throws Exception &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        Map&lt;String, String&gt; options = <span class="keyword">new</span> HashMap&lt;String, String&gt;(<span class="module-access"><span class="module"><span class="identifier">URISupport</span>.</span></span>parse<span class="constructor">Parameters(<span class="params">location</span>)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (!options.contains<span class="constructor">Key(<span class="string">"wireFormat.host"</span>)</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">            options.put(<span class="string">"wireFormat.host"</span>, location.get<span class="constructor">Host()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        WireFormat wf = create<span class="constructor">WireFormat(<span class="params">options</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        Transport transport = create<span class="constructor">Transport(<span class="params">location</span>, <span class="params">wf</span>)</span>; <span class="comment">// 创建一个Transport，创建一个socket连接</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">                                                             <span class="comment">// -&gt; 终于找到真相了</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        Transport rc = configure(transport, wf, options);<span class="comment">// 配置configure，这个里面是对Transport做链路包装</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// remove auto</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">IntrospectionSupport</span>.</span></span>extract<span class="constructor">Properties(<span class="params">options</span>, <span class="string">"auto."</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (!options.is<span class="constructor">Empty()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">            throw <span class="keyword">new</span> <span class="constructor">IllegalArgumentException(<span class="string">"Invalid connect parameters: "</span> + <span class="params">options</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        return rc;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    &#125; catch (URISyntaxException e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        throw <span class="module-access"><span class="module"><span class="identifier">IOExceptionSupport</span>.</span></span>create(e);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p><code>configure(transport, wf, options)</code>：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public Transport configure(Transport transport, WireFormat wf, Map options) throws Exception &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 组装一个复合的transport，这里会包装两层，一个是IactivityMonitor.另一个是WireFormatNegotiator</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    transport = composite<span class="constructor">Configure(<span class="params">transport</span>, <span class="params">wf</span>, <span class="params">options</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    transport = <span class="keyword">new</span> <span class="constructor">MutexTransport(<span class="params">transport</span>)</span>; <span class="comment">// 再做一层包装,MutexTransport</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    transport = <span class="keyword">new</span> <span class="constructor">ResponseCorrelator(<span class="params">transport</span>)</span>; <span class="comment">// 包装ResponseCorrelator</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    return transport;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>到目前为止，这个<code>transport</code>实际上就是一个调用链了，它的链结构为：<code>ResponseCorrelator(MutexTransport(WireFormatNegotiator(IactivityMonitor(TcpTransport()))</code>每一层包装的作用：<br><code>ResponseCorrelator</code> 用于实现异步请求。<br><code>MutexTransport</code> 实现写锁，表示同一时间只允许发送一个请求。<br><code>WireFormatNegotiator</code> 实现了客户端连接broker的时候先发送数据解析相关的协议信息，比如解析版本号，是否使用缓存等。<br><code>InactivityMonitor</code> 用于实现连接成功成功后的心跳检查机制，客户端每10s发送一次心跳信息。服务端每30s读取一次心跳信息。<br><strong>同步发送和异步发送的区别</strong><br>在<code>ResponseCorrelator</code>的request方法中，通过response.getResult去获得broker的结果，如果没有获取到则阻塞。</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="function">Object <span class="title">request</span><span class="params">(Object command, <span class="keyword">int</span> timeout)</span> <span class="keyword">throws</span> IOException </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    FutureResponse response = asyncRequest(command, <span class="keyword">null</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">return</span> response.<span class="title">getResult</span><span class="params">(timeout)</span></span>; <span class="comment">// 从future方法阻塞等待返回</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h3 id="持久化消息和非持久化消息的存储原理"><a href="#持久化消息和非持久化消息的存储原理" class="headerlink" title="持久化消息和非持久化消息的存储原理"></a>持久化消息和非持久化消息的存储原理</h3><p>正常情况下，非持久化消息是存储在内存中的，持久化消息是存储在文件中的。能够存储的最大消息数据在<br><code>${ActiveMQ_HOME}/conf/activemq.xml</code>文件中的systemUsage节点配置。</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">systemUsage</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">systemUsage</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">memoryUsage</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment">&lt;!--该子标记设置整个ActiveMQ节点的“可用内存限制”。这个值不能超过ActiveMQ本身设置的最大内存大小。其中的</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment">percentOfJvmHeap属性表示百分比。占用70%的堆内存--&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">memoryUsage</span> <span class="attr">percentOfJvmHeap</span>=<span class="string">"70"</span> /&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;/<span class="name">memoryUsage</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">storeUsage</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="comment">&lt;!--该标记设置整个ActiveMQ节点，用于存储“持久化消息”的“可用磁盘空间”。该子标记的limit属性必须要进行设置--&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">storeUsage</span> <span class="attr">limit</span>=<span class="string">"100 gb"</span>/&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;/<span class="name">storeUsage</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">tempUsage</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment">&lt;!--一旦ActiveMQ服务节点存储的消息达到了memoryUsage的限制，非持久化消息就会被转储到 temp store区域，虽然非持久化消息不进行持久化存储，但是ActiveMQ为了防止“数据洪峰”出现时非持久化消息大量堆积致使内存耗尽的情况出现，还是会将非持久化消息写入到磁盘的临时区域——temp store。这个子标记就是为了设置这个tempstore区域的“可用磁盘空间限制”。--&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">tempUsage</span> <span class="attr">limit</span>=<span class="string">"50 gb"</span>/&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;/<span class="name">tempUsage</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;/<span class="name">systemUsage</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;/<span class="name">systemUsage</span>&gt;</span></span></pre></td></tr></table></figure>
+
+<p>从上面的配置可以知道，当非持久化消息堆积到一定程度的时候，也就是内存超过指定的设置阀值时，ActiveMQ会将内存中的非持久化消息写入到临时文件，以便腾出内存。但是它和持久化消息的区别是，重启之后，持久化消息会从文件中恢复，非持久化的临时文件会直接删除。</p>
+<h4 id="消息的持久化策略分析"><a href="#消息的持久化策略分析" class="headerlink" title="消息的持久化策略分析"></a>消息的持久化策略分析</h4><p>消息持久性对于可靠消息传递来说是一种比较好的方法，即时发送者和接受者不是同时在线或者消息中心在发送者发送消息后宕机了，在消息中心重启后仍然可以将消息发送出去。消息持久性的原理很简单，就是在发送消息出去后，消息中心首先将消息存储在本地文件、内存或者远程数据库，然后把消息发送给接受者，发送成功后再把消息从存储中删除，失败则继续尝试。<br>ActiveMQ支持多种不同的持久化方式，主要有以下几种：</p>
+<ul>
+<li>KahaDB存储（默认存储方式）</li>
+<li>JDBC存储</li>
+<li>Memory存储</li>
+<li>LevelDB存储</li>
+<li>JDBC With ActiveMQ Journal</li>
+</ul>
+<p><strong>KahaDB存储</strong><br>KahaDB是目前默认的存储方式,可用于任何场景,提高了性能和恢复能力。消息存储使用一个事务日志和仅仅用一个索引文件来存储它所有的地址。KahaDB是一个专门针对消息持久化的解决方案,它对典型的消息使用模式进行了优化。在Kaha中,数据被追加到data logs中。当不再需要log文件中的数据的时候，log文件会被丢弃。<br>KahaDB的存储原理：<br>在data/kahadb这个目录下，会生成四个文件：<br>Ø db.data 它是消息的索引文件，本质上是B-Tree（B树），使用B-Tree作为索引指向db-<em>.log里面存储的消息<br>Ø db.redo 用来进行消息恢复<br>Ø db-</em>.log 存储消息内容。新的数据以APPEND的方式追加到日志文件末尾。属于顺序写入，因此消息存储是比较快的。默认是32M，达到阀值会自动递增<br>Ø lock文件 锁，表示当前获得kahadb读写权限的broker<br><strong>JDBC存储</strong><br>使用JDBC持久化方式，数据库会创建3个表：activemq_msgs，activemq_acks和activemq_lock。<br>ACTIVEMQ_MSGS 消息表，queue和topic都存在这个表中<br>ACTIVEMQ_ACKS 存储持久订阅的信息和最后一个持久订阅接收的消息ID<br>ACTIVEMQ_LOCKS 锁表，用来确保某一时刻，只能有一个ActiveMQ broker实例来访问数据库<br><strong>LevelDB存储</strong><br>LevelDB持久化性能高于KahaDB，虽然目前默认的持久化方式仍然是KahaDB。并且，在ActiveMQ 5.9版本提供了基于LevelDB和Zookeeper的数据复制方式，用于Master-slave方式的首选数据复制方案。不过，据ActiveMQ官网对LevelDB的表述：LevelDB官方建议使用以及不再支持，推荐使用的是KahaDB。<br><strong>Memory 消息存储</strong><br>基于内存的消息存储，内存消息存储主要是存储所有的持久化的消息在内存中。<code>persistent=”false”</code>,表示不设置持久化存储，直接存储到内存中。</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">beans</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">broker</span> <span class="attr">brokerName</span>=<span class="string">"test-broker"</span> <span class="attr">persistent</span>=<span class="string">"false"</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="tag"><span class="attr">xmlns</span>=<span class="string">"http://activemq.apache.org/schema/core"</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">transportConnectors</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">transportConnector</span> <span class="attr">uri</span>=<span class="string">"tcp://localhost:61635"</span>/&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;/<span class="name">transportConnectors</span>&gt;</span> <span class="tag">&lt;/<span class="name">broker</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;/<span class="name">beans</span>&gt;</span></span></pre></td></tr></table></figure>
+
+<p><strong>JDBC Message store with ActiveMQ Journal</strong><br>这种方式克服了JDBC Store的不足，JDBC每次消息过来，都需要去写库和读库。ActiveMQ Journal，使用高速缓存写入技术，大大提高了性能。<br>当消费者的消费速度能够及时跟上生产者消息的生产速度时，journal文件能够大大减少需要写入到DB中的消息。举个例子，生产者生产了1000条消息，这1000条消息会保存到journal文件，如果消费者的消费速度很快的情况下，在journal文件还没有同步到DB之前，消费者已经消费了90%的以上的消息，那么这个时候只需要同步剩余的10%的消息到DB。<br>如果消费者的消费速度很慢，这个时候journal文件可以使消息以批量方式写到DB。</p>
+<blockquote>
+<p>作者：匠丶</p>
+<p>来源：<a href="https://www.jianshu.com/p/3a29b032827a" target="_blank" rel="noopener">https://www.jianshu.com/p/3a29b032827a</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/ActiveMQ/" rel="tag"># ActiveMQ</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/26/ActiveMQ%E6%B6%88%E8%B4%B9%E6%B6%88%E6%81%AF%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90/" rel="prev" title="ActiveMQ消费消息原理解析">
+      <i class="fa fa-chevron-left"></i> ActiveMQ消费消息原理解析
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/26/%E4%BB%8EJMS%E8%A7%84%E8%8C%83%E4%BA%86%E8%A7%A3ActiveMQ/" rel="next" title="从JMS规范了解ActiveMQ">
+      从JMS规范了解ActiveMQ <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-3"><a class="nav-link" href="#消息的发送原理"><span class="nav-number">1.</span> <span class="nav-text">消息的发送原理</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#消息同步发送和异步发送"><span class="nav-number">1.1.</span> <span class="nav-text">消息同步发送和异步发送</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#消息发送源码分析"><span class="nav-number">1.2.</span> <span class="nav-text">消息发送源码分析</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#持久化消息和非持久化消息的存储原理"><span class="nav-number">2.</span> <span class="nav-text">持久化消息和非持久化消息的存储原理</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#消息的持久化策略分析"><span class="nav-number">2.1.</span> <span class="nav-text">消息的持久化策略分析</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">129</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">32</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">40</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

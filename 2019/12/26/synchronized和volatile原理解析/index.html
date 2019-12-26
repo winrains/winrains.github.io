@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="synchronized和volatile是java提供的两个解决并发问题的关键字，本文将深入解析synchronized和volatile的实现原理，并可从中了解内存屏障、对象头、自旋锁、偏向锁等内容。">
+<meta name="keywords" content="synchronized,volatile">
+<meta property="og:type" content="article">
+<meta property="og:title" content="synchronized和volatile原理解析">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;26&#x2F;synchronized%E5%92%8Cvolatile%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="synchronized和volatile是java提供的两个解决并发问题的关键字，本文将深入解析synchronized和volatile的实现原理，并可从中了解内存屏障、对象头、自旋锁、偏向锁等内容。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190826153602-36515.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190826153602-373f6.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190826153603-9af95.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190826153603-7d697.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190826153603-20c3d.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190826153604-a4f4f.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190826153605-88130.png">
+<meta property="og:updated_time" content="2019-12-26T11:48:58.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190826153602-36515.png">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/26/synchronized%E5%92%8Cvolatile%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>synchronized和volatile原理解析 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">40</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">32</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">129</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/26/synchronized%E5%92%8Cvolatile%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          synchronized和volatile原理解析
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-26 19:48:58" itemprop="dateCreated datePublished" datetime="2019-12-26T19:48:58+08:00">2019-12-26</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p><strong>synchronized</strong>和<strong>volatile</strong>是java提供的两个解决并发问题的关键字，本文将深入解析<strong>synchronized</strong>和<strong>volatile</strong>的实现原理，并可从中了解内存屏障、对象头、自旋锁、偏向锁等内容。</p>
+<a id="more"></a>
+
+<h3 id="volatile特性"><a href="#volatile特性" class="headerlink" title="volatile特性"></a>volatile特性</h3><p><strong>volatile</strong>是java虚拟机提供的最轻量级的同步机制。当一个变量定义为volatile之后，它将具备两种特性：<br>1、保证此变量对所有线程的可见性，即当一个线程修改了这个变量的值，新值对于其他线程来说是可以立即得知的。<br>2、禁止指令重排序</p>
+<h4 id="volatile如何保证可见性"><a href="#volatile如何保证可见性" class="headerlink" title="volatile如何保证可见性"></a>volatile如何保证可见性</h4><p>以单例模式的demo为例：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">LazyDoubleSyn</span> <span class="keyword">implements</span> <span class="title">Serializable</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">static</span> <span class="keyword">volatile</span> LazyDoubleSyn lazyDoubleSyn = <span class="keyword">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">private</span> <span class="title">LazyDoubleSyn</span><span class="params">()</span></span>&#123;&#125;;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> LazyDoubleSyn <span class="title">getLazyDoubleSyn</span><span class="params">()</span></span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span>(lazyDoubleSyn == <span class="keyword">null</span>)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">synchronized</span> (LazyDoubleSyn<span class="class">.<span class="keyword">class</span>)</span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span>(lazyDoubleSyn == <span class="keyword">null</span>)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">                    lazyDoubleSyn  = <span class="keyword">new</span> LazyDoubleSyn();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> lazyDoubleSyn;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>通过生成汇编代码，可以清晰的看到加入volatile和未加入volatile的差别。volatile变量修饰的共享变量，在进行写操作的时候会多出一个lock前缀的汇编指令，这个指令会触发总线锁或者缓存锁，通过缓存一致性协议来解决可见性问题。（可从<a href="https://www.jianshu.com/p/7d3425a78d72" target="_blank" rel="noopener">Java内存模型简介</a>了解缓存一致性协议）</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="number">0x01a3de1d</span>:movb $<span class="number">0x0</span>,<span class="number">0x1104800</span>(%esi)  ; ...c6860048 <span class="number">100100</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="number">0x01a3de24</span>:lock addl $<span class="number">0x0</span>,(%esp)  ; ...f0830424 <span class="number">00</span></span></pre></td></tr></table></figure>
+
+<h4 id="volatile如何保证有序性"><a href="#volatile如何保证有序性" class="headerlink" title="volatile如何保证有序性"></a>volatile如何保证有序性</h4><p>在分析保证有序性前，有必要了解一下内存屏障。<strong>内存屏障</strong>（Memory Barriers，Intel称之Memory Fence）指令是指，重排序时不能把后面的指令重排序到内存屏障之前的位置。CPU把内存屏障分成三类：写屏障(store barrier)、读屏障(load barrier)和全屏障(Full Barrier)。<br><strong>写屏障store barrier</strong>相当于storestore barrier, 强制所有在storestore内存屏障之前的所有执行，都要在该内存屏障之前执行，并发送缓存失效的信号。所有在storestore barrier指令之后的store指令，都必须在storestore barrier屏障之前的指令执行完后再被执行。</p>
+<p><img src="http://image.winrains.cn/2019/08/20190826153602-36515.png" alt="img"></p>
+<p><strong>读屏障load barrier</strong>相当于loadload barrier，强制所有在load barrier读屏障之后的load指令，都在loadbarrier屏障之后执行。</p>
+<p><img src="http://image.winrains.cn/2019/08/20190826153602-373f6.png" alt="img"></p>
+<p><strong>全屏障full barrier</strong>相当于storeload，是一个全能型的屏障，因为它同时具备前面两种屏障的效果。强制了所有在storeload barrier之前的store/load指令，都在该屏障之前被执行，所有在该屏障之后的的store/load指令，都在该屏障之后被执行。<br><img src="http://image.winrains.cn/2019/08/20190826153603-9af95.png" alt="img"><br>在JMM中把内存屏障指令分为4类：<br>LoadLoad Barriers，load1 ; LoadLoad; load2 ，确保load1数据的装载优先于load2及所有后续装载指令的装载。<br>StoreStore Barriers，store1; storestore;store2 ，确保store1数据对其他处理器可见优先于store2及所有后续存储指令的存储。<br>LoadStore Barries， load1;loadstore;store2，确保load1数据装载优先于store2以及后续的存储指令刷新到内存。<br>StoreLoad Barries， store1; storeload;load2， 确保store1数据对其他处理器变得可见， 优先于load2及所有后续装载指令的装载；这条内存屏障指令是一个全能型的屏障同时具有其他3条屏障的效果。编译器在生成字节码时，会在<strong>volatile</strong>指令序列中插入内存屏障来禁止特定类型的处理器重排序。对于编译器来说，发现一个最优布置来最小化插入屏障的总数几乎不可能。为此，JMM采取保守策略。下面是基于保守策略的JMM内存屏障插入策略。<br>在每个volatile写操作的前面插入一个StoreStore屏障。<br>在每个volatile写操作的后面插入一个StoreLoad屏障。<br>在每个volatile读操作的前面插入一个LoadLoad屏障。<br>在每个volatile读操作的后面插入一个LoadStore屏障。</p>
+<h4 id="volatile为什么不能保证原子性"><a href="#volatile为什么不能保证原子性" class="headerlink" title="volatile为什么不能保证原子性"></a>volatile为什么不能保证原子性</h4><p>下面以volatile变量自增为例：</p>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">VolatileDemo</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">volatile</span> <span class="keyword">int</span> race = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">increase</span><span class="params">()</span></span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        race++;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">main</span><span class="params">(<span class="keyword">String</span>[] args)</span> throws InterruptedException </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        Thread[] threads = <span class="keyword">new</span> Thread[<span class="number">20</span>];</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">for</span> (<span class="keyword">int</span> i=<span class="number">0</span> ;i&lt;<span class="number">20</span>;i++)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">            threads[i] = <span class="keyword">new</span> Thread(<span class="keyword">new</span> Runnable() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">                @Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">public</span> <span class="keyword">void</span> <span class="built_in">run</span>() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">for</span> (<span class="keyword">int</span> i=<span class="number">0</span>;i&lt;<span class="number">1000</span>;i++)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">                        increase();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">                    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            &#125;);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">            threads[i].start();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">while</span> (Thread.activeCount() &gt;<span class="number">1</span>)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">            Thread.<span class="built_in">yield</span>();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">            System.out.<span class="built_in">println</span>(race);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>反编译字节码文件可以看到，自增操作会分为三个步骤：1.读取volatile变量的值到local；2.增加变量的值；3.把local的值写回让其他线程可见。可以看到，volatile不能保证原子性。</p>
+<figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="attr">Code:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">      <span class="attr">0:</span> <span class="string">iconst_0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">      <span class="attr">1:</span> <span class="string">istore_1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">      <span class="attr">2:</span> <span class="string">iload_1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">      <span class="attr">3:</span> <span class="string">sipush</span>        <span class="number">1000</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">      <span class="attr">6:</span> <span class="string">if_icmpge</span>     <span class="number">18</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">      <span class="attr">9:</span> <span class="string">invokestatic</span>  <span class="comment">#2</span></span></pre></td></tr></table></figure>
+
+<h3 id="synchronized特性"><a href="#synchronized特性" class="headerlink" title="synchronized特性"></a>synchronized特性</h3><p>在多线程并发编程中synchronized一直是元老级角色，很多人都会称呼它为重量级锁。通过反编译成字节码指令可以看到，synchronized会在同步块的前后分别形成<strong>monitorenter</strong>和<strong>monitorexit</strong>这两个字节码指令。根据虚拟机规范的要求，在执行monitorenter指令时，首先要尝试获取对象的锁。如果这个对象没被锁定，或者当前线程已经拥有了那个对象的锁，把锁的计数器加1，相应的，在执行monitorexit指令时会将锁计算器减1，当计数器为0时，锁就被释放。<br>Java的线程是映射到操作系统的原生线程上的，如果要阻塞或唤醒一个线程，都需要操作系统来帮忙完成，这就需要从<strong>用户态</strong>转换到<strong>核心态</strong>，状态转换需要耗费很多处理器的时间。这也是为什么synchronized被称为重量级锁的原因。JDK1.6后加入了很多针对锁的优化措施，包含偏向锁、轻量级锁、重量级锁; 在了解synchronized锁之前，需要了解两个重要的概念，一个是对象头，另一个是monitor。</p>
+<h4 id="Java对象头"><a href="#Java对象头" class="headerlink" title="Java对象头"></a>Java对象头</h4><p>在HotSpot虚拟机中，对象在内存中的布局分为三块区域：对象头（Header）、实例数据（Instance Data）和对齐填充（Padding）。<br>HotSpot虚拟机的对象头包括两部分信息，第一部分用于存储对象自身的运行时数据，如哈希码（HashCode）、GC分代年龄、锁状态标志、线程持有的锁、偏向线程 ID、偏向时间戳等等，这部分数据的长度在32位和64位的虚拟机中分别为32bit和64bit，官方称它为<strong>Mark Word</strong>。考虑到虚拟机的空间效率，<strong>Mark Word</strong>被设计成一个非固定的数据结构，下图为32位MarkWord的数据结构，synchronized源码实现就用了Mark Word来标识对象加锁状态。</p>
+<p><img src="http://image.winrains.cn/2019/08/20190826153603-7d697.png" alt="img"></p>
+<p>对象头的另一部分是类型指针，即对象指向它的类元数据的指针，虚拟机通过这个指针来确定对象是哪个类的实例。</p>
+<h4 id="Monitor"><a href="#Monitor" class="headerlink" title="Monitor"></a>Monitor</h4><p>Java中每个对象都有一个监视器ObjectMonitor，监视器锁的数据结构为：<br>oopDesc–继承–&gt;markOopDesc–方法monitor()–&gt;ObjectMonitor–&gt;enter、exit 获取、释放锁<br>1、oopDesc，openjdk\hotspot\src\share\vm\oops\oop.hpp下oopDesc类是JVM对象的顶级基类,故每个object都包含markOop。如下图所示：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">oopDesc</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">friend</span> <span class="class"><span class="keyword">class</span> <span class="title">VMStructs</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">volatile</span> markOop _mark;<span class="comment">// markOop:Mark Word标记字段</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">union</span> _metadata &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">         Klass*      _klass;<span class="comment">//对象类型元数据的指针</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">         narrowKlass _compressed_klass;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">       &#125;_metadata;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// Fast access to barrier set. Must be initialized.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">static</span> BarrierSet* _bs;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="function">markOop  <span class="title">mark</span><span class="params">()</span> <span class="keyword">const</span>         </span>&#123; <span class="keyword">return</span> _mark; &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="function">markOop* <span class="title">mark_addr</span><span class="params">()</span> <span class="keyword">const</span>    </span>&#123; <span class="keyword">return</span> (markOop*) &amp;_mark; &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="function"><span class="keyword">void</span> <span class="title">set_mark</span><span class="params">(<span class="keyword">volatile</span> markOop m)</span> </span>&#123; _mark = m; &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="function"><span class="keyword">void</span> <span class="title">release_set_mark</span><span class="params">(markOop m)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        <span class="function">markOop <span class="title">cas_set_mark</span><span class="params">(markOop new_mark, markOop old_mark)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// Used only to re-initialize the mark word (e.g., of promoted</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// objects during a GC) -- requires a valid klass pointer</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        <span class="function"><span class="keyword">void</span> <span class="title">init_mark</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        <span class="function">Klass* <span class="title">klass</span><span class="params">()</span> <span class="keyword">const</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        <span class="function">Klass* <span class="title">klass_or_null</span><span class="params">()</span> <span class="keyword">const</span> <span class="keyword">volatile</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        <span class="function">Klass** <span class="title">klass_addr</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        <span class="function">narrowKlass* <span class="title">compressed_klass_addr</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>2、markOopDesc，openjdk\hotspot\src\share\vm\oops\markOop.hpp下markOopDesc继承自oopDesc，并拓展了自己的方法monitor(),如下图</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">ObjectMonitor* monitor() const &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">assert</span>(has_monitor(), "check");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    // Use xor <span class="keyword">instead</span> <span class="keyword">of</span> &amp;~ <span class="keyword">to</span> provide one extra tag-<span class="type">bit</span> <span class="keyword">check</span>.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> (ObjectMonitor*) (<span class="keyword">value</span>() ^ monitor_value);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>3、ObjectMonitor，在HotSpot虚拟机中，最终采用ObjectMonitor类实现monitor openjdk\hotspot\src\share\vm\runtime\objectMonitor.hpp源码如下：</p>
+<figure class="highlight protobuf"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">ObjectMonitor() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">     _header       = NULL;<span class="comment">//markOop对象头</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">     _count        = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">     _waiters      = <span class="number">0</span>,<span class="comment">//等待线程数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">     _recursions   = <span class="number">0</span>;<span class="comment">//重入次数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">     _object       = NULL;<span class="comment">//监视器锁寄生的对象。锁不是平白出现的，而是寄托存储于对象中。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">     _owner        = NULL;<span class="comment">//指向获得ObjectMonitor对象的线程或基础锁</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">     _WaitSet      = NULL;<span class="comment">//处于wait状态的线程，会被加入到wait set；</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">     _WaitSetLock  = <span class="number">0</span> ;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">     _Responsible  = NULL ;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">     _succ         = NULL ;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">     _cxq          = NULL ;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">     FreeNext      = NULL ;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">     _EntryList    = NULL ;<span class="comment">//处于等待锁block状态的线程，会被加入到entry set；</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">     _SpinFreq     = <span class="number">0</span> ;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">     _SpinClock    = <span class="number">0</span> ;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">     OwnerIsThread = <span class="number">0</span> ;<span class="comment">// _owner is (Thread *) vs SP/BasicLock</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">     _previous_owner_tid = <span class="number">0</span>;<span class="comment">// 监视器前一个拥有者线程的ID</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>每个线程都有两个ObjectMonitor对象列表，分别为free和used列表，如果当前free列表为空，线程将向全局global list请求分配ObjectMonitor。<br>ObjectMonitor对象中有两个队列：_WaitSet 和 _EntryList，用来保存ObjectWaiter对象列表；</p>
+<p><img src="http://image.winrains.cn/2019/08/20190826153603-20c3d.png" alt="img"></p>
+<h4 id="synchronized锁的获取和升级过程"><a href="#synchronized锁的获取和升级过程" class="headerlink" title="synchronized锁的获取和升级过程"></a>synchronized锁的获取和升级过程</h4><p>在jdk1.6中对锁的实现引入了大量的优化来减少锁操作的开销：<br>锁粗化（Lock Coarsening）：将多个连续的锁扩展成一个范围更大的锁，用以减少频繁互斥同步导致的性能损耗。<br>锁消除（Lock Elimination）：JVM及时编译器在运行时，通过逃逸分析，如果判断一段代码中，堆上的所有数据不会逃逸出去从来被其他线程访问到，就可以去除这些锁。<br>轻量级锁（Lightweight Locking）：JDK1.6引入。在没有多线程竞争的情况下避免重量级互斥锁，只需要依靠一条CAS原子指令就可以完成锁的获取及释放。<br>偏向锁（Biased Locking）：JDK1.6引入。目的是消除数据再无竞争情况下的同步原语。使用CAS记录获取它的线程。下一次同一个线程进入则偏向该线程，无需任何同步操作。<br>适应性自旋（Adaptive Spinning）：为了避免线程频繁挂起、恢复的状态切换消耗。产生了忙循环（循环时间固定），即自旋。JDK1.6引入了自适应自旋。自旋时间根据之前锁自旋时间和线程状态，动态变化，用以期望能减少阻塞的时间。<br>锁升级：自适应自旋锁–》偏向锁–》轻量级锁–》重量级锁</p>
+<h5 id="自旋锁和自适应自旋锁："><a href="#自旋锁和自适应自旋锁：" class="headerlink" title="自旋锁和自适应自旋锁："></a><strong>自旋锁和自适应自旋锁：</strong></h5><p>虚拟机的开发团队注意到在许多应用上，共享数据的锁定状态只会持续很短的一段时间，为了这段时间去挂起和恢复线程并不值得。如果能让两个或以上的线程同时并行执行，我们就可以让后面请求锁的那个线程“稍等一下”，但不放弃处理器的执行时间，看看持有锁的线程是否很快就会释放锁。这项技术就是所谓的自选锁。<br>自旋等待的时间必须要有一定的限度，如果自旋超过了限定的次数仍然没有获取到锁，则该线程应该被挂起。在JDK1.6中引入了自适应的自旋锁，自适应意味着自旋的时间不再固定，而是由前一次在同一个锁上的自旋时间及锁的拥有者的状态来决定。</p>
+<h5 id="偏向锁："><a href="#偏向锁：" class="headerlink" title="偏向锁："></a><strong>偏向锁：</strong></h5><p>大多数情况下，锁不仅不存在多线程竞争，而且总是由同一线程多次获得，为了让线程获得锁的代价更低而引入了偏向锁。当一个线程访问同步块并获取锁时，会在对象头和栈帧中的锁记录里存储锁偏向的线程ID，以后该线程在进入和退出同步块时不需要进行CAS操作来加锁和解锁，只需简单地测试一下对象头的Mark Word里是否存储着指向当前线程的偏向锁。如果测试成功，表示线程已经获得了锁。如果测试失败，则需要再测试一下Mark Word中偏向锁的标识是否设置成1（表示当前是偏向锁）：如果没有设置，则使用CAS竞争锁；如果设置了，则尝试使用CAS将对象头的偏向锁指向当前线程。<br><img src="http://image.winrains.cn/2019/08/20190826153604-a4f4f.png" alt="img"></p>
+<h5 id="轻量级锁："><a href="#轻量级锁：" class="headerlink" title="轻量级锁："></a><strong>轻量级锁：</strong></h5><p>如果MarkWord不是自己的ThreadId,锁升级，这时候，用CAS来执行切换，新的线程根据MarkWord里面现有的ThreadId，通知之前线程暂停，之前线程将Markword的内容置为空。<br>两个线程都把对象的Mark Word复制到自己新建的用于存储锁的记录空间（在当前线程的栈帧中建立一个名为Lock Record的空间，官方把这份拷贝称为Displaced Mark Word），接着开始通过CAS操作，把共享对象的MarKword更新为指向Lock Record的指针。<br><img src="http://image.winrains.cn/2019/08/20190826153605-88130.png" alt="img"></p>
+<h5 id="重量级锁："><a href="#重量级锁：" class="headerlink" title="重量级锁："></a><strong>重量级锁：</strong></h5><p>自旋的线程在自旋过程中，成功获得资源(即之前获的资源的线程执行完成并释放了共享资源)，则整个状态依然处于轻量级锁的状态，如果自旋失败则进入重量级锁的状态，这个时候，自旋的线程进行阻塞，等待之前线程执行完成并唤醒自己，需要从用户态切换到内核态实现。1）只有一个线程进入临界区，偏向锁<br>2）多个线程交替进入临界区，轻量级锁<br>3）多线程同时进入临界区，重量级锁</p>
+<blockquote>
+<p>作者：匠丶</p>
+<p>来源：<a href="https://www.jianshu.com/p/1ae887521cf3" target="_blank" rel="noopener">https://www.jianshu.com/p/1ae887521cf3</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/synchronized/" rel="tag"># synchronized</a>
+              <a href="/tags/volatile/" rel="tag"># volatile</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/26/%E7%90%86%E8%A7%A3Java-RMI/" rel="prev" title="理解Java RMI">
+      <i class="fa fa-chevron-left"></i> 理解Java RMI
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/26/Java%E7%BA%BF%E7%A8%8B%E6%B1%A0%E7%9A%84%E4%BD%BF%E7%94%A8%E5%92%8C%E5%8E%9F%E7%90%86/" rel="next" title="Java线程池的使用和原理">
+      Java线程池的使用和原理 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-3"><a class="nav-link" href="#volatile特性"><span class="nav-number">1.</span> <span class="nav-text">volatile特性</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#volatile如何保证可见性"><span class="nav-number">1.1.</span> <span class="nav-text">volatile如何保证可见性</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#volatile如何保证有序性"><span class="nav-number">1.2.</span> <span class="nav-text">volatile如何保证有序性</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#volatile为什么不能保证原子性"><span class="nav-number">1.3.</span> <span class="nav-text">volatile为什么不能保证原子性</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#synchronized特性"><span class="nav-number">2.</span> <span class="nav-text">synchronized特性</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#Java对象头"><span class="nav-number">2.1.</span> <span class="nav-text">Java对象头</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#Monitor"><span class="nav-number">2.2.</span> <span class="nav-text">Monitor</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#synchronized锁的获取和升级过程"><span class="nav-number">2.3.</span> <span class="nav-text">synchronized锁的获取和升级过程</span></a><ol class="nav-child"><li class="nav-item nav-level-5"><a class="nav-link" href="#自旋锁和自适应自旋锁："><span class="nav-number">2.3.1.</span> <span class="nav-text">自旋锁和自适应自旋锁：</span></a></li><li class="nav-item nav-level-5"><a class="nav-link" href="#偏向锁："><span class="nav-number">2.3.2.</span> <span class="nav-text">偏向锁：</span></a></li><li class="nav-item nav-level-5"><a class="nav-link" href="#轻量级锁："><span class="nav-number">2.3.3.</span> <span class="nav-text">轻量级锁：</span></a></li><li class="nav-item nav-level-5"><a class="nav-link" href="#重量级锁："><span class="nav-number">2.3.4.</span> <span class="nav-text">重量级锁：</span></a></li></ol></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">129</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">32</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">40</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
