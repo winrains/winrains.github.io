@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="上一篇文章中简单介绍过synchronized关键字的方式，其中，同步代码块使用monitorenter和monitorexit两个指令实现，同步方法使用ACC_SYNCHRONIZED标记符实现。后面几篇文章会从JVM源码的角度更加深入，层层剥开synchronized的面纱。在进入正题之前，肯定有些基础知识需要铺垫，那么先来看一下一个容易被忽略的但是又很重要的知识点 —— Java对象模型 。">
+<meta name="keywords" content="多线程">
+<meta property="og:type" content="article">
+<meta property="og:title" content="深入理解多线程（二）：Java的对象模型">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;26&#x2F;%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3%E5%A4%9A%E7%BA%BF%E7%A8%8B%EF%BC%88%E4%BA%8C%EF%BC%89%EF%BC%9AJava%E7%9A%84%E5%AF%B9%E8%B1%A1%E6%A8%A1%E5%9E%8B&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="上一篇文章中简单介绍过synchronized关键字的方式，其中，同步代码块使用monitorenter和monitorexit两个指令实现，同步方法使用ACC_SYNCHRONIZED标记符实现。后面几篇文章会从JVM源码的角度更加深入，层层剥开synchronized的面纱。在进入正题之前，肯定有些基础知识需要铺垫，那么先来看一下一个容易被忽略的但是又很重要的知识点 —— Java对象模型 。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;d99a2-oops.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;c4110-OOP%E7%BB%93%E6%9E%84.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;527b3-klass.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;e6430-400_ac3_932.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;ce592-2579123-5b117a7c06e83d84.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;e3b37-20170615230126453.jpeg">
+<meta property="og:updated_time" content="2019-12-26T09:12:00.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;d99a2-oops.png">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/26/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3%E5%A4%9A%E7%BA%BF%E7%A8%8B%EF%BC%88%E4%BA%8C%EF%BC%89%EF%BC%9AJava%E7%9A%84%E5%AF%B9%E8%B1%A1%E6%A8%A1%E5%9E%8B/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>深入理解多线程（二）：Java的对象模型 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">12</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">17</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">49</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/26/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3%E5%A4%9A%E7%BA%BF%E7%A8%8B%EF%BC%88%E4%BA%8C%EF%BC%89%EF%BC%9AJava%E7%9A%84%E5%AF%B9%E8%B1%A1%E6%A8%A1%E5%9E%8B/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          深入理解多线程（二）：Java的对象模型
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-26 17:12:00" itemprop="dateCreated datePublished" datetime="2019-12-26T17:12:00+08:00">2019-12-26</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p><a href="http://www.hollischuang.com/archives/1883" target="_blank" rel="noopener">上一篇</a>文章中简单介绍过<code>synchronized</code>关键字的方式，其中，同步代码块使用<code>monitorenter</code>和<code>monitorexit</code>两个指令实现，同步方法使用<code>ACC_SYNCHRONIZED</code>标记符实现。后面几篇文章会从JVM源码的角度更加深入，层层剥开<code>synchronized</code>的面纱。在进入正题之前，肯定有些基础知识需要铺垫，那么先来看一下一个容易被忽略的但是又很重要的知识点 —— Java对象模型 。<br>大家都知道的是，Java对象保存在堆内存中。在内存中，一个Java对象包含三部分：对象头、实例数据和对齐填充。其中对象头是一个很关键的部分，因为<strong>对象头中包含锁状态标志、线程持有的锁等标志</strong>。这篇文章就主要从Java对象模型入手，找一找我们关系的对象头以及对象头中和锁相关的运行时数据在JVM中是如何表示的。</p>
+<a id="more"></a>
+
+<h3 id="Java的对象模型"><a href="#Java的对象模型" class="headerlink" title="Java的对象模型"></a>Java的对象模型</h3><p>任何一个接触过Java的人都知道，Java是一种面向对象语言。在学习Java的过程中你一定对下面两句话不陌生：</p>
+<ul>
+<li>1、在面向对象的软件中，对象（Object）是某一个类（Class）的实例。 <a href="https://zh.wikipedia.org/wiki/对象_(计算机科学)" target="_blank" rel="noopener">维基百科</a></li>
+<li>2、一切皆对象 <a href="https://book.douban.com/subject/1474824/" target="_blank" rel="noopener">Thinking In Java</a></li>
+</ul>
+<p>我们还知道，在JVM的内存结构中，对象保存在堆内存中，而我们在对对象进行操作时，其实操作的是对象的引用。那么对象本身在JVM中的结构是什么样的呢？本文的所有分析均基于<a href="https://github.com/openjdk-mirror/jdk7u-hotspot" target="_blank" rel="noopener">HotSpot</a>虚拟机。</p>
+<h3 id="oop-klass-model"><a href="#oop-klass-model" class="headerlink" title="oop-klass model"></a>oop-klass model</h3><p>HotSpot是基于c++实现，而c++是一门面向对象的语言，本身是具备面向对象基本特征的，所以Java中的对象表示，最简单的做法是为每个Java类生成一个c++类与之对应。但HotSpot JVM并没有这么做，而是设计了一个<code>OOP-Klass Model</code>。OOP（<code>Ordinary Object Pointer</code>）指的是普通对象指针，而<code>Klass</code>用来描述对象实例的具体类型。<br>为什么HotSpot要设计一套<code>oop-klass model</code>呢？答案是：HotSopt JVM的设计者不想让每个对象中都含有一个<code>vtable</code>（虚函数表）<br>这个解释似乎可以说得通。众所周知，C++和Java都是面向对象的语言，面向对象语言有一个很重要的特性就是多态。关于多态的实现，C++和Java有着本质的区别。</p>
+<blockquote>
+<p>多态是面向对象的最主要的特性之一，是一种方法的动态绑定，实现运行时的类型决定对象的行为。多态的表现形式是父类指针或引用指向子类对象，在这个指针上调用的方法使用子类的实现版本。多态是IOC、模板模式实现的关键。</p>
+<blockquote>
+<p>在C++中通过虚函数表的方式实现多态，每个包含虚函数的类都具有一个虚函数表（virtual table），在这个类对象的地址空间的最靠前的位置存有指向虚函数表的指针。在虚函数表中，按照声明顺序依次排列所有的虚函数。由于C++在运行时并不维护类型信息，所以在编译时直接在子类的虚函数表中将被子类重写的方法替换掉。<br>在Java中，在运行时会维持类型信息以及类的继承体系。每一个类会在方法区中对应一个数据结构用于存放类的信息，可以通过Class对象访问这个数据结构。其中，类型信息具有superclass属性指示了其超类，以及这个类对应的方法表（其中只包含这个类定义的方法，不包括从超类继承来的）。而每一个在堆上创建的对象，都具有一个指向方法区类型信息数据结构的指针，通过这个指针可以确定对象的类型。</p>
+</blockquote>
+</blockquote>
+<p>上面这段是我从网上摘取过来的，说的有一定道理，但是也不全对。至于为啥，我会在后文介绍到Klass的时候细说。<br>关于opp-klass模型的整体定义，在HotSpot的<a href="https://github.com/openjdk-mirror/jdk7u-hotspot" target="_blank" rel="noopener">源码</a>中可以找到。<br>oops模块可以分成两个相对独立的部分：OOP框架和Klass框架。<br>在<a href="https://github.com/openjdk-mirror/jdk7u-hotspot/blob/50bdefc3afe944ca74c3093e7448d6b889cd20d1/src/share/vm/oops/oopsHierarchy.hpp" target="_blank" rel="noopener">oopsHierarchy.hpp</a>里定义了oop和klass各自的体系。</p>
+<h3 id="oop-klass结构"><a href="#oop-klass结构" class="headerlink" title="oop-klass结构"></a>oop-klass结构</h3><p><a href="http://image.winrains.cn/2019/08/d99a2-oops.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/08/d99a2-oops.png" alt="oops"></a><br>oop体系：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//定义了oops共同基类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">oopDesc</span>*                            <span class="title">oop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示一个Java类型实例</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">instanceOopDesc</span>*            <span class="title">instanceOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示一个Java方法</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">methodOopDesc</span>*                    <span class="title">methodOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示一个Java方法中的不变信息</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">constMethodOopDesc</span>*            <span class="title">constMethodOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//记录性能信息的数据结构</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">methodDataOopDesc</span>*            <span class="title">methodDataOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//定义了数组OOPS的抽象基类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">arrayOopDesc</span>*                    <span class="title">arrayOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示持有一个OOPS数组</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">objArrayOopDesc</span>*            <span class="title">objArrayOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示容纳基本类型的数组</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">typeArrayOopDesc</span>*            <span class="title">typeArrayOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示在Class文件中描述的常量池</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">constantPoolOopDesc</span>*            <span class="title">constantPoolOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//常量池告诉缓存</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">constantPoolCacheOopDesc</span>*   <span class="title">constantPoolCacheOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//描述一个与Java类对等的C++类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">klassOopDesc</span>*                    <span class="title">klassOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示对象头</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">markOopDesc</span>*                    <span class="title">markOop</span>;</span></span></pre></td></tr></table></figure>
+
+<p><strong>上面列出的是整个Oops模块的组成结构，其中包含多个子模块。每一个子模块对应一个类型，每一个类型的OOP都代表一个在JVM内部使用的特定对象的类型。</strong><br>从上面的代码中可以看到，有一个变量opp的类型是<code>oppDesc</code> ，OOPS类的共同基类型为<code>oopDesc</code>。<br><strong>在Java程序运行过程中，每创建一个新的对象，在JVM内部就会相应地创建一个对应类型的OOP对象。</strong>在HotSpot中，根据JVM内部使用的对象业务类型，具有多种<code>oopDesc</code>的子类。除了<code>oppDesc</code>类型外，opp体系中还有很多<code>instanceOopDesc</code>、<code>arrayOopDesc</code> 等类型的实例，他们都是<code>oopDesc</code>的子类。<br><a href="http://image.winrains.cn/2019/08/c4110-OOP结构.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/08/c4110-OOP%E7%BB%93%E6%9E%84.png" alt="OOP结构"></a><br>这些OOPS在JVM内部有着不同的用途，例如<strong>，<code>instanceOopDesc</code>表示类实例，<code>arrayOopDesc</code>表示数组。</strong>也就是说，<strong>当我们使用<code>new</code>创建一个Java对象实例的时候，JVM会创建一个<code>instanceOopDesc</code>对象来表示这个Java对象。同理，当我们使用<code>new</code>创建一个Java数组实例的时候，JVM会创建一个<code>arrayOopDesc</code>对象来表示这个数组对象。</strong><br>在HotSpot中，oopDesc类定义在<a href="https://github.com/openjdk-mirror/jdk7u-hotspot/blob/50bdefc3afe944ca74c3093e7448d6b889cd20d1/src/share/vm/oops/oop.hpp" target="_blank" rel="noopener">oop.hpp</a>中，instanceOopDesc定义在<a href="https://github.com/openjdk-mirror/jdk7u-hotspot/blob/50bdefc3afe944ca74c3093e7448d6b889cd20d1/src/share/vm/oops/instanceOop.hpp" target="_blank" rel="noopener">instanceOop.hpp</a>中，arrayOopDesc定义在<a href="https://github.com/openjdk-mirror/jdk7u-hotspot/blob/50bdefc3afe944ca74c3093e7448d6b889cd20d1/src/share/vm/oops/arrayOop.hpp" target="_blank" rel="noopener">arrayOop.hpp</a>中。<br>简单看一下相关定义：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">oopDesc</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">friend</span> <span class="class"><span class="keyword">class</span> <span class="title">VMStructs</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">private</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">      <span class="keyword">volatile</span> markOop  _mark;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">      <span class="keyword">union</span> _metadata &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        wideKlassOop    _klass;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        narrowOop       _compressed_klass;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">      &#125; _metadata;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">private</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">      <span class="comment">// field addresses in oop</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">      <span class="function"><span class="keyword">void</span>*     <span class="title">field_base</span><span class="params">(<span class="keyword">int</span> offset)</span>        <span class="keyword">const</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">      <span class="function">jbyte*    <span class="title">byte_field_addr</span><span class="params">(<span class="keyword">int</span> offset)</span>   <span class="keyword">const</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">      <span class="function">jchar*    <span class="title">char_field_addr</span><span class="params">(<span class="keyword">int</span> offset)</span>   <span class="keyword">const</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">      <span class="function">jboolean* <span class="title">bool_field_addr</span><span class="params">(<span class="keyword">int</span> offset)</span>   <span class="keyword">const</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">      <span class="function">jint*     <span class="title">int_field_addr</span><span class="params">(<span class="keyword">int</span> offset)</span>    <span class="keyword">const</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">      <span class="function">jshort*   <span class="title">short_field_addr</span><span class="params">(<span class="keyword">int</span> offset)</span>  <span class="keyword">const</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">      <span class="function">jlong*    <span class="title">long_field_addr</span><span class="params">(<span class="keyword">int</span> offset)</span>   <span class="keyword">const</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">      <span class="function">jfloat*   <span class="title">float_field_addr</span><span class="params">(<span class="keyword">int</span> offset)</span>  <span class="keyword">const</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">      <span class="function">jdouble*  <span class="title">double_field_addr</span><span class="params">(<span class="keyword">int</span> offset)</span> <span class="keyword">const</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">      <span class="function">address*  <span class="title">address_field_addr</span><span class="params">(<span class="keyword">int</span> offset)</span> <span class="keyword">const</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">instanceOopDesc</span> :</span> <span class="keyword">public</span> oopDesc &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">arrayOopDesc</span> :</span> <span class="keyword">public</span> oopDesc &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>通过上面的源码可以看到，<code>instanceOopDesc</code>实际上就是继承了<code>oopDesc</code>，并没有增加其他的数据结构，也就是说<code>instanceOopDesc</code>中主要包含以下几部分数据：<code>markOop  _mark</code>和<code>union _metadata</code> 以及一些不同类型的 <code>field</code>。<br>HotSpot虚拟机中，对象在内存中存储的布局可以分为三块区域：对象头、实例数据和对齐填充。在虚拟机内部，一个Java对象对应一个<code>instanceOopDesc</code>的对象。其中对象头包含了两部分内容：<code>_mark</code>和<code>_metadata</code>，而实例数据则保存在oopDesc中定义的各种field中。</p>
+<h4 id="mark"><a href="#mark" class="headerlink" title="_mark"></a>_mark</h4><p>文章开头我们就说过，之所以我们要写这篇文章，是因为对象头中有和锁相关的运行时数据，这些运行时数据是<code>synchronized</code>以及其他类型的锁实现的重要基础，而关于锁标记、GC分代等信息均保存在<code>_mark</code>中。因为本文主要介绍的<code>oop-klass</code>模型，在这里暂时不对对象头做展开，下一篇文章介绍。</p>
+<h4 id="metadata"><a href="#metadata" class="headerlink" title="_metadata"></a>_metadata</h4><p>前面介绍到的<code>_metadata</code>是一个共用体，其中<code>_klass</code>是普通指针，<code>_compressed_klass</code>是压缩类指针。在深入介绍之前，就要来到<code>oop-Klass</code>中的另外一个主角<code>klass</code>了。</p>
+<h3 id="klass"><a href="#klass" class="headerlink" title="klass"></a>klass</h3><p>klass体系</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//klassOop的一部分，用来描述语言层的类型</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>  <span class="title">Klass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//在虚拟机层面描述一个Java类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>   <span class="title">instanceKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//专有instantKlass，表示java.lang.Class的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>     <span class="title">instanceMirrorKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//专有instantKlass，表示java.lang.ref.Reference的子类的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>     <span class="title">instanceRefKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示methodOop的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>   <span class="title">methodKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示constMethodOop的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>   <span class="title">constMethodKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示methodDataOop的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>   <span class="title">methodDataKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//最为klass链的端点，klassKlass的Klass就是它自身</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>   <span class="title">klassKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示instanceKlass的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>     <span class="title">instanceKlassKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示arrayKlass的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>     <span class="title">arrayKlassKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示objArrayKlass的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>       <span class="title">objArrayKlassKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示typeArrayKlass的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>       <span class="title">typeArrayKlassKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示array类型的抽象基类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>   <span class="title">arrayKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示objArrayOop的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>     <span class="title">objArrayKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示typeArrayOop的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>     <span class="title">typeArrayKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示constantPoolOop的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>   <span class="title">constantPoolKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示constantPoolCacheOop的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>   <span class="title">constantPoolCacheKlass</span>;</span></span></pre></td></tr></table></figure>
+
+<p>和<code>oopDesc</code>是其他oop类型的父类一样，Klass类是其他klass类型的父类。<br><a href="http://image.winrains.cn/2019/08/527b3-klass.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/08/527b3-klass.png" alt="klass"></a><br>Klass向JVM提供两个功能：</p>
+<ul>
+<li>实现语言层面的Java类（在Klass基类中已经实现）</li>
+<li>实现Java对象的分发功能（由Klass的子类提供虚函数实现）</li>
+</ul>
+<p>文章开头的时候说过：之所以设计<code>oop-klass</code>模型，是因为HotSopt JVM的设计者不想让每个对象中都含有一个虚函数表。<br>HotSopt JVM的设计者把对象一拆为二，分为<code>klass</code>和<code>oop</code>，其中<code>oop</code>的职能主要在于表示对象的实例数据，所以其中不含有任何虚函数。而klass为了实现虚函数多态，所以提供了虚函数表。所以，关于Java的多态，其实也有虚函数的影子在。<br><code>_metadata</code>是一个共用体，其中<code>_klass</code>是普通指针，<code>_compressed_klass</code>是压缩类指针。这两个指针都指向<code>instanceKlass</code>对象，它用来描述对象的具体类型。</p>
+<h3 id="instanceKlass"><a href="#instanceKlass" class="headerlink" title="instanceKlass"></a>instanceKlass</h3><p>JVM在运行时，需要一种用来标识Java内部类型的机制。在HotSpot中的解决方案是：为每一个已加载的Java类创建一个<code>instanceKlass</code>对象，用来在JVM层表示Java类。<br>来看下<a href="https://github.com/openjdk-mirror/jdk7u-hotspot/blob/50bdefc3afe944ca74c3093e7448d6b889cd20d1/src/share/vm/oops/instanceKlass.hpp" target="_blank" rel="noopener">instanceKlass</a>的内部结构：</p>
+<figure class="highlight sqf"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//类拥有的方法列表</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">objArrayOop     <span class="variable">_methods</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//描述方法顺序</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">typeArrayOop    <span class="variable">_method_ordering</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//实现的接口</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">objArrayOop     <span class="variable">_local_interfaces</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//继承的接口</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">objArrayOop     <span class="variable">_transitive_interfaces</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//域</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">typeArrayOop    <span class="variable">_fields</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//常量</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">constantPoolOop <span class="variable">_constants</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//类加载器</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">oop             <span class="variable">_class_loader</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//protected域</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">oop             <span class="variable">_protection_domain</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    ....</span></pre></td></tr></table></figure>
+
+<p>可以看到，一个类该具有的东西，这里面基本都包含了。<br>这里还有个点需要简单介绍一下。<br>在JVM中，对象在内存中的基本存在形式就是oop。那么，对象所属的类，在JVM中也是一种对象，因此它们实际上也会被组织成一种oop，即klassOop。同样的，对于klassOop，也有对应的一个klass来描述，它就是klassKlass，也是klass的一个子类。klassKlass作为oop的klass链的端点。关于对象和数组的klass链大致如下图：<br><a href="http://image.winrains.cn/2019/08/e6430-400_ac3_932.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/08/e6430-400_ac3_932.png" alt="400_ac3_932"></a><br>在这种设计下，JVM对内存的分配和回收，都可以采用统一的方式来管理。oop-klass-klassKlass关系如图：<br><a href="http://image.winrains.cn/2019/08/ce592-2579123-5b117a7c06e83d84.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/08/ce592-2579123-5b117a7c06e83d84.png" alt="2579123-5b117a7c06e83d84"></a></p>
+<h3 id="内存存储"><a href="#内存存储" class="headerlink" title="内存存储"></a>内存存储</h3><p>关于一个Java对象，他的存储是怎样的，一般很多人会回答：对象存储在堆上。稍微好一点的人会回答：对象存储在堆上，对象的引用存储在栈上。今天，再给你一个更加显得牛逼的回答：</p>
+<blockquote>
+<p>对象的实例（instantOopDesc)保存在堆上，对象的元数据（instantKlass）保存在方法区，对象的引用保存在栈上。</p>
+</blockquote>
+<p>其实如果细追究的话，上面这句话有点故意卖弄的意思。因为我们都知道。<strong>方法区用于存储虚拟机加载的类信息、常量、静态变量、即时编译器编译后的代码等数据。</strong> 所谓加载的类信息，其实不就是给每一个被加载的类都创建了一个 instantKlass对象么。<br>talk is cheap ,show me the code ：</p>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">Model</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="class">&#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">int</span> a = <span class="number">1</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">int</span> b;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="title">Model</span><span class="params">(<span class="keyword">int</span> b)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">this</span>.b = b;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">main</span><span class="params">(<span class="keyword">String</span>[] args)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">int</span> c = <span class="number">10</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    Model modelA = <span class="keyword">new</span> Model(<span class="number">2</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    Model modelB = <span class="keyword">new</span> Model(<span class="number">3</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>存储结构如下：<br><a href="http://image.winrains.cn/2019/08/e3b37-20170615230126453.jpeg" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/08/e3b37-20170615230126453.jpeg" alt="20170615230126453"></a><br>从上图中可以看到，在方法区的instantKlass中有一个<code>int a=1</code>的数据存储。在堆内存中的两个对象的oop中，分别维护着<code>int b=3</code>,<code>int b=2</code>的实例数据。和oopDesc一样，instantKlass也维护着一些<code>fields</code>，用来保存类中定义的类数据，比如<code>int a=1</code>。</p>
+<h3 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h3><p>每一个Java类，在被JVM加载的时候，JVM会给这个类创建一个<code>instanceKlass</code>，保存在方法区，用来在JVM层表示该Java类。当我们在Java代码中，使用new创建一个对象的时候，JVM会创建一个<code>instanceOopDesc</code>对象，这个对象中包含了两部分信息，对象头以及元数据。对象头中有一些运行时数据，其中就包括和多线程相关的锁的信息。元数据其实维护的是指针，指向的是对象所属的类的<code>instanceKlass</code>。</p>
+<h3 id="参考资料"><a href="#参考资料" class="headerlink" title="参考资料"></a>参考资料</h3><p><a href="http://blog.csdn.net/linxdcn/article/details/73287490" target="_blank" rel="noopener">【理解HotSpot虚拟机】对象在jvm中的表示：OOP-Klass模型</a><br><a href="http://www.jianshu.com/p/b6cb4c694951" target="_blank" rel="noopener">Java反射: 从JDK到JVM全链路详解</a><br><a href="http://www.voidcn.com/article/p-pzznrtkc-ez.html" target="_blank" rel="noopener">HotSpotVM 对象机制实现浅析#1</a><br><a href="https://book.douban.com/subject/25847620/" target="_blank" rel="noopener">HotSpot实战</a></p>
+<blockquote>
+<p>作者：Hollis</p>
+<p>来源：<a href="https://www.hollischuang.com/archives/1910" target="_blank" rel="noopener">https://www.hollischuang.com/archives/1910</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E5%A4%9A%E7%BA%BF%E7%A8%8B/" rel="tag"># 多线程</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/26/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3%E5%A4%9A%E7%BA%BF%E7%A8%8B%EF%BC%88%E4%B8%80%EF%BC%89%EF%BC%9ASynchronized%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/" rel="prev" title="深入理解多线程（一）：Synchronized的实现原理">
+      <i class="fa fa-chevron-left"></i> 深入理解多线程（一）：Synchronized的实现原理
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/26/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3%E5%A4%9A%E7%BA%BF%E7%A8%8B%EF%BC%88%E4%B8%89%EF%BC%89%EF%BC%9AJava%E7%9A%84%E5%AF%B9%E8%B1%A1%E5%A4%B4/" rel="next" title="深入理解多线程（三）：Java的对象头">
+      深入理解多线程（三）：Java的对象头 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-3"><a class="nav-link" href="#Java的对象模型"><span class="nav-number">1.</span> <span class="nav-text">Java的对象模型</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#oop-klass-model"><span class="nav-number">2.</span> <span class="nav-text">oop-klass model</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#oop-klass结构"><span class="nav-number">3.</span> <span class="nav-text">oop-klass结构</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#mark"><span class="nav-number">3.1.</span> <span class="nav-text">_mark</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#metadata"><span class="nav-number">3.2.</span> <span class="nav-text">_metadata</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#klass"><span class="nav-number">4.</span> <span class="nav-text">klass</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#instanceKlass"><span class="nav-number">5.</span> <span class="nav-text">instanceKlass</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#内存存储"><span class="nav-number">6.</span> <span class="nav-text">内存存储</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#总结"><span class="nav-number">7.</span> <span class="nav-text">总结</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#参考资料"><span class="nav-number">8.</span> <span class="nav-text">参考资料</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">49</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">17</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">12</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
