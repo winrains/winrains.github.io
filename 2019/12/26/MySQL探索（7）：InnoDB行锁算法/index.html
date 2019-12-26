@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: '',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="在上一篇《InnoDB一致性非锁定读》中，我们了解到InnoDB使用一致性非锁定读来避免在一般的查询操作(SELECT FOR UPDATE等除外)时使用锁。然而锁这个事情是无法避免的，数据的写入，修改和删除都需要加锁。今天我们就继续学习InnoDB锁相关的知识。">
+<meta name="keywords" content="MySQL">
+<meta property="og:type" content="article">
+<meta property="og:title" content="MySQL探索（7）：InnoDB行锁算法">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;26&#x2F;MySQL%E6%8E%A2%E7%B4%A2%EF%BC%887%EF%BC%89%EF%BC%9AInnoDB%E8%A1%8C%E9%94%81%E7%AE%97%E6%B3%95&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="在上一篇《InnoDB一致性非锁定读》中，我们了解到InnoDB使用一致性非锁定读来避免在一般的查询操作(SELECT FOR UPDATE等除外)时使用锁。然而锁这个事情是无法避免的，数据的写入，修改和删除都需要加锁。今天我们就继续学习InnoDB锁相关的知识。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031175010-58b28.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031175011-8d9fc.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031175011-a2fad.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031175013-450b9.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031175013-1ca41.jpeg">
+<meta property="og:updated_time" content="2019-12-26T05:18:55.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031175010-58b28.jpeg">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/26/MySQL%E6%8E%A2%E7%B4%A2%EF%BC%887%EF%BC%89%EF%BC%9AInnoDB%E8%A1%8C%E9%94%81%E7%AE%97%E6%B3%95/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>MySQL探索（7）：InnoDB行锁算法 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">2</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">2</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">9</span></a>
+
+  </li>
+  </ul>
+
+</nav>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/26/MySQL%E6%8E%A2%E7%B4%A2%EF%BC%887%EF%BC%89%EF%BC%9AInnoDB%E8%A1%8C%E9%94%81%E7%AE%97%E6%B3%95/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          MySQL探索（7）：InnoDB行锁算法
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-26 13:18:55" itemprop="dateCreated datePublished" datetime="2019-12-26T13:18:55+08:00">2019-12-26</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>在上一篇<a href="https://mp.weixin.qq.com/s?__biz=MzU2MDYwMDMzNQ==&mid=2247483698&idx=1&sn=3654042755c7ea0922e5d5b462930946&chksm=fc04c552cb734c443f771eb2075cd4d4ce85df85105805667cc4cf51a67ceed2f9ebdf1a8cde&token=731065842&lang=zh_CN#rd" target="_blank" rel="noopener">《InnoDB一致性非锁定读》</a>中，我们了解到InnoDB使用一致性非锁定读来避免在一般的查询操作(SELECT FOR UPDATE等除外)时使用锁。然而锁这个事情是无法避免的，数据的写入，修改和删除都需要加锁。今天我们就继续学习InnoDB锁相关的知识。</p>
+<a id="more"></a>
+
+<p>由于文章涉及的概念比较多，害怕大家看完后会骂人，有一种字我都认识，就不太懂的感觉，文章会给出一些实例和试验，依据具体案例来讲解这些概念。毕竟，实践才能出真知。</p>
+<p>InnoDB存储引擎支持表锁和行锁。顾名思义，表锁是锁住整张表，行锁只是锁住某些行。InnoDB通过给索引项加锁来实现行锁，如果没有索引，则通过隐藏的聚簇索引来对记录加锁。如果操作不通过索引条件检索数据，InnoDB 则对表中的所有记录加锁，实际效果就和表锁一样。InnoDB存储引擎有3种行锁的算法，分别是：</p>
+<ul>
+<li>Record Lock: 单个记录上的锁</li>
+<li>Gap Lock: 间隙锁，锁定一个范围，但不包括记录本上</li>
+<li>Next-Key Lock: Gap Lock+Record Lock，锁定一个范围，并且锁定记录本身</li>
+</ul>
+<p>如下图所示，</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031175010-58b28.jpeg" alt="img"></p>
+<p>三种锁算法</p>
+<p>例如一个索引有10,11,13,20这四个值。InnoDB可以根据需要使用Record Lock将10，11，13，20四个索引锁住，也可以使用Gap Lock将(-∞,10)，(10,11)，(11,13)，(13,20)，(20, +∞)五个范围区间锁住。Next-Key Locking类似于上述两种锁的结合，它可以锁住的区间有为(-∞,10]，(10,11]，(11,13]，(13,20]，(20, +∞)，可以看出它即锁定了一个范围，也会锁定记录本身。</p>
+<p>InnoDB存储引擎的锁算法的一些规则如下所示，后续章节会给出对应的实验案例和详细讲解。</p>
+<ul>
+<li>在不通过索引条件查询时，InnoDB 会锁定表中的所有记录。所以，如果考虑性能，WHERE语句中的条件查询的字段都应该加上索引。</li>
+<li>InnoDB通过索引来实现行锁，而不是通过锁住记录。因此，当操作的两条不同记录拥有相同的索引时，也会因为行锁被锁而发生等待。</li>
+<li>由于InnoDB的索引机制，数据库操作使用了主键索引，InnoDB会锁住主键索引；使用非主键索引时，InnoDB会先锁住非主键索引，再锁定主键索引。</li>
+<li>当查询的索引是唯一索引(不存在两个数据行具有完全相同的键值)时，InnoDB存储引擎会将Next-Key Lock降级为Record Lock，即只锁住索引本身，而不是范围。</li>
+<li>InnoDB对于辅助索引有特殊的处理，不仅会锁住辅助索引值所在的范围，还会将其下一键值加上Gap LOCK。</li>
+<li>InnoDB使用Next-Key Lock机制来避免Phantom Problem（幻读问题）。</li>
+</ul>
+<h2 id="真的了解本质吗"><a href="#真的了解本质吗" class="headerlink" title="真的了解本质吗?"></a>真的了解本质吗?</h2><p>在不通过索引条件查询时，InnoDB 会锁定表中的所有记录。大家可以登录上自己的MySQL服务器，亲自试验一下。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031175011-8d9fc.jpeg" alt="img"></p>
+<p>示例一</p>
+<p>试验发现，会话二的查询操作真的是会发生等待。那么，这句话真的是对的吗？我们可以使用<a href="https://mp.weixin.qq.com/s?__biz=MzU2MDYwMDMzNQ==&mid=2247483694&idx=1&sn=671ad369f67441c7d1572110066d5695&chksm=fc04c54ecb734c58101f8ff020914f4cccaf6660742a6723b431066ca05d5e71365dfd8d4556&token=731065842&lang=zh_CN#rd" target="_blank" rel="noopener">《InnoDB锁的类型和状态查询》</a>中查询数据锁的方法查询一下，<strong>注意必须在会话二操作还在等待时进行查询，否则查询不到</strong>。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031175011-a2fad.png" alt="img"></p>
+<p>查询锁信息</p>
+<p>其中lock_trx_id为1851的事务是会话二的事务，另一个是会话一的事务。我们可以看到两个锁都要对值为1的主键索引加锁。<em>需要注意的是，这里是对主键进行加锁</em>。二者之间的关系是怎么确定的呢?我们可以通过<code>information_schema.INNODB_LOCK_WAITS</code>中的数据确定。</p>
+<p>奇怪，不是说好的锁定表中的所有记录嘛？查找了很多资料，发现<code>INNODB_LOCKS</code>的定义如下：</p>
+<blockquote>
+<p>The INNODB_LOCKS table contains information about each lock that an InnoDB transaction has requested but not yet acquired, and each lock that a transaction holds that is blocking another transaction.</p>
+</blockquote>
+<p>也就是说，这张表并不会显示所有锁的信息，而是只显示要申请却没有申请到，和已经持有锁并且阻塞其他线程的锁信息。怪不得必须在会话二进行等待时进行查询才能查得到数据。</p>
+<p>因为两个会话的操作都要锁住所有的行，所以发现每次在第一行记录上就发生了锁等待。那我们使用插入语句试试。表e1的主键a的值为1-4，我们分别插入主键为1-4(当然会有主键重复问题，但是由于有锁，一直等待)的新记录，分别查询锁信息，就能看到会话一的事务对所有的主键都加了锁，也就是对所有的记录都加了锁。</p>
+<h2 id="是索引，而不是记录"><a href="#是索引，而不是记录" class="headerlink" title="是索引，而不是记录"></a>是索引，而不是记录</h2><p>InnoDB存储引擎的行锁是通过锁住索引实现的，而不是记录。这是理解很多数据库锁问题的关键。</p>
+<p>由于InnoDB特殊的索引机制，数据库操作使用主键索引时，InnoDB会锁住主键索引；使用非主键索引时，InnoDB会先锁住非主键索引，再锁定主键索引。不了解InnoDB索引机制的可以参考这篇<a href="https://mp.weixin.qq.com/s?__biz=MzU2MDYwMDMzNQ==&mid=2247483664&idx=1&sn=a4aea45edf13b367ee17539eaff4874b&chksm=fc04c570cb734c66447aec4344288025bfe6ba7d715af31dc6d60d65411cd90a05d9b02e749d&token=731065842&lang=zh_CN#rd" target="_blank" rel="noopener">文章</a></p>
+<p>如下图所示，当InnoDB锁定非主键索引b时，它也会锁住其对应的主键索引，所以锁住b值为2和3的非主键索引，那么与其相关的a值为6,5的主键索引也需要被锁住。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031175013-450b9.jpeg" alt="img"></p>
+<p>非主键索引的加锁</p>
+<p>比如说，一种常见的死锁情况一般出现在如下图所示的操作场景中。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031175013-1ca41.jpeg" alt="img"></p>
+<p>示例2</p>
+<p>会话一的语句使用了b上的索引，因为它是非主键索引，所以会先在b索引上添加锁，再去a索引上加锁。而会话二的语句恰恰相反，会先在索引a上加锁，再去索引b加锁。这种情况下，就可能出现死锁。</p>
+<h2 id="Next-Key-Lock锁到底有什么用？"><a href="#Next-Key-Lock锁到底有什么用？" class="headerlink" title="Next-Key Lock锁到底有什么用？"></a>Next-Key Lock锁到底有什么用？</h2><p>默认隔离级别REPEATABLE-READ下，InnoDB中行锁默认使用算法Next-Key Lock，只有当查询的索引是唯一索引或主键时，InnoDB会对Next-Key Lock进行优化，将其降级为Record Lock，即仅锁住索引本身，而不是范围。当查询的索引为辅助索引时，InnoDB则会使用Next-Key Lock进行加锁。InnoDB对于辅助索引有特殊的处理，不仅会锁住辅助索引值所在的范围，还会将其下一键值加上Gap LOCK。</p>
+<p>废话不多说，我们来看一下相关的实验，先做一下准备。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">CREATE TABLE e4 (a INT, b INT, PRIMARY KEY(a), KEY(b));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">INSERT INTO e4 SELECT 1,1;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">INSERT INTO e4 SELECT 3,1;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">INSERT INTO e4 SELECT 5,3;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">INSERT INTO e4 SELECT 7,6;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">INSERT INTO e4 SELECT 10,8;</span></pre></td></tr></table></figure>
+
+<p>然后开启一个会话执行下面的语句。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">SELECT * FROM e4 WHERE b&#x3D;3 FOR UPDATE;</span></pre></td></tr></table></figure>
+
+<p>因为通过索引b来进行查询，所以InnoDB会使用Next-Key Lock进行加锁，并且索引b是非主键索引，所以还会对主键索引a进行加锁。对于主键索引a，仅仅对值为5的索引加上Record Lock（因为之前的规则）。而对于索引b，需要加上Next-Key Lock索引，锁定的范围是(1,3]。除此之外，还会对其下一个键值加上Gap Lock，即还有一个范围为(3,6)的锁。<br>大家可以再新开一个会话，执行下面的SQL语句，会发现都会被阻塞。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">SELECT * FROM e4 WHERE a &#x3D; 5 FOR UPDATE;  # 主键a被锁</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">INSERT INTO e4 SELECT 4,2;   # 插入行b的值为2，在锁定的(1,3]范围内</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">INSERT INTO e4 SELECT 6,5; # 插入行b的值为5，在锁定的(3,6)范围内</span></pre></td></tr></table></figure>
+
+<p>InnoDB引擎采用Next-Key Lock来解决幻读问题。因为Next-Key Lock是锁住一个范围，所以就不会产生幻读问题。但是需要注意的是，InnoDB只在Repeatable Read隔离级别下使用该机制。</p>
+<blockquote>
+<p>作者：程序员历小冰</p>
+<p>来源：<a href="https://www.jianshu.com/p/7d050498d9da" target="_blank" rel="noopener">https://www.jianshu.com/p/7d050498d9da</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/MySQL/" rel="tag"># MySQL</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/26/MySQL%E6%8E%A2%E7%B4%A2%EF%BC%886%EF%BC%89%EF%BC%9AInnoDB%E4%B8%80%E8%87%B4%E6%80%A7%E9%9D%9E%E9%94%81%E5%AE%9A%E8%AF%BB/" rel="prev" title="MySQL探索（6）：InnoDB一致性非锁定读">
+      <i class="fa fa-chevron-left"></i> MySQL探索（6）：InnoDB一致性非锁定读
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/26/MySQL%E6%8E%A2%E7%B4%A2%EF%BC%888%EF%BC%89%EF%BC%9AInnoDB%E7%9A%84%E4%BA%8B%E5%8A%A1/" rel="next" title="MySQL探索（8）：InnoDB的事务">
+      MySQL探索（8）：InnoDB的事务 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#真的了解本质吗"><span class="nav-number">1.</span> <span class="nav-text">真的了解本质吗?</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#是索引，而不是记录"><span class="nav-number">2.</span> <span class="nav-text">是索引，而不是记录</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Next-Key-Lock锁到底有什么用？"><span class="nav-number">3.</span> <span class="nav-text">Next-Key Lock锁到底有什么用？</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">9</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">2</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">2</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

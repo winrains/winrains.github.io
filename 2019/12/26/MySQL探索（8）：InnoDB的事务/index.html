@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: '',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="事务是数据库最为重要的机制之一，凡是使用过数据库的人，都了解数据库的事务机制，也对ACID四个基本特性如数家珍。但是聊起事务或者ACID的底层实现原理，往往言之不详，不明所以。所以，今天我们就一起来分析和探讨InnoDB的事务机制，希望能建立起对事务底层实现原理的具体了解。">
+<meta name="keywords" content="MySQL">
+<meta property="og:type" content="article">
+<meta property="og:title" content="MySQL探索（8）：InnoDB的事务">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;26&#x2F;MySQL%E6%8E%A2%E7%B4%A2%EF%BC%888%EF%BC%89%EF%BC%9AInnoDB%E7%9A%84%E4%BA%8B%E5%8A%A1&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="事务是数据库最为重要的机制之一，凡是使用过数据库的人，都了解数据库的事务机制，也对ACID四个基本特性如数家珍。但是聊起事务或者ACID的底层实现原理，往往言之不详，不明所以。所以，今天我们就一起来分析和探讨InnoDB的事务机制，希望能建立起对事务底层实现原理的具体了解。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031175432-e26fb.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031175433-821a1.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031175433-e6413.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031175434-53e31.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031175434-1e1c3.jpeg">
+<meta property="og:updated_time" content="2019-12-26T05:22:11.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031175432-e26fb.jpeg">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/26/MySQL%E6%8E%A2%E7%B4%A2%EF%BC%888%EF%BC%89%EF%BC%9AInnoDB%E7%9A%84%E4%BA%8B%E5%8A%A1/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>MySQL探索（8）：InnoDB的事务 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">2</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">2</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">9</span></a>
+
+  </li>
+  </ul>
+
+</nav>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/26/MySQL%E6%8E%A2%E7%B4%A2%EF%BC%888%EF%BC%89%EF%BC%9AInnoDB%E7%9A%84%E4%BA%8B%E5%8A%A1/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          MySQL探索（8）：InnoDB的事务
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-26 13:22:11" itemprop="dateCreated datePublished" datetime="2019-12-26T13:22:11+08:00">2019-12-26</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>事务是数据库最为重要的机制之一，凡是使用过数据库的人，都了解数据库的事务机制，也对ACID四个基本特性如数家珍。但是聊起事务或者ACID的底层实现原理，往往言之不详，不明所以。所以，今天我们就一起来分析和探讨InnoDB的事务机制，希望能建立起对事务底层实现原理的具体了解。</p>
+<a id="more"></a>
+
+<p><img src="http://image.winrains.cn/2019/10/20191031175432-e26fb.jpeg" alt="img"></p>
+<p>事务的四大特性</p>
+<p>数据库事务具有ACID四大特性。ACID是以下4个词的缩写：</p>
+<ul>
+<li>原子性(atomicity) ：事务最小工作单元，要么全成功，要么全失败 。</li>
+<li>一致性(consistency)： 事务开始和结束后，数据库的完整性不会被破坏 。</li>
+<li>隔离性(isolation) ：不同事务之间互不影响，四种隔离级别为RU（读未提交）、RC（读已提交）、RR（可重复读）、SERIALIZABLE （串行化）。</li>
+<li>持久性(durability) ：事务提交后，对数据的修改是永久性的，即使系统故障也不会丢失 。</li>
+</ul>
+<p>下面，我们就以一个具体实例来介绍数据库事务的原理，并介绍InnoDB是如何实现ACID四大特性的。</p>
+<h2 id="示例介绍"><a href="#示例介绍" class="headerlink" title="示例介绍"></a>示例介绍</h2><p>我们首先来看一下具体的示例。大家可以自己亲自试验一下，这样理解和记忆都会更加深刻。<br>首先，使用如下的SQL语句创建两张表，分别是goods和trade，代表货物和交易。并向goods表中插入一条记录，id为1的货物数量为10。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">CREATE TABLE goods (id INT, num INT, PRIMARY KEY(id));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">CREATE TABLE trade (id INT, goods_id INT, user_id INT, PRIMARY KEY(id));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">INSERT INTO goods VALUES(1, 10);</span></pre></td></tr></table></figure>
+
+<p>然后打开终端，连接数据库，开启会话一，先用BEGIN显示开启一个事务。会话一先将goods表中id为1的货物的数量减一，然后向trade表中添加一笔交易的记录，最后使用COMMIT显示提交事务。<br>而会话二则先查询goods表中id为1的货物数量，然后向trade表中添加一笔交易记录，接着更新goods表中id为1的货物的数量，最后使用ROLLBACK进行事务的回滚。其中，两个会话中执行的具体语句和先后顺序如下图所示。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031175433-821a1.jpeg" alt="img"></p>
+<p>示例具体语句和执行顺序</p>
+<p>这个示例可以体现数据库事务的很多特性，我们一一来介绍。首先会话一的操作2更新了id为1的货物的数量，但是会话二的操作5读出来的数量仍然是10，这体现了事务的隔离性，使用InnoDB的<a href="https://mp.weixin.qq.com/s?__biz=MzU2MDYwMDMzNQ==&mid=2247483698&idx=1&sn=3654042755c7ea0922e5d5b462930946&chksm=fc04c552cb734c443f771eb2075cd4d4ce85df85105805667cc4cf51a67ceed2f9ebdf1a8cde&token=1535405475&lang=zh_CN#rd" target="_blank" rel="noopener">多版本控制机制</a>实现。<br>会话二的操作7也要更新同种货物的数量，此时因为会话一的操作2已经更新了该货物的数量，InnoDB已经锁住了该记录的行锁，所以操作7会被阻塞，直到会话一COMMIT。但是会话一的操作4和会话二的操作7都是向trade表中插入记录，后者却不会因为前者而阻塞，因为二者插入的不是同一行记录。锁机制是一种常见的并发控制机制，它和多版本控制机制一起实现了InnoDB事务的隔离性，关于InnoDB锁相关的具体内容可以参考<a href="https://mp.weixin.qq.com/s?__biz=MzU2MDYwMDMzNQ==&mid=2247483694&idx=1&sn=671ad369f67441c7d1572110066d5695&chksm=fc04c54ecb734c58101f8ff020914f4cccaf6660742a6723b431066ca05d5e71365dfd8d4556&token=1535405475&lang=zh_CN#rd" target="_blank" rel="noopener">InnoDB锁的类型和状态查询</a>和<a href="https://mp.weixin.qq.com/s?__biz=MzU2MDYwMDMzNQ==&mid=2247483702&idx=1&sn=669fb9f413db0cc744bdb5b9ec8f725e&chksm=fc04c556cb734c40b3c90a55868619b8ca1f3e1f8763be2d6e7f0568d7c992409937c33b7e10&token=1535405475&lang=zh_CN#rd" target="_blank" rel="noopener">InnoDB行锁算法</a>。</p>
+<p>会话一事务最终使用COMMIT提交了事务而会话二事务则使用ROLLBACK回滚了整个事务，这体现了事务的原子性。即事务的一系列操作要么全部执行(COMMIT)，要么就全部不执行(ROLLBACK)，不存在只执行一部分的情况。InnoDB使用事务日志系统来实现事务的原子性。这里有的同学就会问了，如果中途连接断开或者Server Crash会怎么样。能怎么样，直接自动回滚呗。</p>
+<p>一旦会话一使用COMMIT操作提交事务成功后，那么数据一定会被写入到数据库中并持久的存储起来，这体现了事务的持久性。InnoDB使用<a href="https://mp.weixin.qq.com/s?__biz=MzU2MDYwMDMzNQ==&mid=2247483683&idx=1&sn=5225ab3481c38bb57297a36df8e62bce&chksm=fc04c543cb734c556574f9e5331ab70f0c8239d70197f70015f58d4ac3f5c4d0b1260f0478e3&token=1535405475&lang=zh_CN#rd" target="_blank" rel="noopener">redo log机制</a>来实现事务的持久性。</p>
+<p>而事务的一致性比较难以理解，简单的讲在事务开始时，此时数据库有一种状态，这个状态是所有的MySQL对象处于一致的状态，例如数据库完整性约束正确，日志状态一致等。当事务提交后，这时数据库又有了一个新的状态，不同的数据，不同的索引，不同的日志等。但此时，约束，数据，索引，日志等MySQL各种状态还是要保持一致性。 也就是说数据库从一个一致性的状态，变到另一个一致性的状态。事务执行后，并没有破坏数据库的完整性约束。</p>
+<p>下面我们就来详细讲解一下上述示例涉及的事务的ACID特性的具体实现原理。<strong>总结来说，事务的隔离性由多版本控制机制和锁实现，而原子性、一致性和持久性通过InnoDB的redo log、undo log和Force Log at Commit机制来实现</strong>。</p>
+<h2 id="原子性，持久性和一致性"><a href="#原子性，持久性和一致性" class="headerlink" title="原子性，持久性和一致性"></a>原子性，持久性和一致性</h2><p>原子性，持久性和一致性主要是通过redo log、undo log和Force Log at Commit机制机制来完成的。redo log用于在崩溃时恢复数据，undo log用于对事务的影响进行撤销，也可以用于多版本控制。而Force Log at Commit机制保证事务提交后redo log日志都已经持久化。<br>开启一个事务后，用户可以使用COMMIT来提交，也可以用ROLLBACK来回滚。其中COMMIT或者ROLLBACK执行成功之后，数据一定是会被全部保存或者全部回滚到最初状态的，这也体现了事务的原子性。但是也会有很多的异常情况，比如说事务执行中途连接断开，或者是执行COMMIT或者ROLLBACK时发生错误，Server Crash等，此时数据库会自动进行回滚或者重启之后进行恢复。</p>
+<p>我们先来看一下redo log的原理，redo log顾名思义，就是重做日志，每次数据库的SQL操作导致的数据变化它都会记录一下，<strong>具体来说，redo log是物理日志，记录的是数据库页的物理修改操作</strong>。如果数据发生了丢失，数据库可以根据redo log进行数据恢复。</p>
+<p>InnoDB通过Force Log at Commit机制实现事务的持久性，即当事务COMMIT时，必须先将该事务的所有日志都写入到redo log文件进行持久化之后，COMMIT操作才算完成。<br>当事务的各种SQL操作执行时，即会在缓冲区中修改数据，也会将对应的redo log写入它所属的缓存。当事务执行COMMIT时，与该事务相关的redo log缓冲必须都全部刷新到磁盘中之后COMMIT才算执行成功。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031175433-e6413.png" alt="img"></p>
+<p>数据库日志和数据落盘机制</p>
+<p>redo log写入磁盘时，必须进行一次操作系统的fsync操作，防止redo log只是写入了操作系统的磁盘缓存中。参数innodb_flush_log_at_trx_commit可以控制redo log日志刷新到磁盘的策略，它的具体作用可以查阅<a href="https://mp.weixin.qq.com/s?__biz=MzU2MDYwMDMzNQ==&mid=2247483683&idx=1&sn=5225ab3481c38bb57297a36df8e62bce&chksm=fc04c543cb734c556574f9e5331ab70f0c8239d70197f70015f58d4ac3f5c4d0b1260f0478e3&token=1535405475&lang=zh_CN#rd" target="_blank" rel="noopener">InnoDB的磁盘文件及落盘机制</a></p>
+<p>redo log全部写入磁盘后事务就算COMMIT成功了，但是此时事务修改的数据还在内存的缓冲区中，称其为脏页，这些数据会依据检查点(CheckPoint)机制择时刷新到磁盘中，然后删除相应的redo log，但是如果在这个过程中数据库Crash了，那么数据库重启时，会依据redo log file将那些还在内存中未更新到磁盘上的数据进行恢复。</p>
+<p>数据库为了提高性能，数据页在内存修改后并不是每次都会刷到磁盘上。而是引入checkpoint机制，择时将数据页落盘，checkpoint记录之前的数据页保证一定落盘了，这样相关的redo log就没有用了(由于InnoDB redo log file循环使用，这时这部分日志就可以被覆盖)，checkpoint之后的数据页有可能落盘，也有可能没有落盘，所以checkpoint之后的redo log file在崩溃恢复的时候还是需要被使用的。InnoDB会依据脏页的刷新情况，定期推进checkpoint，从而减少数据库崩溃恢复的时间。检查点的信息在第一个日志文件的头部。</p>
+<p>数据库崩溃重启后需要从redo log中把未落盘的脏页数据恢复出来，重新写入磁盘，保证用户的数据不丢失。当然，在崩溃恢复中还需要回滚没有提交的事务。由于回滚操作需要undo日志的支持，undo日志的完整性和可靠性需要redo日志来保证，所以崩溃恢复先做redo恢复数据，然后做undo回滚。</p>
+<p>在事务执行的过程中，除了记录redo log，还会记录一定量的undo log。undo log记录了数据在每个操作前的状态，如果事务执行过程中需要回滚，就可以根据undo log进行回滚操作。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031175434-53e31.jpeg" alt="img"></p>
+<p>数据和回滚日志的逻辑存储结构.jpg</p>
+<p>undo log的存储不同于redo log，它存放在数据库内部的一个特殊的段(segment)中，这个段称为回滚段。回滚段位于共享表空间中。undo段中的以undo page为更小的组织单位。undo page和存储数据库数据和索引的页类似。因为redo log是物理日志，记录的是数据库页的物理修改操作。所以undo log的写入也会产生redo log，也就是undo log的产生会伴随着redo log的产生，这是因为undo log也需要持久性的保护。如上图所示，表空间中有回滚段和叶节点段和非叶节点段，而三者都有对应的页结构。</p>
+<p>我们再来总结一下数据库事务的整个流程，如下图所示。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031175434-1e1c3.jpeg" alt="img"></p>
+<p>事务的相关流程</p>
+<p>事务进行过程中，每次sql语句执行，都会记录undo log和redo log，然后更新数据形成脏页，然后redo log按照时间或者空间等条件进行落盘，undo log和脏页按照checkpoint进行落盘，落盘后相应的redo log就可以删除了。此时，事务还未COMMIT，如果发生崩溃，则首先检查checkpoint记录，使用相应的redo log进行数据和undo log的恢复，然后查看undo log的状态发现事务尚未提交，然后就使用undo log进行事务回滚。事务执行COMMIT操作时，会将本事务相关的所有redo log都进行落盘，只有所有redo log落盘成功，才算COMMIT成功。然后内存中的数据脏页继续按照checkpoint进行落盘。如果此时发生了崩溃，则只使用redo log恢复数据。</p>
+<h2 id="隔离性"><a href="#隔离性" class="headerlink" title="隔离性"></a>隔离性</h2><p>InnoDB事务的隔离性主要通过多版本控制机制和锁机制实现，具体可以参考<a href="https://mp.weixin.qq.com/s?__biz=MzU2MDYwMDMzNQ==&mid=2247483698&idx=1&sn=3654042755c7ea0922e5d5b462930946&chksm=fc04c552cb734c443f771eb2075cd4d4ce85df85105805667cc4cf51a67ceed2f9ebdf1a8cde&token=1535405475&lang=zh_CN#rd" target="_blank" rel="noopener">多版本控制</a>，<a href="https://mp.weixin.qq.com/s?__biz=MzU2MDYwMDMzNQ==&mid=2247483694&idx=1&sn=671ad369f67441c7d1572110066d5695&chksm=fc04c54ecb734c58101f8ff020914f4cccaf6660742a6723b431066ca05d5e71365dfd8d4556&token=1535405475&lang=zh_CN#rd" target="_blank" rel="noopener">InnoDB锁的类型和状态查询</a>和<a href="https://mp.weixin.qq.com/s?__biz=MzU2MDYwMDMzNQ==&mid=2247483702&idx=1&sn=669fb9f413db0cc744bdb5b9ec8f725e&chksm=fc04c556cb734c40b3c90a55868619b8ca1f3e1f8763be2d6e7f0568d7c992409937c33b7e10&token=1535405475&lang=zh_CN#rd" target="_blank" rel="noopener">InnoDB行锁算法</a>三篇文章。</p>
+<h2 id="后记"><a href="#后记" class="headerlink" title="后记"></a>后记</h2><p>本来想一篇文章将MySQL的事务机制讲明白，写完自己读了一遍，还是发现内容有些晦涩难懂，复杂的知识本来就是很难讲明白的，夫夷以近，则游者众；险以远，则至者少，希望读者以本文作为一篇指引性的文章，自己再去更加深入的地方去探秘。不过，能将复杂知识讲解的通俗简单也是一项很大的本领，文字和讲解能力还是需要提示的。</p>
+<blockquote>
+<p>作者：程序员历小冰</p>
+<p>来源：<a href="https://www.jianshu.com/p/42d4385c32bb" target="_blank" rel="noopener">https://www.jianshu.com/p/42d4385c32bb</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/MySQL/" rel="tag"># MySQL</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/26/MySQL%E6%8E%A2%E7%B4%A2%EF%BC%887%EF%BC%89%EF%BC%9AInnoDB%E8%A1%8C%E9%94%81%E7%AE%97%E6%B3%95/" rel="prev" title="MySQL探索（7）：InnoDB行锁算法">
+      <i class="fa fa-chevron-left"></i> MySQL探索（7）：InnoDB行锁算法
+    </a></div>
+      <div class="post-nav-item"></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#示例介绍"><span class="nav-number">1.</span> <span class="nav-text">示例介绍</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#原子性，持久性和一致性"><span class="nav-number">2.</span> <span class="nav-text">原子性，持久性和一致性</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#隔离性"><span class="nav-number">3.</span> <span class="nav-text">隔离性</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#后记"><span class="nav-number">4.</span> <span class="nav-text">后记</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">9</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">2</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">2</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
