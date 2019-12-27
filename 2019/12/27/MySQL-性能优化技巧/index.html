@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="一、背景最近公司项目添加新功能，上线后发现有些功能的列表查询时间很久。原因是新功能用到旧功能的接口，而这些旧接口的 SQL 查询语句关联5,6张表且编写不够规范，导致 MySQL 在执行 SQL 语句时索引失效，进行全表扫描。原本负责优化的同事有事请假回家，因此优化查询数据的问题落在笔者手中。笔者在查阅网上 SQL 优化的资料后成功解决了问题，在此从全局角度记录和总结 MySQL 查询优化相关技巧">
+<meta property="og:type" content="article">
+<meta property="og:title" content="MySQL 性能优化技巧">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;27&#x2F;MySQL-%E6%80%A7%E8%83%BD%E4%BC%98%E5%8C%96%E6%8A%80%E5%B7%A7&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="一、背景最近公司项目添加新功能，上线后发现有些功能的列表查询时间很久。原因是新功能用到旧功能的接口，而这些旧接口的 SQL 查询语句关联5,6张表且编写不够规范，导致 MySQL 在执行 SQL 语句时索引失效，进行全表扫描。原本负责优化的同事有事请假回家，因此优化查询数据的问题落在笔者手中。笔者在查阅网上 SQL 优化的资料后成功解决了问题，在此从全局角度记录和总结 MySQL 查询优化相关技巧">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;5fcaa-mysql-optimized.jpg">
+<meta property="og:updated_time" content="2019-12-27T07:51:52.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;5fcaa-mysql-optimized.jpg">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/27/MySQL-%E6%80%A7%E8%83%BD%E4%BC%98%E5%8C%96%E6%8A%80%E5%B7%A7/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>MySQL 性能优化技巧 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">85</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">65</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">289</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/27/MySQL-%E6%80%A7%E8%83%BD%E4%BC%98%E5%8C%96%E6%8A%80%E5%B7%A7/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          MySQL 性能优化技巧
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-27 15:51:52" itemprop="dateCreated datePublished" datetime="2019-12-27T15:51:52+08:00">2019-12-27</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/MySQL/" itemprop="url" rel="index">
+                    <span itemprop="name">MySQL</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h2 id="一、背景"><a href="#一、背景" class="headerlink" title="一、背景"></a>一、背景</h2><p>最近公司项目添加新功能，上线后发现有些功能的列表查询时间很久。原因是新功能用到旧功能的接口，而这些旧接口的 SQL 查询语句关联5,6张表且编写不够规范，导致 MySQL 在执行 SQL 语句时索引失效，进行全表扫描。原本负责优化的同事有事请假回家，因此优化查询数据的问题落在笔者手中。笔者在查阅网上 SQL 优化的资料后成功解决了问题，在此从<strong>全局角度</strong>记录和总结 MySQL 查询优化相关技巧。</p>
+<a id="more"></a>
+
+<h2 id="二、优化思路"><a href="#二、优化思路" class="headerlink" title="二、优化思路"></a>二、优化思路</h2><p><strong>数据查询慢，不代表 SQL 语句写法有问题。</strong> 首先，我们需要找到问题的源头才能“对症下药”。笔者用一张流程图展示 MySQL 优化的思路：<br><a href="http://image.winrains.cn/2019/09/5fcaa-mysql-optimized.jpg" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/09/5fcaa-mysql-optimized.jpg" alt="img"></a><br>无需更多言语，从图中可以清楚地看出，导致数据查询慢的原因有多种，如：缓存失效，在此一段时间内由于高并发访问导致 MySQL 服务器崩溃；SQL 语句编写问题；MySQL 服务器参数问题；硬件配置限制 MySQL 服务性能问题等。</p>
+<h2 id="三、查看-MySQL-服务器运行的状态值"><a href="#三、查看-MySQL-服务器运行的状态值" class="headerlink" title="三、查看 MySQL 服务器运行的状态值"></a>三、查看 MySQL 服务器运行的状态值</h2><p><strong>如果系统的并发请求数不高，且查询速度慢，可以忽略该步骤直接进行 SQL 语句调优步骤。</strong><br>执行命令：</p>
+<figure class="highlight maxima"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="built_in">show</span> <span class="built_in">status</span></span></pre></td></tr></table></figure>
+
+<p>由于返回结果太多，此处不贴出结果。其中，再返回的结果中，我们主要关注 “Queries”、“Threads_connected” 和 “Threads_running” 的值，即查询次数、线程连接数和线程运行数。<br>我们可以通过执行如下脚本监控 MySQL 服务器运行的状态值</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="meta">#!/bin/bash</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">while</span> <span class="literal">true</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">do</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">mysqladmin -uroot -p<span class="string">"密码"</span> ext | awk <span class="string">'/Queries/&#123;q=$4&#125;/Threads_connected/&#123;c=$4&#125;/Threads_running/&#123;r=$4&#125;END&#123;printf("%d %d %d\n",q,c,r)&#125;'</span> &gt;&gt; status.txt</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">sleep 1</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">done</span></span></pre></td></tr></table></figure>
+
+<p>执行该脚本 24 小时，获取 status.txt 里的内容，再次通过 awk 计算<strong>每秒请求 MySQL 服务的次数</strong></p>
+<figure class="highlight lsl"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">awk '&#123;q=$<span class="number">1</span>-last;last=$<span class="number">1</span>&#125;&#123;printf(<span class="string">"%d %d %d<span class="subst">\n</span>"</span>,q,$<span class="number">2</span>,$<span class="number">3</span>)&#125;' status.txt</span></pre></td></tr></table></figure>
+
+<p>复制计算好的内容到 Excel 中生成图表观察数据周期性。<br>如果观察的数据有周期性的变化，如上图的解释，需要修改缓存失效策略。<br>例如：<br>通过随机数在[3,6,9] 区间获取其中一个值作为缓存失效时间，这样分散了缓存失效时间，从而节省了一部分内存的消耗。<br>当访问高峰期时，一部分请求分流到未失效的缓存，另一部分则访问 MySQL 数据库，这样减少了 MySQL 服务器的压力。</p>
+<h2 id="四、获取需要优化的-SQL-语句"><a href="#四、获取需要优化的-SQL-语句" class="headerlink" title="四、获取需要优化的 SQL 语句"></a>四、获取需要优化的 SQL 语句</h2><h3 id="4-1-方式一：查看运行的线程"><a href="#4-1-方式一：查看运行的线程" class="headerlink" title="4.1 方式一：查看运行的线程"></a>4.1 方式一：查看运行的线程</h3><p>执行命令：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">show</span> <span class="keyword">processlist</span></span></pre></td></tr></table></figure>
+
+<p>返回结果：</p>
+<figure class="highlight asciidoc"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">mysql&gt; show processlist;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="code">+----+</span>------<span class="code">+-----------+</span>------<span class="code">+---------+</span>------<span class="code">+----------+</span>------------------+</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">| Id | User | Host      | db   | Command | Time | State    | Info             |</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="code">+----+</span>------<span class="code">+-----------+</span>------<span class="code">+---------+</span>------<span class="code">+----------+</span>------------------+</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">|  9 | root | localhost | test | Query   |    0 | starting | show processlist |</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="code">+----+</span>------<span class="code">+-----------+</span>------<span class="code">+---------+</span>------<span class="code">+----------+</span>------------------+</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">1 row in set (0.00 sec)</span></pre></td></tr></table></figure>
+
+<p>从返回结果中我们可以了解该线程执行了什么命令/SQL 语句以及执行的时间。实际应用中，查询的返回结果会有 N 条记录。<br>其中，<strong>返回的 State 的值是我们判断性能好坏的关键</strong>，其值出现如下内容，则该行记录的 SQL 语句需要优化：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">Converting HEAP to MyISAM <span class="comment"># 查询结果太大时，把结果放到磁盘，严重</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">Create</span> tmp <span class="keyword">table</span> <span class="comment">#创建临时表，严重</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">Copying <span class="keyword">to</span> tmp <span class="keyword">table</span> <span class="keyword">on</span> disk  <span class="comment">#把内存临时表复制到磁盘，严重</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">locked</span> <span class="comment">#被其他查询锁住，严重</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">loggin slow <span class="keyword">query</span> <span class="comment">#记录慢查询</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">Sorting <span class="keyword">result</span> <span class="comment">#排序</span></span></pre></td></tr></table></figure>
+
+<p>State 字段有很多值，如需了解更多，可以参看文章末尾提供的链接。</p>
+<h3 id="4-2-方式二：开启慢查询日志"><a href="#4-2-方式二：开启慢查询日志" class="headerlink" title="4.2 方式二：开启慢查询日志"></a>4.2 方式二：开启慢查询日志</h3><p>在配置文件 <code>my.cnf</code> 中的 <code>[mysqld]</code> 一行下边添加两个参数：</p>
+<figure class="highlight ini"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="attr">slow_query_log</span> = <span class="number">1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="attr">slow_query_log_file</span>=/var/lib/mysql/slow-query.log</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="attr">long_query_time</span> = <span class="number">2</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="attr">log_queries_not_using_indexes</span> = <span class="number">1</span></span></pre></td></tr></table></figure>
+
+<p>其中，<code>slow_query_log = 1</code> 表示开启慢查询；<br><code>slow_query_log_file</code> 表示慢查询日志存放的位置；<br><code>long_query_time = 2</code> 表示查询 &gt;=2 秒才记录日志；<br><code>log_queries_not_using_indexes = 1</code> 记录没有使用索引的 SQL 语句。<br><strong>注意：<code>slow_query_log_file</code> 的路径不能随便写，否则 MySQL 服务器可能没有权限将日志文件写到指定的目录中。建议直接复制上文的路径。</strong><br>修改保存文件后，重启 MySQL 服务。在 <code>/var/lib/mysql/</code> 目录下会创建 <code>slow-query.log</code> 日志文件。连接 MySQL 服务端执行如下命令可以查看配置情况。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">show</span> <span class="keyword">variables</span> <span class="keyword">like</span> <span class="string">'slow_query%'</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">show</span> <span class="keyword">variables</span> <span class="keyword">like</span> <span class="string">'long_query_time'</span>;</span></pre></td></tr></table></figure>
+
+<p>测试慢查询日志：</p>
+<figure class="highlight asciidoc"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">mysql&gt; select sleep(2);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="code">+----------+</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">| sleep(2) |</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="code">+----------+</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">|        0 |</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="code">+----------+</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">1 row in set (2.00 sec)</span></pre></td></tr></table></figure>
+
+<p>打开慢查询日志文件</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">[<span class="symbol">root@</span>localhost mysql]# vim /var/lib/mysql/slow-query.log</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">/usr/sbin/mysqld, Version: <span class="number">5.7</span><span class="number">.19</span>-log (MySQL Community Server (GPL)). started with:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">Tcp port: <span class="number">0</span>  Unix socket: /var/lib/mysql/mysql.sock</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">Time                 Id Command    Argument</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"># Time: <span class="number">2017</span><span class="number">-10</span><span class="number">-05</span>T04:<span class="number">39</span>:<span class="number">11.408964</span>Z</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"># <span class="symbol">User@</span>Host: root[root] @ localhost []  Id:     <span class="number">3</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"># Query_time: <span class="number">2.001395</span>  Lock_time: <span class="number">0.000000</span> Rows_sent: <span class="number">1</span>  Rows_examined: <span class="number">0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">use test;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">SET timestamp=<span class="number">1507178351</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">select sleep(<span class="number">2</span>);</span></pre></td></tr></table></figure>
+
+<p>我们可以看到刚才执行了 2 秒的 SQL 语句被记录下来了。<br>虽然在慢查询日志中记录查询慢的 SQL 信息，但是日志记录的内容密集且不易查阅。因此，我们需要通过工具将 SQL 筛选出来。<br>MySQL 提供 <code>mysqldumpslow</code> 工具对日志进行分析。我们可以使用 <code>mysqldumpslow --help</code> 查看命令相关用法。<br>常用参数如下：</p>
+<figure class="highlight diff"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="deletion">-s：排序方式，后边接着如下参数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    c：访问次数</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    l：锁定时间</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    r：返回记录</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    t：查询时间</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">al：平均锁定时间</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">ar：平均返回记录书</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">at：平均查询时间</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="deletion">-t：返回前面多少条的数据</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="deletion">-g：翻遍搭配一个正则表达式，大小写不敏感</span></span></pre></td></tr></table></figure>
+
+<p>案例：</p>
+<figure class="highlight crystal"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">获取返回记录集最多的<span class="number">10</span>个sql</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">mysqldumpslow -s r -t <span class="number">10</span> /var/<span class="class"><span class="keyword">lib</span>/<span class="title">mysql</span>/<span class="title">slow</span>-<span class="title">query</span>.<span class="title">log</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">获取访问次数最多的<span class="number">10</span>个sql</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">mysqldumpslow -s c -t <span class="number">10</span> /var/<span class="class"><span class="keyword">lib</span>/<span class="title">mysql</span>/<span class="title">slow</span>-<span class="title">query</span>.<span class="title">log</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">获取按照时间排序的前<span class="number">10</span>条里面含有左连接的查询语句</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">mysqldumpslow -s t -t <span class="number">10</span> -g <span class="string">"left join"</span> /var/<span class="class"><span class="keyword">lib</span>/<span class="title">mysql</span>/<span class="title">slow</span>-<span class="title">query</span>.<span class="title">log</span></span></span></pre></td></tr></table></figure>
+
+<h2 id="五、分析-SQL-语句"><a href="#五、分析-SQL-语句" class="headerlink" title="五、分析 SQL 语句"></a>五、分析 SQL 语句</h2><h3 id="5-1-方式一：explain"><a href="#5-1-方式一：explain" class="headerlink" title="5.1 方式一：explain"></a>5.1 方式一：explain</h3><p>筛选出有问题的 SQL，我们可以使用 MySQL 提供的 <code>explain</code> 查看 SQL 执行计划情况（关联表，表查询顺序、索引使用情况等）。<br>用法：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">explain</span> <span class="keyword">select</span> * <span class="keyword">from</span> <span class="keyword">category</span>;</span></pre></td></tr></table></figure>
+
+<p>返回结果：</p>
+<figure class="highlight jboss-cli"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">mysql&gt; explain select * from category;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">+<span class="params">----</span>+<span class="params">-------------</span>+<span class="params">----------</span>+<span class="params">------------</span>+<span class="params">------</span>+<span class="params">---------------</span>+<span class="params">------</span>+<span class="params">---------</span>+<span class="params">------</span>+<span class="params">------</span>+<span class="params">----------</span>+<span class="params">-------</span>+</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">| id | select_type | table    | partitions | type | possible_keys | key  | key_len | ref  | rows | filtered | Extra |</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">+<span class="params">----</span>+<span class="params">-------------</span>+<span class="params">----------</span>+<span class="params">------------</span>+<span class="params">------</span>+<span class="params">---------------</span>+<span class="params">------</span>+<span class="params">---------</span>+<span class="params">------</span>+<span class="params">------</span>+<span class="params">----------</span>+<span class="params">-------</span>+</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">|  1 | SIMPLE      | category | NULL       | ALL  | NULL          | NULL | NULL    | NULL |    1 |   100.00 | NULL  |</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">+<span class="params">----</span>+<span class="params">-------------</span>+<span class="params">----------</span>+<span class="params">------------</span>+<span class="params">------</span>+<span class="params">---------------</span>+<span class="params">------</span>+<span class="params">---------</span>+<span class="params">------</span>+<span class="params">------</span>+<span class="params">----------</span>+<span class="params">-------</span>+</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">1 row in <span class="keyword">set</span>, 1 warning <span class="params">(0.00 sec)</span></span></pre></td></tr></table></figure>
+
+<p>字段解释：</p>
+<ol>
+<li>id：select 查询序列号。id相同，执行顺序由上至下；id不同，id值越大优先级越高，越先被执行</li>
+<li>select_type：查询数据的操作类型，其值如下：</li>
+</ol>
+<figure class="highlight crystal"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">simple：简单查询，不包含子查询或 <span class="class"><span class="keyword">union</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">primary:</span>包含复杂的子查询，最外层查询标记为该值</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">subquery：在 <span class="keyword">select</span> 或 where 包含子查询，被标记为该值</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">derived：在 from 列表中包含的子查询被标记为该值，MySQL 会递归执行这些子查询，把结果放在临时表</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">union</span>：若第二个 <span class="title">select</span> 出现在 <span class="title">union</span> 之后，则被标记为该值。若 <span class="title">union</span> 包含在 <span class="title">from</span> 的子查询中，外层 <span class="title">select</span> 被标记为 <span class="title">derived</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">union</span> <span class="title">result</span>：从 <span class="title">union</span> 表获取结果的 <span class="title">select</span></span></span></pre></td></tr></table></figure>
+
+<ol>
+<li>table：显示该行数据是关于哪张表</li>
+<li>partitions：匹配的分区</li>
+<li>type：表的连接类型，其值，性能由高到底排列如下：</li>
+</ol>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">system</span>：表只有一行记录，相当于系统表</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">const：通过索引一次就找到，只匹配一行数据</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">eq_ref：唯一性索引扫描，对于每个索引键，表中只有一条记录与之匹配。常用于主键或唯一索引扫描</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">ref</span>：非唯一性索引扫描，返回匹配某个单独值的所有行。用于=、&lt; 或 &gt; 操作符带索引的列</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">range：只检索给定范围的行，使用一个索引来选择行。一般使用<span class="keyword">between</span>、&gt;、&lt;情况</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">index</span>：只遍历索引树</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">ALL</span>：全表扫描，性能最差</span></pre></td></tr></table></figure>
+
+<p><strong>注：前5种情况都是理想情况的索引使用情况。通常优化至少到range级别，最好能优化到 ref</strong></p>
+<ol>
+<li>possible_keys：指出 MySQL 使用哪个索引在该表找到行记录。如果该值为 NULL，说明没有使用索引，可以建立索引提高性能</li>
+<li>key：显示 MySQL 实际使用的索引。如果为 NULL，则没有使用索引查询</li>
+<li>key_len：表示索引中使用的字节数，通过该列计算查询中使用的索引的长度。在不损失精确性的情况下，长度越短越好 显示的是索引字段的最大长度，并非实际使用长度</li>
+<li>ref：显示该表的索引字段关联了哪张表的哪个字段</li>
+<li>rows：根据表统计信息及选用情况，大致估算出找到所需的记录或所需读取的行数，数值越小越好</li>
+<li>filtered：返回结果的行数占读取行数的百分比，值越大越好</li>
+<li>extra： 包含不合适在其他列中显示但十分重要的额外信息，常见的值如下：</li>
+</ol>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">using</span> filesort：说明 MySQL 会对数据使用一个外部的索引排序，而不是按照表内的索引顺序进行读取。出现该值，应该优化 <span class="keyword">SQL</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">using</span> <span class="keyword">temporary</span>：使用了临时表保存中间结果，MySQL 在对查询结果排序时使用临时表。常见于排序 <span class="keyword">order</span> <span class="keyword">by</span> 和分组查询 <span class="keyword">group</span> <span class="keyword">by</span>。出现该值，应该优化 <span class="keyword">SQL</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">using</span> <span class="keyword">index</span>：表示相应的 <span class="keyword">select</span> 操作使用了覆盖索引，避免了访问表的数据行，效率不错</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">using</span> <span class="keyword">where</span>：<span class="keyword">where</span> 子句用于限制哪一行</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">using</span> <span class="keyword">join</span> buffer：使用连接缓存</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">distinct</span>：发现第一个匹配后，停止为当前的行组合搜索更多的行</span></pre></td></tr></table></figure>
+
+<p><strong>注意：出现前 2 个值，SQL 语句必须要优化。</strong></p>
+<h3 id="5-2-方式二：profiling"><a href="#5-2-方式二：profiling" class="headerlink" title="5.2 方式二：profiling"></a>5.2 方式二：profiling</h3><p>使用 <code>profiling</code> 命令可以了解 SQL 语句消耗资源的详细信息（每个执行步骤的开销）。</p>
+<h4 id="5-2-1-查看-profile-开启情况"><a href="#5-2-1-查看-profile-开启情况" class="headerlink" title="5.2.1 查看 profile 开启情况"></a>5.2.1 查看 profile 开启情况</h4><figure class="highlight autoit"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">select</span> @<span class="symbol">@profiling</span><span class="comment">;</span></span></pre></td></tr></table></figure>
+
+<p>返回结果：</p>
+<figure class="highlight asciidoc"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">mysql&gt; select @@profiling;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="code">+-------------+</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">| @@profiling |</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="code">+-------------+</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">|           0 |</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="code">+-------------+</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">1 row in set, 1 warning (0.00 sec)</span></pre></td></tr></table></figure>
+
+<p>0 表示关闭状态,1 表示开启</p>
+<h4 id="5-2-2-启用-profile"><a href="#5-2-2-启用-profile" class="headerlink" title="5.2.2 启用 profile"></a>5.2.2 启用 profile</h4><figure class="highlight gams"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">set</span> profiling <span class="comment">= 1</span>;</span></pre></td></tr></table></figure>
+
+<p>返回结果：</p>
+<figure class="highlight asciidoc"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">mysql&gt; set profiling = 1;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">Query OK, 0 rows affected, 1 warning (0.00 sec)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">mysql&gt; select @@profiling;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="code">+-------------+</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">| @@profiling |</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="code">+-------------+</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">|           1 |</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="code">+-------------+</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">1 row in set, 1 warning (0.00 sec)</span></pre></td></tr></table></figure>
+
+<p>在连接关闭后，profiling 状态自动设置为关闭状态。</p>
+<h4 id="5-2-3-查看执行的-SQL-列表"><a href="#5-2-3-查看执行的-SQL-列表" class="headerlink" title="5.2.3 查看执行的 SQL 列表"></a>5.2.3 查看执行的 SQL 列表</h4><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">show</span> <span class="keyword">profiles</span>;</span></pre></td></tr></table></figure>
+
+<p>返回结果：</p>
+<figure class="highlight gherkin"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">mysql&gt; show profiles;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">+----------+------------+------------------------------+</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> Query_ID </span>|<span class="string"> Duration   </span>|<span class="string"> Query                        </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">+----------+------------+------------------------------+</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">|<span class="string">        1 </span>|<span class="string"> 0.00062925 </span>|<span class="string"> select @@profiling           </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">|<span class="string">        2 </span>|<span class="string"> 0.00094150 </span>|<span class="string"> show tables                  </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">|<span class="string">        3 </span>|<span class="string"> 0.00119125 </span>|<span class="string"> show databases               </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">|<span class="string">        4 </span>|<span class="string"> 0.00029750 </span>|<span class="string"> SELECT DATABASE()            </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">|<span class="string">        5 </span>|<span class="string"> 0.00025975 </span>|<span class="string"> show databases               </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">|<span class="string">        6 </span>|<span class="string"> 0.00023050 </span>|<span class="string"> show tables                  </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">|<span class="string">        7 </span>|<span class="string"> 0.00042000 </span>|<span class="string"> show tables                  </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">|<span class="string">        8 </span>|<span class="string"> 0.00260675 </span>|<span class="string"> desc role                    </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">|<span class="string">        9 </span>|<span class="string"> 0.00074900 </span>|<span class="string"> select name,is_key from role </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">+----------+------------+------------------------------+</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">9 rows in set, 1 warning (0.00 sec)</span></pre></td></tr></table></figure>
+
+<p>该命令执行之前，需要执行其他 SQL 语句才有记录。</p>
+<h4 id="5-2-4-查询指定-ID-的执行详细信息"><a href="#5-2-4-查询指定-ID-的执行详细信息" class="headerlink" title="5.2.4 查询指定 ID 的执行详细信息"></a>5.2.4 查询指定 ID 的执行详细信息</h4><figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">show<span class="built_in"> profile </span><span class="keyword">for</span> query Query_ID;</span></pre></td></tr></table></figure>
+
+<p>返回结果：</p>
+<figure class="highlight gherkin"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">mysql&gt; show profile for query 9;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">+----------------------+----------+</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> Status               </span>|<span class="string"> Duration </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">+----------------------+----------+</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> starting             </span>|<span class="string"> 0.000207 </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> checking permissions </span>|<span class="string"> 0.000010 </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> Opening tables       </span>|<span class="string"> 0.000042 </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> init                 </span>|<span class="string"> 0.000050 </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> System lock          </span>|<span class="string"> 0.000012 </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> optimizing           </span>|<span class="string"> 0.000003 </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> statistics           </span>|<span class="string"> 0.000011 </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> preparing            </span>|<span class="string"> 0.000011 </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> executing            </span>|<span class="string"> 0.000002 </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> Sending data         </span>|<span class="string"> 0.000362 </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> end                  </span>|<span class="string"> 0.000006 </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> query end            </span>|<span class="string"> 0.000006 </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> closing tables       </span>|<span class="string"> 0.000006 </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> freeing items        </span>|<span class="string"> 0.000011 </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">|<span class="string"> cleaning up          </span>|<span class="string"> 0.000013 </span>|</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">+----------------------+----------+</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">15 rows in set, 1 warning (0.00 sec)</span></pre></td></tr></table></figure>
+
+<p>每行都是状态变化的过程以及它们持续的时间。Status 这一列和 <code>show processlist</code> 的 State 是一致的。因此，需要优化的注意点与上文描述的一样。<br>其中，Status 字段的值同样可以参考末尾链接。</p>
+<h4 id="5-2-5-获取-CPU、-Block-IO-等信息"><a href="#5-2-5-获取-CPU、-Block-IO-等信息" class="headerlink" title="5.2.5 获取 CPU、 Block IO 等信息"></a>5.2.5 获取 CPU、 Block IO 等信息</h4><figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">show<span class="built_in"> profile </span>block io,cpu <span class="keyword">for</span> query Query_ID;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">show<span class="built_in"> profile </span>cpu,block io,memory,swaps,context switches,source <span class="keyword">for</span> query Query_ID;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">show<span class="built_in"> profile </span>all <span class="keyword">for</span> query Query_ID;</span></pre></td></tr></table></figure>
+
+<h2 id="六、优化手段"><a href="#六、优化手段" class="headerlink" title="六、优化手段"></a>六、优化手段</h2><p>主要以查询优化、索引使用和表结构设计方面进行讲解。</p>
+<h3 id="6-1-查询优化"><a href="#6-1-查询优化" class="headerlink" title="6.1 查询优化"></a>6.1 查询优化</h3><ol>
+<li>避免 SELECT *，需要什么数据，就查询对应的字段。</li>
+<li>小表驱动大表，即小的数据集驱动大的数据集。如：以 A，B 两表为例，两表通过 id 字段进行关联。</li>
+</ol>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">当 B 表的数据集小于 A 表时，用 in 优化 exist；使用 in ，两表执行顺序是先查 B 表，再查 A 表</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">select</span> * <span class="keyword">from</span> A <span class="keyword">where</span> <span class="keyword">id</span> <span class="keyword">in</span> (<span class="keyword">select</span> <span class="keyword">id</span> <span class="keyword">from</span> B)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">当 A 表的数据集小于 B 表时，用 exist 优化 <span class="keyword">in</span>；使用 <span class="keyword">exists</span>，两表执行顺序是先查 A 表，再查 B 表</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">select</span> * <span class="keyword">from</span> A <span class="keyword">where</span> <span class="keyword">exists</span> (<span class="keyword">select</span> <span class="number">1</span> <span class="keyword">from</span> B <span class="keyword">where</span> B.id = A.id)</span></pre></td></tr></table></figure>
+
+<ol>
+<li>一些情况下，可以使用连接代替子查询，因为使用 join，MySQL 不会在内存中创建临时表。</li>
+<li>适当添加冗余字段，减少表关联。</li>
+<li>合理使用索引（下文介绍）。如：为排序、分组字段建立索引，避免 filesort 的出现。</li>
+</ol>
+<h3 id="6-2-索引使用"><a href="#6-2-索引使用" class="headerlink" title="6.2 索引使用"></a>6.2 索引使用</h3><h4 id="6-2-1-适合使用索引的场景"><a href="#6-2-1-适合使用索引的场景" class="headerlink" title="6.2.1 适合使用索引的场景"></a>6.2.1 适合使用索引的场景</h4><ol>
+<li>主键自动创建唯一索引</li>
+<li>频繁作为查询条件的字段</li>
+<li>查询中与其他表关联的字段</li>
+<li>查询中排序的字段</li>
+<li>查询中统计或分组字段</li>
+</ol>
+<h4 id="6-2-2-不适合使用索引的场景"><a href="#6-2-2-不适合使用索引的场景" class="headerlink" title="6.2.2 不适合使用索引的场景"></a>6.2.2 不适合使用索引的场景</h4><ol>
+<li>频繁更新的字段</li>
+<li>where 条件中用不到的字段</li>
+<li>表记录太少</li>
+<li>经常增删改的表</li>
+<li>字段的值的差异性不大或重复性高</li>
+</ol>
+<h4 id="6-2-3-索引创建和使用原则"><a href="#6-2-3-索引创建和使用原则" class="headerlink" title="6.2.3 索引创建和使用原则"></a>6.2.3 索引创建和使用原则</h4><ol>
+<li>单表查询：哪个列作查询条件，就在该列创建索引</li>
+<li>多表查询：left join 时，索引添加到右表关联字段；right join 时，索引添加到左表关联字段</li>
+<li>不要对索引列进行任何操作（计算、函数、类型转换）</li>
+<li>索引列中不要使用 !=，&lt;&gt; 非等于</li>
+<li>索引列不要为空，且不要使用 is null 或 is not null 判断</li>
+<li>索引字段是字符串类型，查询条件的值要加’’单引号,避免底层类型自动转换</li>
+</ol>
+<p><strong>违背上述原则可能会导致索引失效，具体情况需要使用 explain 命令进行查看</strong></p>
+<h4 id="6-2-4-索引失效情况"><a href="#6-2-4-索引失效情况" class="headerlink" title="6.2.4 索引失效情况"></a>6.2.4 索引失效情况</h4><p>除了违背索引创建和使用原则外，如下情况也会导致索引失效：</p>
+<ol>
+<li>模糊查询时，以 % 开头</li>
+<li>使用 or 时，如：字段1（非索引）or 字段2（索引）会导致索引失效。</li>
+<li>使用复合索引时，不使用第一个索引列。</li>
+</ol>
+<p>index(a,b,c) ，以字段 a,b,c 作为复合索引为例：</p>
+<table>
+<thead>
+<tr>
+<th>语句</th>
+<th>索引是否生效</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>where a = 1</td>
+<td>是，字段 a 索引生效</td>
+</tr>
+<tr>
+<td>where a = 1 and b = 2</td>
+<td>是，字段 a 和 b 索引生效</td>
+</tr>
+<tr>
+<td>where a = 1 and b = 2 and c = 3</td>
+<td>是，全部生效</td>
+</tr>
+<tr>
+<td>where b = 2 或 where c = 3</td>
+<td>否</td>
+</tr>
+<tr>
+<td>where a = 1 and c = 3</td>
+<td>字段 a 生效，字段 c 失效</td>
+</tr>
+<tr>
+<td>where a = 1 and b &gt; 2 and c = 3</td>
+<td>字段 a，b 生效，字段 c 失效</td>
+</tr>
+<tr>
+<td>where a = 1 and b like ‘xxx%’ and c = 3</td>
+<td>字段 a，b 生效，字段 c 失效</td>
+</tr>
+</tbody></table>
+<h3 id="6-3-数据库表结构设计"><a href="#6-3-数据库表结构设计" class="headerlink" title="6.3 数据库表结构设计"></a>6.3 数据库表结构设计</h3><h4 id="6-3-1-选择合适的数据类型"><a href="#6-3-1-选择合适的数据类型" class="headerlink" title="6.3.1 选择合适的数据类型"></a>6.3.1 选择合适的数据类型</h4><ol>
+<li>使用可以存下数据最小的数据类型</li>
+<li>使用简单的数据类型。int 要比 varchar 类型在mysql处理简单</li>
+<li>尽量使用 tinyint、smallint、mediumint 作为整数类型而非 int</li>
+<li>尽可能使用 not null 定义字段，因为 null 占用4字节空间</li>
+<li>尽量少用 text 类型,非用不可时最好考虑分表</li>
+<li>尽量使用 timestamp 而非 datetime</li>
+<li>单表不要有太多字段，建议在 20 以内</li>
+</ol>
+<h4 id="6-3-2-表的拆分"><a href="#6-3-2-表的拆分" class="headerlink" title="6.3.2 表的拆分"></a>6.3.2 表的拆分</h4><p>当数据库中的数据非常大时，查询优化方案也不能解决查询速度慢的问题时，我们可以考虑拆分表，让每张表的数据量变小，从而提高查询效率。</p>
+<ol>
+<li>垂直拆分：将表中多个列分开放到不同的表中。例如用户表中一些字段经常被访问，将这些字段放在一张表中，另外一些不常用的字段放在另一张表中。 插入数据时，使用事务确保两张表的数据一致性。</li>
+<li>水平拆分：按照行进行拆分。例如用户表中，使用用户ID，对用户ID取10的余数，将用户数据均匀的分配到0~9的10个用户表中。查找时也按照这个规则查询数据。</li>
+</ol>
+<h4 id="6-3-3-读写分离"><a href="#6-3-3-读写分离" class="headerlink" title="6.3.3 读写分离"></a>6.3.3 读写分离</h4><p>一般情况下对数据库而言都是“读多写少”。换言之，数据库的压力多数是因为大量的读取数据的操作造成的。我们可以采用数据库集群的方案，使用一个库作为主库，负责写入数据；其他库为从库，负责读取数据。这样可以缓解对数据库的访问压力。</p>
+<h2 id="七、服务器参数调优"><a href="#七、服务器参数调优" class="headerlink" title="七、服务器参数调优"></a>七、服务器参数调优</h2><h3 id="7-1-内存相关"><a href="#7-1-内存相关" class="headerlink" title="7.1 内存相关"></a>7.1 内存相关</h3><p>sort_buffer_size 排序缓冲区内存大小<br>join_buffer_size 使用连接缓冲区大小<br>read_buffer_size 全表扫描时分配的缓冲区大小</p>
+<h3 id="7-2-IO-相关"><a href="#7-2-IO-相关" class="headerlink" title="7.2 IO 相关"></a>7.2 IO 相关</h3><p>Innodb_log_file_size 事务日志大小<br>Innodb_log_files_in_group 事务日志个数<br>Innodb_log_buffer_size 事务日志缓冲区大小<br>Innodb_flush_log_at_trx_commit 事务日志刷新策略，其值如下：<br>0：每秒进行一次 log 写入 cache，并 flush log 到磁盘<br>1：在每次事务提交执行 log 写入 cache，并 flush log 到磁盘<br>2：每次事务提交，执行 log 数据写到 cache，每秒执行一次 flush log 到磁盘</p>
+<h3 id="7-3-安全相关"><a href="#7-3-安全相关" class="headerlink" title="7.3 安全相关"></a>7.3 安全相关</h3><p>expire_logs_days 指定自动清理 binlog 的天数<br>max_allowed_packet 控制 MySQL 可以接收的包的大小<br>skip_name_resolve 禁用 DNS 查找<br>read_only 禁止非 super 权限用户写权限<br>skip_slave_start 级你用 slave 自动恢复</p>
+<h3 id="7-4-其他"><a href="#7-4-其他" class="headerlink" title="7.4 其他"></a>7.4 其他</h3><p>max_connections 控制允许的最大连接数<br>tmp_table_size 临时表大小<br>max_heap_table_size 最大内存表大小<br><strong>笔者并没有使用这些参数对 MySQL 服务器进行调优，具体详情介绍和性能效果请参考文章末尾的资料或另行百度。</strong></p>
+<h2 id="八、硬件选购和参数优化"><a href="#八、硬件选购和参数优化" class="headerlink" title="八、硬件选购和参数优化"></a>八、硬件选购和参数优化</h2><p>硬件的性能直接决定 MySQL 数据库的性能瓶颈，直接决定 MySQL 数据库的运行数据和效率。<br><strong>作为软件开发程序员，我们主要关注软件方面的优化内容，以下硬件方面的优化作为了解即可</strong></p>
+<h3 id="8-1-内存相关"><a href="#8-1-内存相关" class="headerlink" title="8.1 内存相关"></a>8.1 内存相关</h3><p>内存的 IO 比硬盘的速度快很多，可以增加系统的缓冲区容量，使数据在内存停留的时间更长，以减少磁盘的 IO</p>
+<h3 id="8-2-磁盘-I-O-相关"><a href="#8-2-磁盘-I-O-相关" class="headerlink" title="8.2 磁盘 I/O 相关"></a>8.2 磁盘 I/O 相关</h3><ol>
+<li>使用 SSD 或 PCle SSD 设备，至少获得数百倍甚至万倍的 IOPS 提升</li>
+<li>购置阵列卡同时配备 CACHE 及 BBU 模块，可以明显提升 IOPS</li>
+<li>尽可能选用 RAID-10，而非 RAID-5</li>
+</ol>
+<h3 id="8-3-配置-CUP-相关"><a href="#8-3-配置-CUP-相关" class="headerlink" title="8.3 配置 CUP 相关"></a>8.3 配置 CUP 相关</h3><p>在服务器的 BIOS 设置中，调整如下配置：</p>
+<ol>
+<li>选择 Performance Per Watt Optimized（DAPC）模式，发挥 CPU 最大性能</li>
+<li>关闭 C1E 和 C States 等选项，提升 CPU 效率</li>
+<li>Memory Frequency（内存频率）选择 Maximum Performance</li>
+</ol>
+<h2 id="九、参考资料"><a href="#九、参考资料" class="headerlink" title="九、参考资料"></a>九、参考资料</h2><ul>
+<li><a href="https://dev.mysql.com/doc/refman/5.7/en/show-status.html" target="_blank" rel="noopener">https://dev.mysql.com/doc/refman/5.7/en/show-status.html</a> show status 语法</li>
+<li><a href="https://dev.mysql.com/doc/refman/5.7/en/show-processlist.html" target="_blank" rel="noopener">https://dev.mysql.com/doc/refman/5.7/en/show-processlist.html</a> show processlist 语法</li>
+<li><a href="https://dev.mysql.com/doc/refman/5.7/en/general-thread-states.html" target="_blank" rel="noopener">https://dev.mysql.com/doc/refman/5.7/en/general-thread-states.html</a> 线程状态</li>
+<li><a href="https://dev.mysql.com/doc/refman/5.7/en/explain-output.html" target="_blank" rel="noopener">https://dev.mysql.com/doc/refman/5.7/en/explain-output.html</a> explain 语法</li>
+<li><a href="https://dev.mysql.com/doc/refman/5.7/en/show-profile.html" target="_blank" rel="noopener">https://dev.mysql.com/doc/refman/5.7/en/show-profile.html</a> show profile 语法</li>
+<li><a href="http://blog.csdn.net/nightelve/article/details/17393631" target="_blank" rel="noopener">http://blog.csdn.net/nightelve/article/details/17393631</a> MySQL 服务器参数调优</li>
+<li><a href="http://blog.csdn.net/qq_22929803/article/details/51237056" target="_blank" rel="noopener">http://blog.csdn.net/qq_22929803/article/details/51237056</a> MySQL 服务器参数调优</li>
+<li><a href="http://blog.chinaunix.net/uid-11640640-id-3426908.html" target="_blank" rel="noopener">http://blog.chinaunix.net/uid-11640640-id-3426908.html</a></li>
+<li><a href="https://segmentfault.com/a/1190000006158186" target="_blank" rel="noopener">https://segmentfault.com/a/1190000006158186</a></li>
+<li><a href="http://blog.csdn.net/gzh0222/article/details/7976127" target="_blank" rel="noopener">http://blog.csdn.net/gzh0222/article/details/7976127</a></li>
+</ul>
+<blockquote>
+<p>作者：月光中的污点</p>
+<p>来源：<a href="https://www.extlight.com/2017/10/07/MySQL-%E6%80%A7%E8%83%BD%E4%BC%98%E5%8C%96%E6%8A%80%E5%B7%A7/" target="_blank" rel="noopener">https://www.extlight.com/2017/10/07/MySQL-%E6%80%A7%E8%83%BD%E4%BC%98%E5%8C%96%E6%8A%80%E5%B7%A7/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/27/Java-%E8%AE%BE%E8%AE%A1%E6%A8%A1%E5%BC%8F%EF%BC%8816%EF%BC%89%EF%BC%9A%E8%A7%82%E5%AF%9F%E8%80%85%E6%A8%A1%E5%BC%8F/" rel="prev" title="Java 设计模式（16）：观察者模式">
+      <i class="fa fa-chevron-left"></i> Java 设计模式（16）：观察者模式
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/27/Nginx-%E5%BF%AB%E9%80%9F%E5%85%A5%E9%97%A8/" rel="next" title="Nginx 快速入门">
+      Nginx 快速入门 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#一、背景"><span class="nav-number">1.</span> <span class="nav-text">一、背景</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#二、优化思路"><span class="nav-number">2.</span> <span class="nav-text">二、优化思路</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#三、查看-MySQL-服务器运行的状态值"><span class="nav-number">3.</span> <span class="nav-text">三、查看 MySQL 服务器运行的状态值</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#四、获取需要优化的-SQL-语句"><span class="nav-number">4.</span> <span class="nav-text">四、获取需要优化的 SQL 语句</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#4-1-方式一：查看运行的线程"><span class="nav-number">4.1.</span> <span class="nav-text">4.1 方式一：查看运行的线程</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#4-2-方式二：开启慢查询日志"><span class="nav-number">4.2.</span> <span class="nav-text">4.2 方式二：开启慢查询日志</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#五、分析-SQL-语句"><span class="nav-number">5.</span> <span class="nav-text">五、分析 SQL 语句</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#5-1-方式一：explain"><span class="nav-number">5.1.</span> <span class="nav-text">5.1 方式一：explain</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#5-2-方式二：profiling"><span class="nav-number">5.2.</span> <span class="nav-text">5.2 方式二：profiling</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#5-2-1-查看-profile-开启情况"><span class="nav-number">5.2.1.</span> <span class="nav-text">5.2.1 查看 profile 开启情况</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#5-2-2-启用-profile"><span class="nav-number">5.2.2.</span> <span class="nav-text">5.2.2 启用 profile</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#5-2-3-查看执行的-SQL-列表"><span class="nav-number">5.2.3.</span> <span class="nav-text">5.2.3 查看执行的 SQL 列表</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#5-2-4-查询指定-ID-的执行详细信息"><span class="nav-number">5.2.4.</span> <span class="nav-text">5.2.4 查询指定 ID 的执行详细信息</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#5-2-5-获取-CPU、-Block-IO-等信息"><span class="nav-number">5.2.5.</span> <span class="nav-text">5.2.5 获取 CPU、 Block IO 等信息</span></a></li></ol></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#六、优化手段"><span class="nav-number">6.</span> <span class="nav-text">六、优化手段</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#6-1-查询优化"><span class="nav-number">6.1.</span> <span class="nav-text">6.1 查询优化</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#6-2-索引使用"><span class="nav-number">6.2.</span> <span class="nav-text">6.2 索引使用</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#6-2-1-适合使用索引的场景"><span class="nav-number">6.2.1.</span> <span class="nav-text">6.2.1 适合使用索引的场景</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#6-2-2-不适合使用索引的场景"><span class="nav-number">6.2.2.</span> <span class="nav-text">6.2.2 不适合使用索引的场景</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#6-2-3-索引创建和使用原则"><span class="nav-number">6.2.3.</span> <span class="nav-text">6.2.3 索引创建和使用原则</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#6-2-4-索引失效情况"><span class="nav-number">6.2.4.</span> <span class="nav-text">6.2.4 索引失效情况</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#6-3-数据库表结构设计"><span class="nav-number">6.3.</span> <span class="nav-text">6.3 数据库表结构设计</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#6-3-1-选择合适的数据类型"><span class="nav-number">6.3.1.</span> <span class="nav-text">6.3.1 选择合适的数据类型</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#6-3-2-表的拆分"><span class="nav-number">6.3.2.</span> <span class="nav-text">6.3.2 表的拆分</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#6-3-3-读写分离"><span class="nav-number">6.3.3.</span> <span class="nav-text">6.3.3 读写分离</span></a></li></ol></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#七、服务器参数调优"><span class="nav-number">7.</span> <span class="nav-text">七、服务器参数调优</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#7-1-内存相关"><span class="nav-number">7.1.</span> <span class="nav-text">7.1 内存相关</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#7-2-IO-相关"><span class="nav-number">7.2.</span> <span class="nav-text">7.2 IO 相关</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#7-3-安全相关"><span class="nav-number">7.3.</span> <span class="nav-text">7.3 安全相关</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#7-4-其他"><span class="nav-number">7.4.</span> <span class="nav-text">7.4 其他</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#八、硬件选购和参数优化"><span class="nav-number">8.</span> <span class="nav-text">八、硬件选购和参数优化</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#8-1-内存相关"><span class="nav-number">8.1.</span> <span class="nav-text">8.1 内存相关</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#8-2-磁盘-I-O-相关"><span class="nav-number">8.2.</span> <span class="nav-text">8.2 磁盘 I/O 相关</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#8-3-配置-CUP-相关"><span class="nav-number">8.3.</span> <span class="nav-text">8.3 配置 CUP 相关</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#九、参考资料"><span class="nav-number">9.</span> <span class="nav-text">九、参考资料</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">289</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">65</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">85</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="Session管理是JavaEE容器比较重要的一部分，在app中也经常会用到。在开发app时，我们只是获取一个session，然后向session中存取数据，然后再销毁session。那么如何产生session，以及session池如何维护及管理，这些并没有在app涉及到。这些工作都是由容器来完成的。Tomcat中主要由每个context容器内的一个Manager对象来管理session。对于这个">
+<meta property="og:type" content="article">
+<meta property="og:title" content="tomcat架构分析：Session管理">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;27&#x2F;tomcat%E6%9E%B6%E6%9E%84%E5%88%86%E6%9E%90%EF%BC%9ASession%E7%AE%A1%E7%90%86&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="Session管理是JavaEE容器比较重要的一部分，在app中也经常会用到。在开发app时，我们只是获取一个session，然后向session中存取数据，然后再销毁session。那么如何产生session，以及session池如何维护及管理，这些并没有在app涉及到。这些工作都是由容器来完成的。Tomcat中主要由每个context容器内的一个Manager对象来管理session。对于这个">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190910104348-1ffd0.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190910104349-d49f3.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190910104349-abf11.jpeg">
+<meta property="og:updated_time" content="2019-12-27T08:17:01.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190910104348-1ffd0.jpeg">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/27/tomcat%E6%9E%B6%E6%9E%84%E5%88%86%E6%9E%90%EF%BC%9ASession%E7%AE%A1%E7%90%86/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>tomcat架构分析：Session管理 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">85</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">65</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">289</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/27/tomcat%E6%9E%B6%E6%9E%84%E5%88%86%E6%9E%90%EF%BC%9ASession%E7%AE%A1%E7%90%86/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          tomcat架构分析：Session管理
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-27 16:17:01" itemprop="dateCreated datePublished" datetime="2019-12-27T16:17:01+08:00">2019-12-27</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/Tomcat/" itemprop="url" rel="index">
+                    <span itemprop="name">Tomcat</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>Session管理是JavaEE容器比较重要的一部分，在app中也经常会用到。在开发app时，我们只是获取一个session，然后向session中存取数据，然后再销毁session。那么如何产生session，以及session池如何维护及管理，这些并没有在app涉及到。这些工作都是由容器来完成的。<br>Tomcat中主要由每个context容器内的一个<code>Manager</code>对象来管理session。对于这个<code>manager</code>对象的实现，可以根据tomcat提供的接口或基类来自己定制，同时，tomcat也提供了标准实现。</p>
+<a id="more"></a>
+
+<p>在tomcat架构分析(容器类)中已经介绍过，在每个<code>context</code>对象，即web app都具有一个独立的<code>manager</code>对象。通过<code>server.xml</code>可以配置定制化的<code>manager</code>，也可以不配置。不管怎样，在生成<code>context</code>对象时，都会生成一个<code>manager</code>对象。缺省的是<code>StandardManager</code>类，其类路径为：</p>
+<figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">org</span><span class="selector-class">.apache</span><span class="selector-class">.catalina</span><span class="selector-class">.session</span><span class="selector-class">.StandardManager</span></span></pre></td></tr></table></figure>
+
+<p><code>Session</code>对象也可以定制化实现，其主要实现标准servlet的session接口：</p>
+<figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">javax</span><span class="selector-class">.servlet</span><span class="selector-class">.http</span><span class="selector-class">.HttpSession</span></span></pre></td></tr></table></figure>
+
+<p>Tomcat也提供了标准的session实现：</p>
+<figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">org</span><span class="selector-class">.apache</span><span class="selector-class">.catalina</span><span class="selector-class">.session</span><span class="selector-class">.StandardSession</span></span></pre></td></tr></table></figure>
+
+<p>本文主要就是结合消息流程介绍这两个类的实现，及session机制。<br>Session方面牵涉的东西还是蛮多的，例如HA，session复制是其中重要部分等，不过本篇主要从功能方面介绍session管理，有时间再说说扩展。<br>Session管理主要涉及到这几个方面：</p>
+<ul>
+<li>创建session</li>
+<li>注销session</li>
+<li>持久化及启动加载session</li>
+</ul>
+<h2 id="创建session"><a href="#创建session" class="headerlink" title="创建session"></a><strong>创建session</strong></h2><p>在具体说明session的创建过程之前，先看一下BS访问模型吧，这样理解直观一点。 <img src="http://image.winrains.cn/2019/09/20190910104348-1ffd0.jpeg" alt="img"></p>
+<ol>
+<li>browser发送Http request；</li>
+<li>tomcat内核Http11Processor会从HTTP request中解析出“jsessionid”(具体的解析过程为先从request的URL中解析，这是为了有的浏览器把cookie功能禁止后，将URL重写考虑的，如果解析不出来，再从cookie中解析相应的jsessionid)，解析完后封装成一个request对象(当然还有其他的http header)；</li>
+<li>servlet中获取session，其过程是根据刚才解析得到的<code>jsessionid</code>(如果有的话)，从session池(session maps)中获取相应的session对象；这个地方有个逻辑，就是如果<code>jsessionid</code>为空的话(或者没有其对应的session对象，或者有session对象，但此对象已经过期超时)，可以选择创建一个session，或者不创建；</li>
+<li>如果创建新session，则将session放入session池中，同时将与其相对应的<code>jsessionid</code>写入cookie通过Http response header的方式发送给browser，然后重复第一步。</li>
+</ol>
+<p>以上是session的获取及创建过程。在servlet中获取session，通常是调用request的getSession方法。这个方法需要传入一个boolean参数，这个参数就是实现刚才说的，当<code>jsessionid</code>为空或从session池中获取不到相应的session对象时，选择创建一个新的session还是不创建。<br>看一下核心代码逻辑；</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">protected <span class="keyword">Session</span> doGetSession(<span class="type">boolean</span> <span class="keyword">create</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    ……</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    // 先获取所在context的manager对象</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    Manager manager = <span class="keyword">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (context != <span class="keyword">null</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        manager = context.getManager();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (manager == <span class="keyword">null</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> (<span class="keyword">null</span>);      // Sessions are <span class="keyword">not</span> supported</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    //这个requestedSessionId就是从Http request中解析出来的</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (requestedSessionId != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        try &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">            //manager管理的<span class="keyword">session</span>池中找相应的<span class="keyword">session</span>对象</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">session</span> = manager.findSession(requestedSessionId);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        &#125; catch (IOException e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">session</span> = <span class="keyword">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        //判断<span class="keyword">session</span>是否为空及是否过期超时</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> ((<span class="keyword">session</span> != <span class="keyword">null</span>) &amp;&amp; !<span class="keyword">session</span>.isValid())</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">session</span> = <span class="keyword">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (<span class="keyword">session</span> != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">            //<span class="keyword">session</span>对象有效，记录此次访问时间</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">session</span>.<span class="keyword">access</span>();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">return</span> (<span class="keyword">session</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    // 如果参数是<span class="keyword">false</span>，则不创建新<span class="keyword">session</span>对象了，直接退出了</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (!<span class="keyword">create</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> (<span class="keyword">null</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> ((context != <span class="keyword">null</span>) &amp;&amp; (response != <span class="keyword">null</span>) &amp;&amp;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">        context.getCookies() &amp;&amp;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        response.getResponse().isCommitted()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">        throw <span class="built_in">new</span> IllegalStateException</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">          (sm.getString("coyoteRequest.sessionCreateCommitted"));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">    // 开始创建新<span class="keyword">session</span>对象</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (connector.getEmptySessionPath()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">            &amp;&amp; isRequestedSessionIdFromCookie()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">session</span> = manager.createSession(getRequestedSessionId());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">    &#125; <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">session</span> = manager.createSession(<span class="keyword">null</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">    // 将新<span class="keyword">session</span>的jsessionid写入cookie，传给browser</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> ((<span class="keyword">session</span> != <span class="keyword">null</span>) &amp;&amp; (getContext() != <span class="keyword">null</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line">           &amp;&amp; getContext().getCookies()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line">        Cookie cookie = <span class="built_in">new</span> Cookie(Globals.SESSION_COOKIE_NAME,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line">                                   <span class="keyword">session</span>.getIdInternal());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line">        configureSessionCookie(cookie);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line">        response.addCookieInternal(cookie);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">49</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">50</span></pre></td><td class="code"><pre><span class="line">    //记录<span class="keyword">session</span>最新访问时间</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">51</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (<span class="keyword">session</span> != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">52</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">session</span>.<span class="keyword">access</span>();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">53</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> (<span class="keyword">session</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">54</span></pre></td><td class="code"><pre><span class="line">    &#125; <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">55</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> (<span class="keyword">null</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">56</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">57</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>尽管不能贴出所有代码，但是上述的核心逻辑还是很清晰的。从中也可以看出，我们经常在servlet中这两种调用方式的不同；<br>新创建session</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">request.get<span class="constructor">Session()</span>; 或者request.get<span class="constructor">Session(<span class="params">true</span>)</span>;</span></pre></td></tr></table></figure>
+
+<p>不创建session</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">request.get<span class="constructor">Session(<span class="params">false</span>)</span>;</span></pre></td></tr></table></figure>
+
+<p>接下来，看一下<code>StandardManager</code>的<code>createSession</code>方法，了解一下session的创建过程；</p>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> Session <span class="title">createSession</span><span class="params">(<span class="keyword">String</span> sessionId)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//这是个session数量控制逻辑，超过上限则抛异常退出</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> ((maxActiveSessions &gt;= <span class="number">0</span>) &amp;&amp;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        (sessions.<span class="built_in">size</span>() &gt;= maxActiveSessions)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        rejectedSessions++;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> IllegalStateException</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            (sm.getString(<span class="string">"standardManager.createSession.ise"</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> (super.createSession(sessionId));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>这个最大支持session数量<code>maxActiveSessions</code>是可以配置的，先不管这个安全控制逻辑，看其主逻辑，即调用其基类的<code>createSession</code>方法；</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public Session create<span class="constructor">Session(String <span class="params">sessionId</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 创建一个新的StandardSession对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    Session session = create<span class="constructor">EmptySession()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// Initialize the properties of the new session and return it</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    session.set<span class="constructor">New(<span class="params">true</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    session.set<span class="constructor">Valid(<span class="params">true</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    session.set<span class="constructor">CreationTime(System.<span class="params">currentTimeMillis</span>()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    session.set<span class="constructor">MaxInactiveInterval(<span class="params">this</span>.<span class="params">maxInactiveInterval</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (sessionId<span class="operator"> == </span>null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//设置jsessionid</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        sessionId = generate<span class="constructor">SessionId()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    session.set<span class="constructor">Id(<span class="params">sessionId</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    sessionCounter++;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    return (session);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>关键是<code>jsessionid</code>的产生过程，接着看<code>generateSessionId</code>方法；</p>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">protected</span> synchronized <span class="keyword">String</span> <span class="title">generateSessionId</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">byte</span> <span class="built_in">random</span>[] = <span class="keyword">new</span> <span class="keyword">byte</span>[<span class="number">16</span>];</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">String</span> jvmRoute = getJvmRoute();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">String</span> result = null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// Render the result as a String of hexadecimal digits</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    StringBuffer <span class="built_in">buffer</span> = <span class="keyword">new</span> StringBuffer();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">do</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">int</span> resultLenBytes = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (result != null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            <span class="built_in">buffer</span> = <span class="keyword">new</span> StringBuffer();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">            duplicates++;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">while</span> (resultLenBytes &lt; <span class="keyword">this</span>.sessionIdLength) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">            getRandomBytes(<span class="built_in">random</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            <span class="built_in">random</span> = getDigest().digest(<span class="built_in">random</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">for</span> (<span class="keyword">int</span> j = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">            j &lt; <span class="built_in">random</span>.length &amp;&amp; resultLenBytes &lt; <span class="keyword">this</span>.sessionIdLength;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">            j++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">byte</span> b1 = (<span class="keyword">byte</span>) ((<span class="built_in">random</span>[j] &amp; <span class="number">0xf0</span>) &gt;&gt; <span class="number">4</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">byte</span> b2 = (<span class="keyword">byte</span>) (<span class="built_in">random</span>[j] &amp; <span class="number">0x0f</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (b1 &lt; <span class="number">10</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">                    <span class="built_in">buffer</span>.append((<span class="keyword">char</span>) (<span class="string">'0'</span> + b1));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">else</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">                    <span class="built_in">buffer</span>.append((<span class="keyword">char</span>) (<span class="string">'A'</span> + (b1 - <span class="number">10</span>)));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (b2 &lt; <span class="number">10</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">                    <span class="built_in">buffer</span>.append((<span class="keyword">char</span>) (<span class="string">'0'</span> + b2));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">else</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">                    <span class="built_in">buffer</span>.append((<span class="keyword">char</span>) (<span class="string">'A'</span> + (b2 - <span class="number">10</span>)));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">                resultLenBytes++;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (jvmRoute != null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">            <span class="built_in">buffer</span>.append(<span class="string">'.'</span>).append(jvmRoute);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">        result = <span class="built_in">buffer</span>.toString();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//注意这个do…while结构</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">    &#125; <span class="keyword">while</span> (sessions.containsKey(result));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> (result);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>这里主要说明的不是生成<code>jsessionid</code>的算法了，而是这个do…while结构。把这个逻辑抽象出来，可以看出；<br><img src="http://image.winrains.cn/2019/09/20190910104349-d49f3.jpeg" alt="img"></p>
+<p>如图所示，创建<code>jsessionid</code>的方式是由tomcat内置的加密算法算出一个随机的<code>jsessionid</code>，如果此<code>jsessionid</code>已经存在，则重新计算一个新的，直到确保现在计算的<code>jsessionid</code>唯一。<br>好了，至此一个session就这么创建了，像上面所说的，返回时是将<code>jsessionid</code>以HTTP response的header：“Set-cookie”发给客户端。</p>
+<h2 id="注销session"><a href="#注销session" class="headerlink" title="注销session"></a><strong>注销session</strong></h2><ul>
+<li>主动注销</li>
+<li>超时注销</li>
+</ul>
+<p>Session创建完之后，不会一直存在，或是主动注销，或是超时清除。即是出于安全考虑也是为了节省内存空间等。例如，常见场景：用户登出系统时，会主动触发注销操作。</p>
+<h3 id="主动注销"><a href="#主动注销" class="headerlink" title="主动注销"></a><strong>主动注销</strong></h3><p>主动注销时，是调用标准的servlet接口：</p>
+<figure class="highlight abnf"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">session.invalidate()<span class="comment">;</span></span></pre></td></tr></table></figure>
+
+<p>看一下tomcat提供的标准session实现(StandardSession)</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">invalidate</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (!isValidInternal())</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> IllegalStateException</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">            (sm.getString(<span class="string">"standardSession.invalidate.ise"</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 明显的注销方法</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    expire();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p><code>Expire</code>方法的逻辑稍后再说，先看看超时注销，因为它们调用的是同一个<code>expire</code>方法。</p>
+<h3 id="超时注销"><a href="#超时注销" class="headerlink" title="超时注销"></a><strong>超时注销</strong></h3><p>Tomcat定义了一个最大空闲超时时间，也就是说当session没有被操作超过这个最大空闲时间时间时，再次操作这个session，这个session就会触发expire。<br>这个方法封装在<code>StandardSession</code>中的<code>isValid()</code>方法内，这个方法在获取这个request请求对应的session对象时调用，可以参看上面说的创建session环节。也就是说，获取session的逻辑是，先从manager控制的session池中获取对应<code>jsessionid</code>的session对象，如果获取到，就再判断是否超时，如果超时，就expire这个session了。<br>看一下tomcat提供的标准session实现(<code>StandardSession</code>)</p>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">boolean</span> <span class="title">isValid</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    ……</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//这就是判断距离上次访问是否超时的过程</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (maxInactiveInterval &gt;= <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">long</span> timeNow = System.currentTimeMillis();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">int</span> timeIdle = (<span class="keyword">int</span>) ((timeNow - thisAccessedTime) / <span class="number">1000L</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (timeIdle &gt;= maxInactiveInterval) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">            expire(<span class="literal">true</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> (<span class="keyword">this</span>.<span class="built_in">isValid</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h3 id="expire方法"><a href="#expire方法" class="headerlink" title="expire方法"></a><strong>expire方法</strong></h3><p>是时候来看看<code>expire</code>方法了。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public void expire(boolean notify) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    synchronized (this) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        ......</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//设立标志位</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        set<span class="constructor">Valid(<span class="params">false</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//计算一些统计值，例如此manager下所有session平均存活时间等</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        long timeNow = <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>current<span class="constructor">TimeMillis()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">int</span> timeAlive = (<span class="built_in">int</span>) ((timeNow - creationTime)/<span class="number">1000</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        synchronized (manager) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (timeAlive &gt; manager.get<span class="constructor">SessionMaxAliveTime()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">                manager.set<span class="constructor">SessionMaxAliveTime(<span class="params">timeAlive</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            <span class="built_in">int</span> numExpired = manager.get<span class="constructor">ExpiredSessions()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">            numExpired++;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            manager.set<span class="constructor">ExpiredSessions(<span class="params">numExpired</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            <span class="built_in">int</span> average = manager.get<span class="constructor">SessionAverageAliveTime()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">            average = ((average<span class="operator"> * </span>(numExpired-<span class="number">1</span>)) + timeAlive)/numExpired;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">            manager.set<span class="constructor">SessionAverageAliveTime(<span class="params">average</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 将此session从manager对象的session池中删除</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        manager.remove(this);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        ......</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>不需要解释，已经很清晰了。<br>这个超时时间是可以配置的，缺省在tomcat的全局web.xml下配置，也可在各个app下的web.xml自行定义；</p>
+<p>单位是分钟。</p>
+<h3 id="Session持久化及启动初始化"><a href="#Session持久化及启动初始化" class="headerlink" title="Session持久化及启动初始化"></a><strong>Session持久化及启动初始化</strong></h3><p>这个功能主要是，当tomcat执行安全退出时(通过执行shutdown脚本)，会将session持久化到本地文件，通常在tomcat的部署目录下有个session.ser文件。当启动tomcat时，会从这个文件读入session，并添加到manager的session池中去。<br>这样，当tomcat正常重启时， session没有丢失，对于用户而言，体会不到重启，不影响用户体验。<br>看一下概念图吧，觉得不是重要实现逻辑，代码就不说了。<br><img src="http://image.winrains.cn/2019/09/20190910104349-abf11.jpeg" alt="img"><br><strong>总结</strong><br>由此可以看出，session的管理是容器层做的事情，应用层一般不会参与session的管理，也就是说，如果在应用层获取到相应的session，已经是由tomcat提供的，因此如果过多的依赖session机制来进行一些操作，例如访问控制，安全登录等就不是十分的安全，因为如果有人能得到正在使用的<code>jsessionid</code>，则就可以侵入系统。</p>
+<blockquote>
+<p>作者：keitho00</p>
+<p>来源：<a href="https://blog.csdn.net/keitho00/article/details/45536259" target="_blank" rel="noopener">https://blog.csdn.net/keitho00/article/details/45536259</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/27/Session%E6%94%BB%E5%87%BB%E6%89%8B%E6%AE%B5%E5%8F%8A%E5%85%B6%E5%AE%89%E5%85%A8%E9%98%B2%E5%BE%A1%E6%8E%AA%E6%96%BD/" rel="prev" title="Session攻击手段及其安全防御措施">
+      <i class="fa fa-chevron-left"></i> Session攻击手段及其安全防御措施
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/27/Spring-Session%EF%BC%881%EF%BC%89%EF%BC%9A%E6%8F%AD%E7%A7%98/" rel="next" title="Spring Session（1）：揭秘">
+      Spring Session（1）：揭秘 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#创建session"><span class="nav-number">1.</span> <span class="nav-text">创建session</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#注销session"><span class="nav-number">2.</span> <span class="nav-text">注销session</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#主动注销"><span class="nav-number">2.1.</span> <span class="nav-text">主动注销</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#超时注销"><span class="nav-number">2.2.</span> <span class="nav-text">超时注销</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#expire方法"><span class="nav-number">2.3.</span> <span class="nav-text">expire方法</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Session持久化及启动初始化"><span class="nav-number">2.4.</span> <span class="nav-text">Session持久化及启动初始化</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">289</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">65</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">85</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

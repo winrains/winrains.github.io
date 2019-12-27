@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="一、全称跨站请求伪造（Cross-site Request Forgery） 二、原理在用户登陆目标网站后，后端会返回用户登陆的凭证到前端（浏览器的 cookie）。攻击者诱使用户点击某个超链接，该超链接会发送恶意请求（会携带用户的 cookie），从而冒充用户完成业务请求（发帖、盗取用户资金等）。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Web 漏洞分析与防御（2）： CSRF跨站请求伪造">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;27&#x2F;Web-%E6%BC%8F%E6%B4%9E%E5%88%86%E6%9E%90%E4%B8%8E%E9%98%B2%E5%BE%A1%EF%BC%882%EF%BC%89%EF%BC%9A-CSRF%E8%B7%A8%E7%AB%99%E8%AF%B7%E6%B1%82%E4%BC%AA%E9%80%A0&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="一、全称跨站请求伪造（Cross-site Request Forgery） 二、原理在用户登陆目标网站后，后端会返回用户登陆的凭证到前端（浏览器的 cookie）。攻击者诱使用户点击某个超链接，该超链接会发送恶意请求（会携带用户的 cookie），从而冒充用户完成业务请求（发帖、盗取用户资金等）。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;c5774-web-security-1.gif">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;c9d68-web-security-2.gif">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;5d50b-web-security-4.gif">
+<meta property="og:updated_time" content="2019-12-27T07:54:05.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;c5774-web-security-1.gif">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/27/Web-%E6%BC%8F%E6%B4%9E%E5%88%86%E6%9E%90%E4%B8%8E%E9%98%B2%E5%BE%A1%EF%BC%882%EF%BC%89%EF%BC%9A-CSRF%E8%B7%A8%E7%AB%99%E8%AF%B7%E6%B1%82%E4%BC%AA%E9%80%A0/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Web 漏洞分析与防御（2）： CSRF跨站请求伪造 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">85</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">65</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">289</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/27/Web-%E6%BC%8F%E6%B4%9E%E5%88%86%E6%9E%90%E4%B8%8E%E9%98%B2%E5%BE%A1%EF%BC%882%EF%BC%89%EF%BC%9A-CSRF%E8%B7%A8%E7%AB%99%E8%AF%B7%E6%B1%82%E4%BC%AA%E9%80%A0/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Web 漏洞分析与防御（2）： CSRF跨站请求伪造
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-27 15:54:05" itemprop="dateCreated datePublished" datetime="2019-12-27T15:54:05+08:00">2019-12-27</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E7%BD%91%E7%BB%9C%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">网络技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E7%BD%91%E7%BB%9C%E6%8A%80%E6%9C%AF/%E7%BD%91%E7%BB%9C%E5%AE%89%E5%85%A8/" itemprop="url" rel="index">
+                    <span itemprop="name">网络安全</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h2 id="一、全称"><a href="#一、全称" class="headerlink" title="一、全称"></a>一、全称</h2><p>跨站请求伪造（Cross-site Request Forgery）</p>
+<h2 id="二、原理"><a href="#二、原理" class="headerlink" title="二、原理"></a>二、原理</h2><p>在用户登陆目标网站后，后端会返回用户登陆的凭证到前端（浏览器的 cookie）。攻击者诱使用户点击某个超链接，该超链接会发送恶意请求（会携带用户的 cookie），从而冒充用户完成业务请求（发帖、盗取用户资金等）。</p>
+<a id="more"></a>
+
+<h2 id="三、攻击方式"><a href="#三、攻击方式" class="headerlink" title="三、攻击方式"></a>三、攻击方式</h2><p>笔者以网站的发帖功能为案例对 CSRF 攻击进行简单的讲解。</p>
+<h3 id="3-1-提交-form-表单"><a href="#3-1-提交-form-表单" class="headerlink" title="# 3.1 提交 form 表单"></a># 3.1 提交 form 表单</h3><p>下图为模拟攻击演示图：<br><a href="http://image.winrains.cn/2019/09/c5774-web-security-1.gif" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/09/c5774-web-security-1.gif" alt="img"></a><br>以下是演示图中，”CSRF 攻击.html” 文件的源码。</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="meta">&lt;!DOCTYPE html&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">html</span> <span class="attr">lang</span>=<span class="string">"en"</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">head</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="tag">&lt;<span class="name">meta</span> <span class="attr">charset</span>=<span class="string">"UTF-8"</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="tag">&lt;<span class="name">title</span>&gt;</span>测试<span class="tag">&lt;/<span class="name">title</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;/<span class="name">head</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">body</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">script</span> <span class="attr">type</span>=<span class="string">"text/javascript"</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="javascript">        <span class="built_in">document</span>.write(<span class="string">`</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="actionscript">                &lt;form id=<span class="string">"myForm"</span> name=<span class="string">"myForm"</span> target=<span class="string">"csrf"</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="actionscript">                        method=<span class="string">"post"</span> action=<span class="string">"http://localhost:8080/article/save"</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="handlebars"><span class="xml">                    <span class="tag">&lt;<span class="name">input</span> <span class="attr">type</span>=<span class="string">"hidden"</span> <span class="attr">name</span>=<span class="string">"userName"</span> <span class="attr">value</span>=<span class="string">"李四"</span> /&gt;</span></span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="handlebars"><span class="xml">                    <span class="tag">&lt;<span class="name">textarea</span> <span class="attr">name</span>=<span class="string">"content"</span>&gt;</span>表单攻击<span class="tag">&lt;/<span class="name">textarea</span>&gt;</span></span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="handlebars"><span class="xml">                <span class="tag">&lt;/<span class="name">form</span>&gt;</span></span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            `);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="javascript">        <span class="keyword">var</span> iframe = <span class="built_in">document</span>.createElement(<span class="string">"iframe"</span>);</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="actionscript">        iframe.name = <span class="string">"csrf"</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="actionscript">        iframe.style.display = <span class="string">"none"</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="javascript">        <span class="built_in">document</span>.body.appendChild(iframe);</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="actionscript">        setTimeout(<span class="function"><span class="keyword">function</span><span class="params">()</span> </span>&#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="javascript">            <span class="built_in">document</span>.getElementById(<span class="string">"myForm"</span>).submit();</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        &#125;,1000);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;/<span class="name">script</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;/<span class="name">body</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;/<span class="name">html</span>&gt;</span></span></pre></td></tr></table></figure>
+
+<p><strong>实际案例中，攻击者会先了解目标网站请求的 url，通过诱惑登陆用户点击某个超链接，该链接指向类似上文的 html 页面（第三方网站）。因为是用户在自己浏览器点击的超链接，因此会自动携带用户浏览器中的 cookie，这样在第三方网站就可以冒充用户发起请求。</strong></p>
+<h3 id="3-2-点击超链接"><a href="#3-2-点击超链接" class="headerlink" title="# 3.2 点击超链接"></a># 3.2 点击超链接</h3><p>如果目标网站允许 get 请求，可通过超链接攻击。如下图：<br><a href="http://image.winrains.cn/2019/09/c9d68-web-security-2.gif" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/09/c9d68-web-security-2.gif" alt="img"></a><br>超链接源码如下：</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">a</span> <span class="attr">href</span>=<span class="string">"http://localhost:8080/article/save?userName=李四&amp;content=超链接攻击"</span>&gt;</span>点击获取现金大奖<span class="tag">&lt;/<span class="name">a</span>&gt;</span></span></pre></td></tr></table></figure>
+
+<h3 id="3-3-加载图片方式"><a href="#3-3-加载图片方式" class="headerlink" title="# 3.3 加载图片方式"></a># 3.3 加载图片方式</h3><p>更加粗暴的方式就是通过图片发送请求，如下图：<br><a href="http://image.winrains.cn/2019/09/5d50b-web-security-4.gif" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/09/5d50b-web-security-4.gif" alt="img"></a><br>图片源码如下：</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">img</span> <span class="attr">src</span>=<span class="string">"http://localhost:8080/article/save?userName=李四&amp;content=图片攻击"</span> /&gt;</span></span></pre></td></tr></table></figure>
+
+<h2 id="四、防御"><a href="#四、防御" class="headerlink" title="四、防御"></a>四、防御</h2><p>CSRF 攻击的一个特点是绕过目标网站的前端页面（无法获知页面的信息，如：验证码，token），在第三方网站发送请求到目标网站后端。</p>
+<h3 id="4-1-禁止第三方网站携带-cookie"><a href="#4-1-禁止第三方网站携带-cookie" class="headerlink" title="# 4.1 禁止第三方网站携带 cookie"></a># 4.1 禁止第三方网站携带 cookie</h3><p>在网站后端，用户登陆功能的代码中，设置 cookie 的 SameSite 的值为 Strict 返回给浏览器。<br>缺点：目前只有 chrome 和 opera 支持该属性。</p>
+<h3 id="4-2-使用验证码"><a href="#4-2-使用验证码" class="headerlink" title="# 4.2 使用验证码"></a># 4.2 使用验证码</h3><p>以论坛发帖为例，在发帖时，设置一个验证码，发帖后在后端进行校验。CSRF 攻击没法获取到验证码，从而目标网站得到了防御。</p>
+<h3 id="4-3-使用-token"><a href="#4-3-使用-token" class="headerlink" title="# 4.3 使用 token"></a># 4.3 使用 token</h3><p>继续以论坛发帖为例，在论坛后端跳转发帖页面的代码中随机生成一个 N 位数的数字/字符串作为 token，设置到 cookie 和任意变量名的变量中（最终放入到前端的 form 表单中）。当用户在页面发帖后，后端接收和校验 cookie 中的 token 和 页面提交的 token 是否一致。如果一致，则说明是用户合法操作。</p>
+<h3 id="4-4-判断-referer"><a href="#4-4-判断-referer" class="headerlink" title="# 4.4 判断 referer"></a># 4.4 判断 referer</h3><p>referer 是 http 的请求头，用户发送请求后，在后端获取该请求头，判断它的值是否包含目标网站的域名。如果包含说明操作合法。</p>
+<h2 id="五、参考资料"><a href="#五、参考资料" class="headerlink" title="五、参考资料"></a>五、参考资料</h2><ul>
+<li><a href="http://netsecurity.51cto.com/art/200811/97281.htm" target="_blank" rel="noopener">http://netsecurity.51cto.com/art/200811/97281.htm</a></li>
+<li><a href="https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Headers/Referer" target="_blank" rel="noopener">https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Headers/Referer</a></li>
+</ul>
+<blockquote>
+<p>作者：月光中的污点</p>
+<p>来源：<a href="https://www.extlight.com/2017/10/11/Web-%E6%BC%8F%E6%B4%9E%E5%88%86%E6%9E%90%E4%B8%8E%E9%98%B2%E5%BE%A1%E4%B9%8B-CSRF%EF%BC%88%E4%BA%8C%EF%BC%89/" target="_blank" rel="noopener">https://www.extlight.com/2017/10/11/Web-%E6%BC%8F%E6%B4%9E%E5%88%86%E6%9E%90%E4%B8%8E%E9%98%B2%E5%BE%A1%E4%B9%8B-CSRF%EF%BC%88%E4%BA%8C%EF%BC%89/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/27/Web-%E6%BC%8F%E6%B4%9E%E5%88%86%E6%9E%90%E4%B8%8E%E9%98%B2%E5%BE%A1%EF%BC%881%EF%BC%89%EF%BC%9A-XSS%E8%B7%A8%E7%AB%99%E8%84%9A%E6%9C%AC%E6%94%BB%E5%87%BB/" rel="prev" title="Web 漏洞分析与防御（1）： XSS跨站脚本攻击">
+      <i class="fa fa-chevron-left"></i> Web 漏洞分析与防御（1）： XSS跨站脚本攻击
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/27/Web-%E6%BC%8F%E6%B4%9E%E5%88%86%E6%9E%90%E4%B8%8E%E9%98%B2%E5%BE%A1%EF%BC%883%EF%BC%89%EF%BC%9A-%E7%82%B9%E5%87%BB%E5%8A%AB%E6%8C%81/" rel="next" title="Web 漏洞分析与防御（3）： 点击劫持">
+      Web 漏洞分析与防御（3）： 点击劫持 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#一、全称"><span class="nav-number">1.</span> <span class="nav-text">一、全称</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#二、原理"><span class="nav-number">2.</span> <span class="nav-text">二、原理</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#三、攻击方式"><span class="nav-number">3.</span> <span class="nav-text">三、攻击方式</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#3-1-提交-form-表单"><span class="nav-number">3.1.</span> <span class="nav-text"># 3.1 提交 form 表单</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#3-2-点击超链接"><span class="nav-number">3.2.</span> <span class="nav-text"># 3.2 点击超链接</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#3-3-加载图片方式"><span class="nav-number">3.3.</span> <span class="nav-text"># 3.3 加载图片方式</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#四、防御"><span class="nav-number">4.</span> <span class="nav-text">四、防御</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#4-1-禁止第三方网站携带-cookie"><span class="nav-number">4.1.</span> <span class="nav-text"># 4.1 禁止第三方网站携带 cookie</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#4-2-使用验证码"><span class="nav-number">4.2.</span> <span class="nav-text"># 4.2 使用验证码</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#4-3-使用-token"><span class="nav-number">4.3.</span> <span class="nav-text"># 4.3 使用 token</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#4-4-判断-referer"><span class="nav-number">4.4.</span> <span class="nav-text"># 4.4 判断 referer</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#五、参考资料"><span class="nav-number">5.</span> <span class="nav-text">五、参考资料</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">289</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">65</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">85</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="1、前言本文接上篇《高性能网络编程(五)：一文读懂高性能网络编程中的I&#x2F;O模型》。随着互联网的发展，面对海量用户高并发业务，传统的阻塞式的服务端架构模式已经无能为力。本文（和上篇《高性能网络编程(五)：一文读懂高性能网络编程中的I&#x2F;O模型》）旨在为大家提供有用的高性能网络编程的I&#x2F;O模型概览以及网络服务进程模型的比较，以揭开设计和实现高性能网络架构的神秘面纱。另外，作者的另一篇《新手入门：目前为止">
+<meta name="keywords" content="高性能">
+<meta property="og:type" content="article">
+<meta property="og:title" content="高性能网络编程中的线程模型">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;27&#x2F;%E9%AB%98%E6%80%A7%E8%83%BD%E7%BD%91%E7%BB%9C%E7%BC%96%E7%A8%8B%E4%B8%AD%E7%9A%84%E7%BA%BF%E7%A8%8B%E6%A8%A1%E5%9E%8B&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="1、前言本文接上篇《高性能网络编程(五)：一文读懂高性能网络编程中的I&#x2F;O模型》。随着互联网的发展，面对海量用户高并发业务，传统的阻塞式的服务端架构模式已经无能为力。本文（和上篇《高性能网络编程(五)：一文读懂高性能网络编程中的I&#x2F;O模型》）旨在为大家提供有用的高性能网络编程的I&#x2F;O模型概览以及网络服务进程模型的比较，以揭开设计和实现高性能网络架构的神秘面纱。另外，作者的另一篇《新手入门：目前为止">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;7753a-195333v2cj2o6y92d2zp5z.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;1c541-195839s5hi3te5pxueq5ze.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;a7951-200048bgll2l41w72174ot.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;b24c0-200650wun9j9ghkgk7ngna.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;48a81-200759gg777fr7v7wzcr7r.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;afc30-201251i0om3mro9wtcxrty.jpeg">
+<meta property="og:updated_time" content="2019-12-27T08:21:33.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;7753a-195333v2cj2o6y92d2zp5z.jpeg">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/27/%E9%AB%98%E6%80%A7%E8%83%BD%E7%BD%91%E7%BB%9C%E7%BC%96%E7%A8%8B%E4%B8%AD%E7%9A%84%E7%BA%BF%E7%A8%8B%E6%A8%A1%E5%9E%8B/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>高性能网络编程中的线程模型 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">85</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">65</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">289</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/27/%E9%AB%98%E6%80%A7%E8%83%BD%E7%BD%91%E7%BB%9C%E7%BC%96%E7%A8%8B%E4%B8%AD%E7%9A%84%E7%BA%BF%E7%A8%8B%E6%A8%A1%E5%9E%8B/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          高性能网络编程中的线程模型
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-27 16:21:33" itemprop="dateCreated datePublished" datetime="2019-12-27T16:21:33+08:00">2019-12-27</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h2 id="1、前言"><a href="#1、前言" class="headerlink" title="1、前言"></a>1、前言</h2><p>本文接上篇《<a href="http://www.52im.net/thread-1935-1-1.html" target="_blank" rel="noopener">高性能网络编程(五)：一文读懂高性能网络编程中的I/O模型</a>》。<br>随着互联网的发展，面对海量用户高并发业务，传统的阻塞式的服务端架构模式已经无能为力。本文（和上篇《<a href="http://www.52im.net/thread-1935-1-1.html" target="_blank" rel="noopener">高性能网络编程(五)：一文读懂高性能网络编程中的I/O模型</a>》）旨在为大家提供有用的高性能网络编程的I/O模型概览以及网络服务进程模型的比较，以揭开设计和实现高性能网络架构的神秘面纱。<br>另外，作者的另一篇《<a href="http://www.52im.net/thread-2043-1-1.html" target="_blank" rel="noopener">新手入门：目前为止最透彻的的Netty高性能原理和框架架构解析</a>》，也值得一读，推荐一并阅读之。</p>
+<a id="more"></a>
+
+<h2 id="2、关于作者"><a href="#2、关于作者" class="headerlink" title="2、关于作者"></a>2、关于作者</h2><p><strong>陈彩华（caison）：</strong>主要从事服务端开发、需求分析、系统设计、优化重构工作，主要开发语言是 Java，现任广州贝聊服务端研发工程师。</p>
+<h2 id="3、C10K问题系列文章"><a href="#3、C10K问题系列文章" class="headerlink" title="3、C10K问题系列文章"></a>3、C10K问题系列文章</h2><p><strong>本文是C10K问题系列文章中的第6篇，总目录如下：</strong></p>
+<ul>
+<li>《<a href="http://www.52im.net/thread-561-1-1.html" target="_blank" rel="noopener">高性能网络编程(一)：单台服务器并发TCP连接数到底可以有多少</a>》</li>
+<li>《<a href="http://www.52im.net/thread-566-1-1.html" target="_blank" rel="noopener">高性能网络编程(二)：上一个10年，著名的C10K并发连接问题</a>》</li>
+<li>《<a href="http://www.52im.net/thread-568-1-1.html" target="_blank" rel="noopener">高性能网络编程(三)：下一个10年，是时候考虑C10M并发问题了</a>》</li>
+<li>《<a href="http://www.52im.net/thread-578-1-1.html" target="_blank" rel="noopener">高性能网络编程(四)：从C10K到C10M高性能网络应用的理论探索</a>》</li>
+<li>《<a href="http://www.52im.net/thread-1935-1-1.html" target="_blank" rel="noopener">高性能网络编程(五)：一文读懂高性能网络编程中的I/O模型</a>》</li>
+<li>《<a href="http://www.52im.net/thread-1939-1-1.html" target="_blank" rel="noopener">高性能网络编程(六)：一文读懂高性能网络编程中的线程模型</a>》（本文）</li>
+<li>《<a href="http://www.52im.net/thread-560-1-1.html" target="_blank" rel="noopener">高性能网络编程经典：《The C10K problem(英文)》[附件下载]</a>》</li>
+</ul>
+<h2 id="4、线程模型"><a href="#4、线程模型" class="headerlink" title="4、线程模型"></a>4、线程模型</h2><p>上篇《<a href="http://www.52im.net/thread-1935-1-1.html" target="_blank" rel="noopener">高性能网络编程(五)：一文读懂高性能网络编程中的I/O模型</a>》介绍完服务器如何基于 I/O 模型管理连接，获取输入数据，下面将介绍基于进程/线程模型，服务器如何处理请求。<br>值得说明的是，具体选择线程还是进程，更多是与平台及编程语言相关。<br>例如 C 语言使用线程和进程都可以(例如 Nginx 使用进程，Memcached 使用线程)，Java 语言一般使用线程(例如 Netty)，为了描述方便，下面都使用线程来进行描述。</p>
+<h2 id="5、线程模型1：传统阻塞-I-O-服务模型"><a href="#5、线程模型1：传统阻塞-I-O-服务模型" class="headerlink" title="5、线程模型1：传统阻塞 I/O 服务模型"></a>5、线程模型1：传统阻塞 I/O 服务模型</h2><p><img src="http://image.winrains.cn/2019/09/7753a-195333v2cj2o6y92d2zp5z.jpeg" alt="高性能网络编程(六)：一文读懂高性能网络编程中的线程模型_1.jpeg"><br><strong>特点：</strong></p>
+<ul>
+<li>1）采用阻塞式 I/O 模型获取输入数据；</li>
+<li>2）每个连接都需要独立的线程完成数据输入，业务处理，数据返回的完整操作。</li>
+</ul>
+<p><strong>存在问题：</strong></p>
+<ul>
+<li>1）当并发数较大时，需要创建大量线程来处理连接，系统资源占用较大；</li>
+<li>2）连接建立后，如果当前线程暂时没有数据可读，则线程就阻塞在 Read 操作上，造成线程资源浪费。</li>
+</ul>
+<h2 id="6、线程模型2：Reactor-模式"><a href="#6、线程模型2：Reactor-模式" class="headerlink" title="6、线程模型2：Reactor 模式"></a>6、线程模型2：Reactor 模式</h2><h3 id="6-1基本介绍"><a href="#6-1基本介绍" class="headerlink" title="6.1基本介绍"></a>6.1基本介绍</h3><p><strong>针对传统阻塞 I/O 服务模型的 2 个缺点，比较常见的有如下解决方案：</strong> </p>
+<ul>
+<li>1）基于 I/O 复用模型：多个连接共用一个阻塞对象，应用程序只需要在一个阻塞对象上等待，无需阻塞等待所有连接。当某条连接有新的数据可以处理时，操作系统通知应用程序，线程从阻塞状态返回，开始进行业务处理；</li>
+<li>2）基于线程池复用线程资源：不必再为每个连接创建线程，将连接完成后的业务处理任务分配给线程进行处理，一个线程可以处理多个连接的业务。</li>
+</ul>
+<p><strong>I/O 复用结合线程池，这就是 Reactor 模式基本设计思想，如下图：</strong><br><img src="http://image.winrains.cn/2019/09/1c541-195839s5hi3te5pxueq5ze.jpeg" alt="高性能网络编程(六)：一文读懂高性能网络编程中的线程模型_2.jpeg"><br>Reactor 模式，是指通过一个或多个输入同时传递给服务处理器的服务请求的事件驱动处理模式。<br>服务端程序处理传入多路请求，并将它们同步分派给请求对应的处理线程，Reactor 模式也叫 Dispatcher 模式。<br>即 I/O 多了复用统一监听事件，收到事件后分发(Dispatch 给某进程)，是编写高性能网络服务器的必备技术之一。<br><strong>Reactor 模式中有 2 个关键组成：</strong></p>
+<ul>
+<li>1）Reactor：Reactor 在一个单独的线程中运行，负责监听和分发事件，分发给适当的处理程序来对 IO 事件做出反应。 它就像公司的电话接线员，它接听来自客户的电话并将线路转移到适当的联系人；</li>
+<li>2）Handlers：处理程序执行 I/O 事件要完成的实际事件，类似于客户想要与之交谈的公司中的实际官员。Reactor 通过调度适当的处理程序来响应 I/O 事件，处理程序执行非阻塞操作。</li>
+</ul>
+<p><strong>根据 Reactor 的数量和处理资源池线程的数量不同，有 3 种典型的实现：</strong></p>
+<ul>
+<li>1）单 Reactor 单线程；</li>
+<li>2）单 Reactor 多线程；</li>
+<li>3）主从 Reactor 多线程。</li>
+</ul>
+<p>下面详细介绍这 3 种实现方式。</p>
+<h3 id="6-2单-Reactor-单线程"><a href="#6-2单-Reactor-单线程" class="headerlink" title="6.2单 Reactor 单线程"></a>6.2单 Reactor 单线程</h3><p><img src="http://image.winrains.cn/2019/09/a7951-200048bgll2l41w72174ot.jpeg" alt="高性能网络编程(六)：一文读懂高性能网络编程中的线程模型_3.jpeg"><br>其中，Select 是前面 I/O 复用模型介绍的标准网络编程 API，可以实现应用程序通过一个阻塞对象监听多路连接请求，其他方案示意图类似。<br><strong>方案说明：</strong></p>
+<ul>
+<li>1）Reactor 对象通过 Select 监控客户端请求事件，收到事件后通过 Dispatch 进行分发；</li>
+<li>2）如果是建立连接请求事件，则由 Acceptor 通过 Accept 处理连接请求，然后创建一个 Handler 对象处理连接完成后的后续业务处理；</li>
+<li>3）如果不是建立连接事件，则 Reactor 会分发调用连接对应的 Handler 来响应；</li>
+<li>4）Handler 会完成 Read→业务处理→Send 的完整业务流程。</li>
+</ul>
+<p><strong>优点：</strong>模型简单，没有多线程、进程通信、竞争的问题，全部都在一个线程中完成。<br><strong>缺点：</strong>性能问题，只有一个线程，无法完全发挥多核 CPU 的性能。Handler 在处理某个连接上的业务时，整个进程无法处理其他连接事件，很容易导致性能瓶颈。<br>可靠性问题，线程意外跑飞，或者进入死循环，会导致整个系统通信模块不可用，不能接收和处理外部消息，造成节点故障。<br><strong>使用场景：</strong>客户端的数量有限，业务处理非常快速，比如 Redis，业务处理的时间复杂度 O(1)。</p>
+<h3 id="6-3单-Reactor-多线程"><a href="#6-3单-Reactor-多线程" class="headerlink" title="6.3单 Reactor 多线程"></a>6.3单 Reactor 多线程</h3><p><img src="http://image.winrains.cn/2019/09/b24c0-200650wun9j9ghkgk7ngna.jpeg" alt="高性能网络编程(六)：一文读懂高性能网络编程中的线程模型_4.jpeg"><br><strong>方案说明：</strong></p>
+<ul>
+<li>1）Reactor 对象通过 Select 监控客户端请求事件，收到事件后通过 Dispatch 进行分发；</li>
+<li>2）如果是建立连接请求事件，则由 Acceptor 通过 Accept 处理连接请求，然后创建一个 Handler 对象处理连接完成后续的各种事件；</li>
+<li>3）如果不是建立连接事件，则 Reactor 会分发调用连接对应的 Handler 来响应；</li>
+<li>4）Handler 只负责响应事件，不做具体业务处理，通过 Read 读取数据后，会分发给后面的 Worker 线程池进行业务处理；</li>
+<li>5）Worker 线程池会分配独立的线程完成真正的业务处理，如何将响应结果发给 Handler 进行处理；</li>
+<li>6）Handler 收到响应结果后通过 Send 将响应结果返回给 Client。</li>
+</ul>
+<p><strong>优点：</strong>可以充分利用多核 CPU 的处理能力。<br><strong>缺点：</strong>多线程数据共享和访问比较复杂；Reactor 承担所有事件的监听和响应，在单线程中运行，高并发场景下容易成为性能瓶颈。</p>
+<h3 id="6-4主从-Reactor-多线程"><a href="#6-4主从-Reactor-多线程" class="headerlink" title="6.4主从 Reactor 多线程"></a>6.4主从 Reactor 多线程</h3><p><img src="http://image.winrains.cn/2019/09/48a81-200759gg777fr7v7wzcr7r.jpeg" alt="高性能网络编程(六)：一文读懂高性能网络编程中的线程模型_5.jpeg"><br>针对单 Reactor 多线程模型中，Reactor 在单线程中运行，高并发场景下容易成为性能瓶颈，可以让 Reactor 在多线程中运行。<br><strong>方案说明：</strong></p>
+<ul>
+<li>1）Reactor 主线程 MainReactor 对象通过 Select 监控建立连接事件，收到事件后通过 Acceptor 接收，处理建立连接事件；</li>
+<li>2）Acceptor 处理建立连接事件后，MainReactor 将连接分配 Reactor 子线程给 SubReactor 进行处理；</li>
+<li>3）SubReactor 将连接加入连接队列进行监听，并创建一个 Handler 用于处理各种连接事件；</li>
+<li>4）当有新的事件发生时，SubReactor 会调用连接对应的 Handler 进行响应；</li>
+<li>5）Handler 通过 Read 读取数据后，会分发给后面的 Worker 线程池进行业务处理；</li>
+<li>6）Worker 线程池会分配独立的线程完成真正的业务处理，如何将响应结果发给 Handler 进行处理；</li>
+<li>7）Handler 收到响应结果后通过 Send 将响应结果返回给 Client。</li>
+</ul>
+<p><strong>优点：</strong>父线程与子线程的数据交互简单职责明确，父线程只需要接收新连接，子线程完成后续的业务处理。<br>父线程与子线程的数据交互简单，Reactor 主线程只需要把新连接传给子线程，子线程无需返回数据。<br>这种模型在许多项目中广泛使用，包括 Nginx 主从 Reactor 多进程模型，Memcached 主从多线程，Netty 主从多线程模型的支持。</p>
+<h3 id="6-5小结"><a href="#6-5小结" class="headerlink" title="6.5小结"></a>6.5小结</h3><p><strong>3 种模式可以用个比喻来理解：</strong>（餐厅常常雇佣接待员负责迎接顾客，当顾客入坐后，侍应生专门为这张桌子服务）</p>
+<ul>
+<li>1）单 Reactor 单线程，接待员和侍应生是同一个人，全程为顾客服务；</li>
+<li>2）单 Reactor 多线程，1 个接待员，多个侍应生，接待员只负责接待；</li>
+<li>3）主从 Reactor 多线程，多个接待员，多个侍应生。</li>
+</ul>
+<p><strong>Reactor 模式具有如下的优点：</strong></p>
+<ul>
+<li>1）响应快，不必为单个同步时间所阻塞，虽然 Reactor 本身依然是同步的；</li>
+<li>2）编程相对简单，可以最大程度的避免复杂的多线程及同步问题，并且避免了多线程/进程的切换开销；</li>
+<li>3）可扩展性，可以方便的通过增加 Reactor 实例个数来充分利用 CPU 资源；</li>
+<li>4）可复用性，Reactor 模型本身与具体事件处理逻辑无关，具有很高的复用性。</li>
+</ul>
+<h2 id="7、线程模型2：Proactor-模型"><a href="#7、线程模型2：Proactor-模型" class="headerlink" title="7、线程模型2：Proactor 模型"></a>7、线程模型2：Proactor 模型</h2><p>在 Reactor 模式中，Reactor 等待某个事件或者可应用或者操作的状态发生（比如文件描述符可读写，或者是 Socket 可读写）。<br>然后把这个事件传给事先注册的 Handler（事件处理函数或者回调函数），由后者来做实际的读写操作。<br>其中的读写操作都需要应用程序同步操作，所以 Reactor 是非阻塞同步网络模型。<br>如果把 I/O 操作改为异步，即交给操作系统来完成就能进一步提升性能，这就是异步网络模型 Proactor。<br><img src="http://image.winrains.cn/2019/09/afc30-201251i0om3mro9wtcxrty.jpeg" alt="高性能网络编程(六)：一文读懂高性能网络编程中的线程模型_1.jpeg"><br><strong>Proactor 是和异步 I/O 相关的，详细方案如下：</strong></p>
+<ul>
+<li>1）Proactor Initiator 创建 Proactor 和 Handler 对象，并将 Proactor 和 Handler 都通过 AsyOptProcessor（Asynchronous Operation Processor）注册到内核；</li>
+<li>2）AsyOptProcessor 处理注册请求，并处理 I/O 操作；</li>
+<li>3）AsyOptProcessor 完成 I/O 操作后通知 Proactor；</li>
+<li>4）Proactor 根据不同的事件类型回调不同的 Handler 进行业务处理；</li>
+<li>5）Handler 完成业务处理。</li>
+</ul>
+<p><strong>可以看出 Proactor 和 Reactor 的区别：</strong></p>
+<ul>
+<li>1）Reactor 是在事件发生时就通知事先注册的事件（读写在应用程序线程中处理完成）；</li>
+<li>2）Proactor 是在事件发生时基于异步 I/O 完成读写操作（由内核完成），待 I/O 操作完成后才回调应用程序的处理器来进行业务处理。</li>
+</ul>
+<p>理论上 Proactor 比 Reactor 效率更高，异步 I/O 更加充分发挥 DMA(Direct Memory Access，直接内存存取)的优势。<br><strong>但是Proactor有如下缺点：</strong></p>
+<ul>
+<li>1）编程复杂性，由于异步操作流程的事件的初始化和事件完成在时间和空间上都是相互分离的，因此开发异步应用程序更加复杂。应用程序还可能因为反向的流控而变得更加难以 Debug；</li>
+<li>2）内存使用，缓冲区在读或写操作的时间段内必须保持住，可能造成持续的不确定性，并且每个并发操作都要求有独立的缓存，相比 Reactor 模式，在 Socket 已经准备好读或写前，是不要求开辟缓存的；</li>
+<li>3）操作系统支持，Windows 下通过 IOCP 实现了真正的异步 I/O，而在 Linux 系统下，Linux 2.6 才引入，目前异步 I/O 还不完善。</li>
+</ul>
+<p>因此在 Linux 下实现高并发网络编程都是以 Reactor 模型为主。</p>
+<blockquote>
+<p>作者：JackJiang</p>
+<p>来源：<a href="http://www.52im.net/thread-1939-1-1.html" target="_blank" rel="noopener">http://www.52im.net/thread-1939-1-1.html</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E9%AB%98%E6%80%A7%E8%83%BD/" rel="tag"># 高性能</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/27/%E9%AB%98%E6%80%A7%E8%83%BD%E7%BD%91%E7%BB%9C%E7%BC%96%E7%A8%8B%E4%B8%AD%E7%9A%84I-O%E6%A8%A1%E5%9E%8B/" rel="prev" title="高性能网络编程中的I/O模型">
+      <i class="fa fa-chevron-left"></i> 高性能网络编程中的I/O模型
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/27/%E6%8A%80%E6%9C%AF%E5%BE%80%E4%BA%8B%EF%BC%9A%E6%94%B9%E5%8F%98%E4%B8%96%E7%95%8C%E7%9A%84TCP-IP%E5%8D%8F%E8%AE%AE/" rel="next" title="技术往事：改变世界的TCP/IP协议">
+      技术往事：改变世界的TCP/IP协议 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#1、前言"><span class="nav-number">1.</span> <span class="nav-text">1、前言</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2、关于作者"><span class="nav-number">2.</span> <span class="nav-text">2、关于作者</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3、C10K问题系列文章"><span class="nav-number">3.</span> <span class="nav-text">3、C10K问题系列文章</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#4、线程模型"><span class="nav-number">4.</span> <span class="nav-text">4、线程模型</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#5、线程模型1：传统阻塞-I-O-服务模型"><span class="nav-number">5.</span> <span class="nav-text">5、线程模型1：传统阻塞 I/O 服务模型</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#6、线程模型2：Reactor-模式"><span class="nav-number">6.</span> <span class="nav-text">6、线程模型2：Reactor 模式</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#6-1基本介绍"><span class="nav-number">6.1.</span> <span class="nav-text">6.1基本介绍</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#6-2单-Reactor-单线程"><span class="nav-number">6.2.</span> <span class="nav-text">6.2单 Reactor 单线程</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#6-3单-Reactor-多线程"><span class="nav-number">6.3.</span> <span class="nav-text">6.3单 Reactor 多线程</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#6-4主从-Reactor-多线程"><span class="nav-number">6.4.</span> <span class="nav-text">6.4主从 Reactor 多线程</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#6-5小结"><span class="nav-number">6.5.</span> <span class="nav-text">6.5小结</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#7、线程模型2：Proactor-模型"><span class="nav-number">7.</span> <span class="nav-text">7、线程模型2：Proactor 模型</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">289</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">65</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">85</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
