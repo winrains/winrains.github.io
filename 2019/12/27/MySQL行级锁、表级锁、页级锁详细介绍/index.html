@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="页级:引擎 BDB。表级:引擎 MyISAM ， 理解为锁住整个表，可以同时读，写不行行级:引擎 INNODB ， 单独的一行记录加锁表级:直接锁定整张表，在你锁定期间，其它进程无法对该表进行写操作。如果你是写锁，则其它进程则读也不允许行级:仅对指定的记录进行加锁，这样其它进程还是可以对同一个表中的其它记录进行操作。页级:表级锁速度快，但冲突多，行级冲突少，但速度慢。所以取了折衷的页级，一次锁定相">
+<meta name="keywords" content="锁">
+<meta property="og:type" content="article">
+<meta property="og:title" content="MySQL行级锁、表级锁、页级锁详细介绍">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;27&#x2F;MySQL%E8%A1%8C%E7%BA%A7%E9%94%81%E3%80%81%E8%A1%A8%E7%BA%A7%E9%94%81%E3%80%81%E9%A1%B5%E7%BA%A7%E9%94%81%E8%AF%A6%E7%BB%86%E4%BB%8B%E7%BB%8D&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="页级:引擎 BDB。表级:引擎 MyISAM ， 理解为锁住整个表，可以同时读，写不行行级:引擎 INNODB ， 单独的一行记录加锁表级:直接锁定整张表，在你锁定期间，其它进程无法对该表进行写操作。如果你是写锁，则其它进程则读也不允许行级:仅对指定的记录进行加锁，这样其它进程还是可以对同一个表中的其它记录进行操作。页级:表级锁速度快，但冲突多，行级冲突少，但速度慢。所以取了折衷的页级，一次锁定相">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:updated_time" content="2019-12-27T02:05:33.000Z">
+<meta name="twitter:card" content="summary">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/27/MySQL%E8%A1%8C%E7%BA%A7%E9%94%81%E3%80%81%E8%A1%A8%E7%BA%A7%E9%94%81%E3%80%81%E9%A1%B5%E7%BA%A7%E9%94%81%E8%AF%A6%E7%BB%86%E4%BB%8B%E7%BB%8D/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>MySQL行级锁、表级锁、页级锁详细介绍 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">70</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">42</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">209</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/27/MySQL%E8%A1%8C%E7%BA%A7%E9%94%81%E3%80%81%E8%A1%A8%E7%BA%A7%E9%94%81%E3%80%81%E9%A1%B5%E7%BA%A7%E9%94%81%E8%AF%A6%E7%BB%86%E4%BB%8B%E7%BB%8D/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          MySQL行级锁、表级锁、页级锁详细介绍
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-27 10:05:33" itemprop="dateCreated datePublished" datetime="2019-12-27T10:05:33+08:00">2019-12-27</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/MySQL/" itemprop="url" rel="index">
+                    <span itemprop="name">MySQL</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p><strong>页级:</strong>引擎 BDB。<br><strong>表级:</strong>引擎 MyISAM ， 理解为锁住整个表，可以同时读，写不行<br><strong>行级:</strong>引擎 INNODB ， 单独的一行记录加锁<br><strong>表级:</strong>直接锁定整张表，在你锁定期间，其它进程无法对该表进行写操作。如果你是写锁，则其它进程则读也不允许<br><strong>行级:</strong>仅对指定的记录进行加锁，这样其它进程还是可以对同一个表中的其它记录进行操作。<br><strong>页级:</strong>表级锁速度快，但冲突多，行级冲突少，但速度慢。所以取了折衷的页级，一次锁定相邻的一组记录。</p>
+<a id="more"></a>
+
+<p>MySQL 5.1支持对MyISAM和MEMORY表进行表级锁定，对BDB表进行页级锁定，对InnoDB表进行行级锁定。<br>对WRITE，MySQL使用的表锁定方法原理如下：</p>
+<ul>
+<li>如果在表上没有锁，在它上面放一个写锁。</li>
+<li>否则，把锁定请求放在写锁定队列中。</li>
+</ul>
+<p>对READ，MySQL使用的锁定方法原理如下：</p>
+<blockquote>
+<p>如果在表上没有写锁定，把一个读锁定放在它上面<br>否则，把锁请求放在读锁定队列中。</p>
+</blockquote>
+<p>InnoDB使用行锁定，BDB使用页锁定。对于这两种存储引擎，都可能存在死锁。这是因为，在SQL语句处理期间，InnoDB自动获得行锁定和BDB获得页锁定，而不是在事务启动时获得。<br><strong>行级锁定的优点：</strong></p>
+<ul>
+<li>当在许多线程中访问不同的行时只存在少量锁定冲突。</li>
+<li>回滚时只有少量的更改。</li>
+<li>可以长时间锁定单一的行。</li>
+</ul>
+<p><strong>行级锁定的缺点：</strong></p>
+<ul>
+<li>比页级或表级锁定占用更多的内存。</li>
+<li>当在表的大部分中使用时，比页级或表级锁定速度慢，因为你必须获取更多的锁。</li>
+<li>如果你在大部分数据上经常进行GROUP BY操作或者必须经常扫描整个表，比其它锁定明显慢很多。</li>
+<li>用高级别锁定，通过支持不同的类型锁定，你也可以很容易地调节应用程序，因为其锁成本小于行级锁定。</li>
+</ul>
+<p><strong>在以下情况下，表锁定优先于页级或行级锁定：</strong><br>表的大部分语句用于读取。<br>对严格的关键字进行读取和更新，你可以更新或删除可以用单一的读取的关键字来提取的一行：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">UPDATE</span> tbl_name <span class="keyword">SET</span> <span class="keyword">column</span>=<span class="keyword">value</span> <span class="keyword">WHERE</span> unique_key_col=key_value;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">DELETE</span> <span class="keyword">FROM</span> tbl_name <span class="keyword">WHERE</span> unique_key_col=key_value;</span></pre></td></tr></table></figure>
+
+<p>SELECT 结合并行的INSERT语句，并且只有很少的UPDATE或DELETE语句。<br>在整个表上有许多扫描或GROUP BY操作，没有任何写操作。<br>/ ========================= mysql 锁表类型和解锁语句 ========================= /<br>如果想要在一个表上做大量的 INSERT 和 SELECT 操作，但是并行的插入却不可能时，可以将记录插入到临时表中，然后定期将临时表中的数据更新到实际的表里。可以用以下命令实现：</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">mysql&gt; <span class="keyword">LOCK</span> <span class="keyword">TABLES</span> real_table <span class="keyword">WRITE</span>, insert_table <span class="keyword">WRITE</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">mysql&gt; <span class="keyword">INSERT</span> <span class="keyword">INTO</span> real_table <span class="keyword">SELECT</span> * <span class="keyword">FROM</span> insert_table;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">mysql&gt; <span class="keyword">TRUNCATE</span> <span class="keyword">TABLE</span> insert_table;mysql&gt; UNLOCK <span class="keyword">TABLES</span>;</span></pre></td></tr></table></figure>
+
+<p><strong>行级锁的优点有：</strong></p>
+<ul>
+<li>在很多线程请求不同记录时减少冲突锁。</li>
+<li>事务回滚时减少改变数据。</li>
+<li>使长时间对单独的一行记录加锁成为可能。</li>
+</ul>
+<p><strong>行级锁的缺点有：</strong></p>
+<ul>
+<li>比页级锁和表级锁消耗更多的内存。</li>
+<li>锁是计算机协调多个进程或线程并发访问某一资源的机制，不同的数据库的锁机制大同小异。由于数据库资源是一种供许多用户共享的资源，所以如何保证数据并发访问的一致性、有效性是所有数据库必须解决的一个问题，锁冲突也是影响数据库并发访问性能的一个重要因素。了解锁机制不仅可以使我们更有效的开发利用数据库资源，也使我们能够更好地维护数据库，从而提高数据库的性能。</li>
+<li>MySQL的锁机制比较简单，其最显著的特点是不同的存储引擎支持不同的锁机制。</li>
+</ul>
+<p>例如，MyISAM和MEMORY存储引擎采用的是表级锁（table-level-locking）；BDB存储引擎采用的是页面锁（page-level-locking），同时也支持表级锁；InnoDB存储引擎既支持行级锁，也支持表级锁，默认情况下是采用行级锁。<br><strong>上述三种锁的特性可大致归纳如下：</strong><br>1） 表级锁：开销小，加锁快；不会出现死锁；锁定粒度大，发生锁冲突的概率最高，并发度最低。<br>2） 行级锁：开销大，加锁慢；会出现死锁；锁定粒度最小，发生锁冲突的概率最低，并发度也最高。<br>3） 页面锁：开销和加锁时间界于表锁和行锁之间；会出现死锁；锁定粒度界于表锁和行锁之间，并发度一般。<br>三种锁各有各的特点，若仅从锁的角度来说，表级锁更适合于以查询为主，只有少量按索引条件更新数据的应用，如WEB应用；行级锁更适合于有大量按索引条件并发更新少量不同数据，同时又有并发查询的应用，如一些在线事务处理（OLTP）系统。<br>MySQL表级锁有两种模式：表共享读锁（Table Read Lock）和表独占写锁（Table Write<br>Lock）。什么意思呢，就是说对MyISAM表进行读操作时，它不会阻塞其他用户对同一表的读请求，但会阻塞<br>对同一表的写操作；而对MyISAM表的写操作，则会阻塞其他用户对同一表的读和写操作。<br>MyISAM表的读和写是串行的，即在进行读操作时不能进行写操作，反之也是一样。但在一定条件下MyISAM表也支持查询和插入的操作的并发进行，其机制是通过控制一个系统变量（concurrent_insert）来进行的，当其值设置为0时，不允许并发插入；当其值设置为1<br>时，如果MyISAM表中没有空洞（即表中没有被删除的行），MyISAM允许在一个进程读表的同时，另一个进程从表尾插入记录；当其值设置为2时，无论MyISAM表中有没有空洞，都允许在表尾并发插入记录。<br>MyISAM锁调度是如何实现的呢，这也是一个很关键的问题。例如，当一个进程请求某个MyISAM表的读锁，同时另一个进程也请求同一表的写锁，此时MySQL将会如优先处理进程呢？通过研究表明，写进程将先获得锁（即使读请求先到锁等待队列）。但这也造成一个很大的缺陷，即大量的写操作会造成查询操作很难获得读锁，从而可能造成永远阻塞。所幸我们可以通过一些设置来调节MyISAM的调度行为。我们可通过指定参数low-priority-updates，使MyISAM默认引擎给予读请求以优先的权利，设置其值为1（set<br>low_priority_updates=1),使优先级降低。<br>InnoDB锁与MyISAM锁的最大不同在于：一是支持事务（TRANCSACTION），二是采用了行级锁。我们知道事务是由一组SQL语句组成的逻辑处理单元，其有四个属性（简称ACID属性），分别为：</p>
+<ul>
+<li><strong>原子性（Atomicity）</strong>：事务是一个原子操作单元，其对数据的修改，要么全部执行，要么全都不执行；</li>
+<li><strong>一致性（Consistent）</strong>：在事务开始和完成时，数据都必须保持一致状态；</li>
+<li><strong>隔离性（Isolation）</strong>：数据库系统提供一定的隔离机制，保证事务在不受外部并发操作影响的“独立”环境执行；</li>
+<li><strong>持久性（Durable）</strong>：事务完成之后，它对于数据的修改是永久性的，即使出现系统故障也能够保持。</li>
+</ul>
+<p><strong>InnoDB有两种模式的行锁：</strong><br>1）共享锁：允许一个事务去读一行，阻止其他事务获得相同数据集的排他锁。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">( <span class="keyword">Select</span> * <span class="keyword">from</span> table_name <span class="keyword">where</span> ......lock <span class="keyword">in</span> <span class="keyword">share</span> <span class="keyword">mode</span>)</span></pre></td></tr></table></figure>
+
+<p>2）排他锁：允许获得排他锁的事务更新数据，阻止其他事务取得相同数据集的共享读锁和 排他写锁。(select * from table_name where…for update)<br>为了允许行锁和表锁共存，实现多粒度锁机制；同时还有两种内部使用的意向锁（都是表锁），分别为意向共享锁和意向排他锁。<br>InnoDB行锁是通过给索引项加锁来实现的，即只有通过索引条件检索数据，InnoDB才使用行级锁，否则将使用表锁！<br>另外：插入，更新性能优化的几个重要参数<br>bulk_insert_buffer_size 批量插入缓存大小,<br>这个参数是针对MyISAM存储引擎来说的.适用于在一次性插入100-1000+条记录时,<br>提高效率.默认值是8M.可以针对数据量的大小,翻倍增加. concurrent_insert 并发插入, 当表没有空洞(删除过记录),<br>在某进程获取读锁的情况下,其他进程可以在表尾部进行插入. 值可以设0不允许并发插入, 1当表没有空洞时, 执行并发插入,<br>2不管是否有空洞都执行并发插入. 默认是1 针对表的删除频率来设置. delay_key_write<br>针对MyISAM存储引擎,延迟更新索引.意思是说,update记录时,先将数据up到磁盘,但不up索引,将索引存在内存里,当表关闭时,将内存索引,写到磁盘.<br>值为 0不开启, 1开启. 默认开启. delayed_insert_limit, delayed_insert_timeout,<br>delayed_queue_size 延迟插入, 将数据先交给内存队列, 然后慢慢地插入.但是这些配置,不是所有的存储引擎都支持,<br>目前来看, 常用的InnoDB不支持, MyISAM支持. 根据实际情况调大, 一般默认够用了<br>/ ==================== MySQL InnoDB 锁表与锁行 ======================== /<br>由于InnoDB预设是Row-Level Lock，所以只有「明确」的指定主键，MySQL才会执行Row lock (只锁住被选取的资料例) ，否则MySQL将会执行Table Lock (将整个资料表单给锁住)。<br>举个例子: 假设有个表单products ，里面有id跟name二个栏位，id是主键。<br>例1: (明确指定主键，并且有此笔资料，row lock)</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> * <span class="keyword">FROM</span> products <span class="keyword">WHERE</span> <span class="keyword">id</span>=<span class="string">'3'</span> <span class="keyword">FOR</span> <span class="keyword">UPDATE</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> * <span class="keyword">FROM</span> products <span class="keyword">WHERE</span> <span class="keyword">id</span>=<span class="string">'3'</span> <span class="keyword">and</span> <span class="keyword">type</span>=<span class="number">1</span> <span class="keyword">FOR</span> <span class="keyword">UPDATE</span>;</span></pre></td></tr></table></figure>
+
+<p>例2: (明确指定主键，若查无此笔资料，无lock)`sql</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> * <span class="keyword">FROM</span> products <span class="keyword">WHERE</span> <span class="keyword">id</span>=<span class="string">'-1'</span> <span class="keyword">FOR</span> <span class="keyword">UPDATE</span>;</span></pre></td></tr></table></figure>
+
+<p>例3: (无主键，table lock)</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> * <span class="keyword">FROM</span> products <span class="keyword">WHERE</span> <span class="keyword">name</span>=<span class="string">'Mouse'</span> <span class="keyword">FOR</span> <span class="keyword">UPDATE</span>;</span></pre></td></tr></table></figure>
+
+<p>例4: (主键不明确，table lock)</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> * <span class="keyword">FROM</span> products <span class="keyword">WHERE</span> <span class="keyword">id</span>&lt;&gt;<span class="string">'3'</span> <span class="keyword">FOR</span> <span class="keyword">UPDATE</span>;</span></pre></td></tr></table></figure>
+
+<p>例5: (主键不明确，table lock)</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> * <span class="keyword">FROM</span> products <span class="keyword">WHERE</span> <span class="keyword">id</span> <span class="keyword">LIKE</span> <span class="string">'3'</span> <span class="keyword">FOR</span> <span class="keyword">UPDATE</span>;</span></pre></td></tr></table></figure>
+
+<p><strong>注1: FOR UPDATE仅适用于InnoDB，且必须在交易区块(BEGIN/COMMIT)中才能生效。</strong><br><strong>注2: 要测试锁定的状况，可以利用MySQL的Command Mode ，开二个视窗来做测试。</strong><br>在MySql 5.0中测试确实是这样的<br>另外：MyAsim 只支持表级锁，InnerDB支持行级锁<br>添加了(行级锁/表级锁)锁的数据不能被其它事务再锁定，也不被其它事务修改（修改、删除）<br>是表级锁时，不管是否查询到记录，都会锁定表<br>此外，如果A与B都对表id进行查询但查询不到记录，则A与B在查询上不会进行row锁，但A与B都会获取排它锁，此时A再插入一条记录的话则会因为B已经有锁而处于等待中，此时B再插入一条同样的数据则会抛出Deadlock found when trying to get lock; try restarting transaction然后释放锁，此时A就获得了锁而插入成功。</p>
+<blockquote>
+<p>作者：程序猿的内心独白</p>
+<p>来源：<a href="https://www.toutiao.com/a6662126156524814860/" target="_blank" rel="noopener">https://www.toutiao.com/a6662126156524814860/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E9%94%81/" rel="tag"># 锁</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/27/Java-Web%E4%B9%B1%E7%A0%81%E9%97%AE%E9%A2%98%E7%BB%88%E6%9E%81%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88/" rel="prev" title="Java Web乱码问题终极解决方案">
+      <i class="fa fa-chevron-left"></i> Java Web乱码问题终极解决方案
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/27/MySQL-%E6%80%A7%E8%83%BD%E4%BC%98%E5%8C%96%E7%A5%9E%E5%99%A8-Explain-%E4%BD%BF%E7%94%A8%E5%88%86%E6%9E%90/" rel="next" title="MySQL 性能优化神器 Explain 使用分析">
+      MySQL 性能优化神器 Explain 使用分析 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">209</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">42</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">70</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

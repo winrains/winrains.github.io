@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="前言MyISAM和InnoDB是MySQL最常用的两个存储引擎，本文将进行详尽的介绍和对比。对于MySQL其余几种存储引擎，请读者自行搜索学习。本文会图解两种引擎的索引结构区别，然后讲解索引的原理，理解本文内容，就能够理解索引优化的各种原则的背后原因。限于篇幅，本篇没有介绍的知识，会在后续博客将逐一讲解。例如：MySQL引擎的锁机制、多列索引的生效规则、索引优化等主题。">
+<meta name="keywords" content="索引">
+<meta property="og:type" content="article">
+<meta property="og:title" content="MySQL索引原理">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;27&#x2F;MySQL%E7%B4%A2%E5%BC%95%E5%8E%9F%E7%90%86&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="前言MyISAM和InnoDB是MySQL最常用的两个存储引擎，本文将进行详尽的介绍和对比。对于MySQL其余几种存储引擎，请读者自行搜索学习。本文会图解两种引擎的索引结构区别，然后讲解索引的原理，理解本文内容，就能够理解索引优化的各种原则的背后原因。限于篇幅，本篇没有介绍的知识，会在后续博客将逐一讲解。例如：MySQL引擎的锁机制、多列索引的生效规则、索引优化等主题。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190822102602-249bd.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190822102603-ec00e.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190822102603-6adc6.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190822102603-5d7d3.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190822102603-249c5.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190822102603-edd33.jpeg">
+<meta property="og:updated_time" content="2019-12-27T02:25:41.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190822102602-249bd.jpeg">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/27/MySQL%E7%B4%A2%E5%BC%95%E5%8E%9F%E7%90%86/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>MySQL索引原理 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">70</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">42</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">209</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/27/MySQL%E7%B4%A2%E5%BC%95%E5%8E%9F%E7%90%86/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          MySQL索引原理
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-27 10:25:41" itemprop="dateCreated datePublished" datetime="2019-12-27T10:25:41+08:00">2019-12-27</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/MySQL/" itemprop="url" rel="index">
+                    <span itemprop="name">MySQL</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>MyISAM和InnoDB是MySQL最常用的两个存储引擎，本文将进行详尽的介绍和对比。对于MySQL其余几种存储引擎，请读者自行搜索学习。<br>本文会图解两种引擎的索引结构区别，然后讲解索引的原理，理解本文内容，就能够理解索引优化的各种原则的背后原因。<br>限于篇幅，本篇没有介绍的知识，会在后续博客将逐一讲解。例如：MySQL引擎的锁机制、多列索引的生效规则、索引优化等主题。</p>
+<a id="more"></a>
+
+<p>下面SQL在本篇介绍引擎的结构区别时使用的表结构，便于读者更好理解。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">TABLE</span> <span class="string">`user`</span> (</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="string">`id`</span> <span class="built_in">int</span>(<span class="number">11</span>) <span class="keyword">NOT</span> <span class="literal">NULL</span> AUTO_INCREMENT <span class="keyword">COMMENT</span> <span class="string">'唯一码'</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="string">`age`</span> <span class="built_in">int</span>(<span class="number">5</span>) <span class="keyword">NOT</span> <span class="literal">NULL</span> <span class="keyword">COMMENT</span> <span class="string">'年龄'</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="string">`name`</span> <span class="built_in">varchar</span>(<span class="number">5</span>) <span class="keyword">NOT</span> <span class="literal">NULL</span> <span class="keyword">COMMENT</span> <span class="string">'名字'</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">PRIMARY <span class="keyword">KEY</span> (<span class="string">`id`</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">KEY</span> <span class="string">`name`</span> (<span class="string">`name`</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">) <span class="keyword">ENGINE</span>=<span class="keyword">InnoDB</span> AUTO_INCREMENT=<span class="number">92</span> <span class="keyword">DEFAULT</span></span></pre></td></tr></table></figure>
+
+<blockquote>
+<p>B-树、B树和B-tree是同一个数据结构，只不过英语翻译过来之后，有些人误解了以为是多种树。所以好多讲解树的数据结构的博客完全是误导初学者。。。请读者认真分辨。</p>
+</blockquote>
+<p>MyISAM和InnoDB的索引均采用B+树数据结构，所以接下来先介绍一下B树与B+树。</p>
+<h1 id="B树与B-树"><a href="#B树与B-树" class="headerlink" title="B树与B+树"></a>B树与B+树</h1><h2 id="B树"><a href="#B树" class="headerlink" title="B树"></a><strong>B树</strong></h2><p>B树是一种多路搜索树。</p>
+<ol>
+<li>定义任意非叶子结点最多只有M个儿子，且M&gt;2。</li>
+<li>根结点的儿子数为[2, M]。</li>
+<li>除根结点以外的非叶子结点的儿子数为[M/2, M]。</li>
+<li>每个结点存放至少M/2-1（取上整）和至多M-1个关键字；（至少2个关键字）。</li>
+<li>非叶子结点的关键字个数=指向儿子的指针个数-1。</li>
+<li>非叶子结点的关键字：K[1], K[2], …, K[M-1]，且K[i] &lt;= K[i+1]。</li>
+<li>非叶子结点的指针：P[1], P[2], …,P[M]（其中P[1]指向关键字小于K[1]的子树，P[M]指向关键字大于K[M-1]的子树，其它P[i]指向关键字属于(K[i-1], K[i])的子树）。</li>
+<li>所有叶子结点位于同一层。</li>
+</ol>
+<p>下图是一个M=4阶的B树。</p>
+<p><img src="http://image.winrains.cn/2019/08/20190822102602-249bd.jpeg" alt="一篇文章彻底搞懂MySQL的索引原理"></p>
+<p>B树的搜索，从根结点开始，对结点内的关键字（有序）序列进行二分查找，如果命中则结束，否则进入查询关键字所属范围的儿子结点；重复，直到所对应的是叶子结点。<br>查找文件29的过程：</p>
+<ol>
+<li>根据根结点指针找到文件目录的根磁盘块1，将其中的信息导入内存。（磁盘IO操作1次）</li>
+<li>此时内存中有两个文件名17，35和三个存储其他磁盘页面地址的数据。根据算法我们发现17&lt;29&lt;35，因此我们找到指针p2。</li>
+<li>根据p2指针，我们定位到磁盘块3，并将其中的信息导入内存。（磁盘IO操作2次）</li>
+<li>此时内存中有两个文件名26，30和三个存储其他磁盘页面地址的数据。根据算法我们发现26&lt;29&lt;30，因此我们找到指针p2。</li>
+<li>根据p2指针，我们定位到磁盘块8，并将其中的信息导入内存。（磁盘IO操作3次）</li>
+<li>此时内存中有两个文件名28，29。根据算法我们查找到文件29，并定位了该文件内存的磁盘地址。</li>
+</ol>
+<p>下面的动画是4阶B树插入的过程。<br>（因为动图时间过长，微信无法显示。请查看原文阅读博客，可以正常显示动图）<br>B树的特性：</p>
+<ol>
+<li>关键字分布在整颗树的所有节点。</li>
+<li>任何一个关键字出现且只出现在一个结点中。</li>
+<li>搜索有可能在非叶子结点结束。</li>
+<li>其搜索性能等价于在关键字全集内做一次二分查找。</li>
+</ol>
+<h2 id="B-树"><a href="#B-树" class="headerlink" title="B+树"></a><strong>B+树</strong></h2><p>下图是一个M=3阶的B+树。<br>一般在数据库系统或文件系统中使用的B+Tree结构都在经典B+Tree的基础上进行了优化，增加了顺序访问指针。</p>
+<p><img src="http://image.winrains.cn/2019/08/20190822102603-ec00e.jpeg" alt="一篇文章彻底搞懂MySQL的索引原理"></p>
+<p>B+树是B树的一种变形树，总结起来，数据库索引的B+树与B树的差异在于：</p>
+<ol>
+<li>非叶子结点的子树指针与关键字个数相同。</li>
+<li>非叶子结点的子树指针P[i]，指向关键字值属于[K[i],K[i+1])的子树（注意，区间是前闭后开）。</li>
+<li>为所有叶子结点增加一个链指针。</li>
+<li>所有关键字都在叶子结点出现。</li>
+</ol>
+<p>B+树的特性：</p>
+<ol>
+<li>所有关键字都出现在叶子结点的链表中，且链表中的关键字是有序的。</li>
+<li>搜索只在叶子结点命中。</li>
+<li>非叶子结点相当于是叶子结点的索引，叶子结点是存储关键字数据的数据层。</li>
+</ol>
+<h2 id="B-树做索引的原因"><a href="#B-树做索引的原因" class="headerlink" title="B-/+树做索引的原因"></a><strong>B-/+树做索引的原因</strong></h2><p>解释这个问题之前，需要了解一些基础知识。</p>
+<h3 id="局部性原理与磁盘预读"><a href="#局部性原理与磁盘预读" class="headerlink" title="局部性原理与磁盘预读"></a><strong>局部性原理与磁盘预读</strong></h3><p>由于存储介质的特性，磁盘本身存取就比主存慢很多，再加上机械运动耗费，磁盘的存取速度往往是主存的几百分之一，因此为了提高效率，要尽量减少磁盘I/O。为了达到这个目的，磁盘往往不是严格按需读取，而是每次都会预读，即使只需要一个字节，磁盘也会从这个位置开始，顺序向后读取一定长度的数据放入内存。这样做的理论依据是计算机科学中著名的局部性原理：</p>
+<blockquote>
+<p>当一个数据被用到时，其附近的数据也通常会马上被使用——程序运行期间所需要的数据通常比较集中。</p>
+</blockquote>
+<p>由于磁盘顺序读取的效率很高（不需要寻道时间，只需很少的旋转时间），因此对于具有局部性的程序来说，预读可以提高I/O效率。<br>预读的长度一般为页的整倍数。页是计算机管理存储器的逻辑块，硬件及操作系统往往将主存和磁盘存储区分割为连续的大小相等的块，每个存储块称为一页（在许多操作系统中，页得大小通常为4k），主存和磁盘以页为单位交换数据。当程序要读取的数据不在主存中时，会触发一个缺页异常，此时系统会向磁盘发出读盘信号，磁盘会找到数据的起始位置并向后连续读取一页或几页载入内存中，然后异常返回，程序继续运行。</p>
+<h3 id="B-树做索引的原因分析"><a href="#B-树做索引的原因分析" class="headerlink" title="B-/+树做索引的原因分析"></a><strong>B-/+树做索引的原因分析</strong></h3><p>一般来说，磁盘I/O次数可以用于评价索引结构的优劣。在B-Tree中查找，可知检索一次最多需要访问h个节点（上文举例查找文件29的过程）。数据库系统的设计者巧妙利用了磁盘预读原理，将一个节点的大小设为等于一个页，这样每个节点只需要一次I/O就可以完全载入。<br>为了达到这个目的，在实际实现中，B树还使用如下技巧：</p>
+<ol>
+<li>每次新建节点时，直接申请一个页的空间，这样就保证一个节点物理上也存储在一个页里，加之计算机存储分配都是按页对齐的，就实现了一个节点只需一次I/O。</li>
+<li>B树中一次检索最多需要h-1次I/O（根节点常驻内存）。一般实际应用中，出度d（树的分叉数）是非常大的数字，通常超过100；h非常小，通常不超过3。</li>
+</ol>
+<p>综上所述，用B树作为索引结构效率是非常高的。<br>红黑树或者平衡二叉树的其他树结构，</p>
+<ol>
+<li>h明显要深的多，执行效率低。</li>
+<li>逻辑上很近的节点（父子）物理上可能很远，无法利用局部性，</li>
+<li>每个节点存储的数据量太小了，对磁盘空间造成浪费，带来频繁的IO操作。</li>
+</ol>
+<p>所以其他树结构的效率明显比B树差很多。<br>相对B树，B+树做索引的优势</p>
+<ol>
+<li>B+树的磁盘读写代价更低：B+树的内部节点并没有指向关键字具体信息的指针，因此其内部节点相对B树更小，如果把所有同一内部节点的关键字存放在同一盘块中，那么盘块所能容纳的关键字数量也越多，一次性读入内存的需要查找的关键字也就越多，相对IO读写次数就降低了。</li>
+<li>B+树的查询效率更加稳定：由于所有数据都存于叶子节点。所有关键字查询的路径长度相同，每一个数据的查询效率相当。</li>
+<li>B树在提高了IO性能的同时并没有解决元素遍历的我效率低下的问题，正是为了解决这个问题，B+树应用而生。B+树只需要去遍历叶子节点就可以实现整棵树的遍历。</li>
+</ol>
+<blockquote>
+<p>笔者认为第三条原因才是MySQL使用B+树而不是B树做索引的主要原因，毕竟MongoDB的索引是B树，所以两种数据结构并没有绝对的好坏，要看实际的业务需求。</p>
+</blockquote>
+<h1 id="MyISAM"><a href="#MyISAM" class="headerlink" title="MyISAM"></a>MyISAM</h1><h2 id="磁盘存储"><a href="#磁盘存储" class="headerlink" title="磁盘存储"></a><strong>磁盘存储</strong></h2><p>MyISAM在磁盘存储上有三个文件，每个文件名以表名开头，扩展名指出文件类型。</p>
+<ul>
+<li>.frm：用于存储表的定义。</li>
+<li>.MYD：用于存放数据。</li>
+<li>.MYI：用于存放表索引。</li>
+</ul>
+<h2 id="索引"><a href="#索引" class="headerlink" title="索引"></a><strong>索引</strong></h2><h3 id="主键索引"><a href="#主键索引" class="headerlink" title="主键索引"></a>主键索引</h3><p>MyISAM引擎使用B+树作为索引结果，叶节点的data域存放的是数据记录的地址。</p>
+<p><img src="http://image.winrains.cn/2019/08/20190822102603-6adc6.jpeg" alt="一篇文章彻底搞懂MySQL的索引原理"></p>
+<p>MyISAM索引文件和数据文件是分离的，索引文件仅保存记录所在页的指针（物理位置），通过这些地址来读取页，进而读取被索引的行。<br>树中叶子保存的是对应行的物理位置。通过该值，存储引擎能顺利地进行回表查询，得到一行完整记录。同时，每个叶子页也保存了指向下一个叶子页的指针。从而方便叶子节点的范围遍历。</p>
+<h3 id="辅助索引"><a href="#辅助索引" class="headerlink" title="辅助索引"></a><strong>辅助索引</strong></h3><p>在MyISAM中，主键索引和辅助索引在结构上没有任何区别，只是主键索引要求key是唯一的，而辅助索引的key可以重复。</p>
+<p><img src="http://image.winrains.cn/2019/08/20190822102603-5d7d3.jpeg" alt="一篇文章彻底搞懂MySQL的索引原理"></p>
+<h1 id="Innodb"><a href="#Innodb" class="headerlink" title="Innodb"></a>Innodb</h1><p>MySQL5.5开始支持InnoDB引擎，并将其作为默认数据库引擎。</p>
+<h2 id="磁盘存储-1"><a href="#磁盘存储-1" class="headerlink" title="磁盘存储"></a><strong>磁盘存储</strong></h2><p>Innodb有两种存储方式，共享表空间存储和多表空间存储。<br>Innodb只有表结构文件和数据文件。<br>表结构文件和MyISAM一样，以表名开头，扩展名是.frm。<br>数据文件与存储方式有关：</p>
+<ul>
+<li>如果使用共享表空间，那么所有表的数据文件和索引文件都保存在一个表空间里，一个表空间可以有多个文件，通过innodb_data_file_path和innodb_data_home_dir参数设置共享表空间的位置和名字，一般共享表空间的名字叫ibdata1-n。</li>
+<li>如果使用多表空间，那么每个表都有一个表空间文件用于存储每个表的数据和索引，文件名以表名开头，以.ibd为扩展名。</li>
+</ul>
+<h2 id="索引-1"><a href="#索引-1" class="headerlink" title="索引"></a><strong>索引</strong></h2><h3 id="主键索引-1"><a href="#主键索引-1" class="headerlink" title="主键索引"></a><strong>主键索引</strong></h3><p>Innodb主键索引中，既存储了主键值，又存储了行数据。</p>
+<p><img src="http://image.winrains.cn/2019/08/20190822102603-249c5.jpeg" alt="一篇文章彻底搞懂MySQL的索引原理"></p>
+<h3 id="辅助索引-1"><a href="#辅助索引-1" class="headerlink" title="辅助索引"></a><strong>辅助索引</strong></h3><p>对于辅助索引，InnoDB采用的方式是在叶子页中保存主键值，通过这个主键值来回表（上图）查询到一条完整记录，因此按辅助索引检索实际上进行了二次查询，效率肯定是没有按照主键检索高的。</p>
+<p><img src="http://image.winrains.cn/2019/08/20190822102603-edd33.jpeg" alt="一篇文章彻底搞懂MySQL的索引原理"></p>
+<h1 id="Innodb与MyISAM的区别"><a href="#Innodb与MyISAM的区别" class="headerlink" title="Innodb与MyISAM的区别"></a>Innodb与MyISAM的区别</h1><h2 id="1-存储结构"><a href="#1-存储结构" class="headerlink" title="1. 存储结构"></a>1<strong>. 存储结构</strong></h2><p>MyISAM存储表分为三个文件frm（表结构）、MYD（表数据）、MYI（表索引），而Innodb如上文所说，根据存储方式不同，存储结构不同。</p>
+<h2 id="2-事务支持"><a href="#2-事务支持" class="headerlink" title="2. 事务支持"></a>2<strong>. 事务支持</strong></h2><p>MyISAM不支持事务，而Innodb支持事务，具有事务、回滚和恢复的事务安全。</p>
+<h2 id="3-外键和主键"><a href="#3-外键和主键" class="headerlink" title="3. 外键和主键"></a>3. <strong>外键和主键</strong></h2><p>MyISAM不支持外键，而Innodb支持外键。MyISAM允许没有主键，但是Innodb必须有主键，若未指定主键，会自动生成长度为6字节的主键。</p>
+<h2 id="4-锁"><a href="#4-锁" class="headerlink" title="4. 锁"></a>4. 锁</h2><p>MyISAM只支持表级锁，而Innodb支持行级锁，具有比较好的并发性能，但是行级锁只有在where子句是对主键筛选才生效，非主键where会锁全表</p>
+<h2 id="5-索引"><a href="#5-索引" class="headerlink" title="5. 索引"></a>5. 索引</h2><p>MyISAM使用B+树作为索引结构，叶节点保存的是存储数据的地址，主键索引key值唯一，辅助索引key可以重复，二者在结构上相同。Innodb也是用B+树作为索引结构，数据表本身就是按照b+树组织，叶节点key值为数据记录的主键，data域为完整的数据记录，辅助索引data域保存的是数据记录的主键。</p>
+<h1 id="FAQ"><a href="#FAQ" class="headerlink" title="FAQ"></a>FAQ</h1><p>MongoDB的索引为什么选择B树，而Mysql的索引是B+树<br>MongoDB不是传统的关系性数据库，而是以Json格式作为存储的nosql，目的就是高性能，高可用，易扩展。首先它摆脱了关系模型，所以范围查询和遍历查询的需求就没那么强烈了，其次Mysql由于使用B+树，数据都在叶节点上，每次查询都需要访问到叶节点，而MongoDB使用B-树，所有节点都有Data域，只要找到指定索引就可以进行访问。<br>总体来说，Mysql选用B+树和MongoDB选用B-树还是以自己的需求来选择的。</p>
+<h1 id="索引有关的名词解释"><a href="#索引有关的名词解释" class="headerlink" title="索引有关的名词解释"></a><strong>索引有关的名词解释</strong></h1><h2 id="普通索引"><a href="#普通索引" class="headerlink" title="普通索引"></a>普通索引</h2><p>用表中的普通列构建的索引，没有任何限制</p>
+<h2 id="唯一索引"><a href="#唯一索引" class="headerlink" title="唯一索引"></a>唯一索引</h2><p>唯一索引列的值必须唯一，但允许有空值。如果是组合索引，则列值的组合必须唯一。</p>
+<h2 id="主键索引-2"><a href="#主键索引-2" class="headerlink" title="主键索引"></a>主键索引</h2><p>根据主键建立索引，不允许重复，不允许空值；</p>
+<h2 id="全文索引"><a href="#全文索引" class="headerlink" title="全文索引"></a>全文索引</h2><p>仅可用于MyISAM表，针对较大的数据，生成全文索引非常的消耗时间和空间（在生成FULLTEXT索引时，会为文本生成一份单词的清单，在索引时及根据这个单词的清单来索引）。</p>
+<h2 id="组合索引"><a href="#组合索引" class="headerlink" title="组合索引"></a>组合索引</h2><p>又叫联合索引。用多个列组合构建的索引，这多个列中的值不允许有空值。可以在创建表的时候指定，也可以修改表结构。</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">ALTER</span> <span class="keyword">TABLE</span> <span class="string">'table_name'</span> <span class="keyword">ADD</span> <span class="keyword">INDEX</span> index_name(<span class="string">'col1'</span>,<span class="string">'col2'</span>,<span class="string">'col3'</span>)；</span></pre></td></tr></table></figure>
+
+<p>为了更多的提高mysql效率可建立组合索引，遵循”最左前缀“原则。创建复合索引时应该将最常用（频率）作限制条件的列放在最左边，依次递减。示例的组合索引相当于建立了col1,col1col2,col1col2col3三个索引，而col2或者col3是不能使用索引的。</p>
+<h2 id="最左前缀规则"><a href="#最左前缀规则" class="headerlink" title="最左前缀规则"></a>最左前缀规则</h2><p>假设联合索引由列(a,b,c)组成，则一下顺序满足最左前缀规则：a、ab、abc；selece、where、order by 、group by都可以匹配最左前缀。其它情况都不满足最左前缀规则就不会用到联合索引。</p>
+<h2 id="聚集索引"><a href="#聚集索引" class="headerlink" title="聚集索引"></a>聚集索引</h2><p>定义：数据行的物理顺序与列值（一般是主键的那一列）的逻辑顺序相同，一个表中只能拥有一个聚集索引。<br>如果定义了主键，Innodb会选择主键作为聚集索引；如果没有定义主键，Innodb会选择不包含NULL值的唯一索引作为聚集索引；如果也没有这样的唯一索引列，Innodb会选择内置6字节长的rowID作为隐含的聚集索引，这里的RowId会随着记录的写入而主键自增，但是它是不可引用和查看的，是数据库引擎内部的使用。<br>如果我们使用自增主键，那么每次插入的新纪录都在原先记录的尾部按照顺序，添加到当前节点的索引后面，当一页快写满的时候，就会开辟一个新的页。数据记录本身就存与主索引的叶子节点上，B+tree的树。这就要求每一个叶子节点内的各条数据记录按主键顺序存放，因此每当有一条新的记录插入的时候，MYSQL会根据其主键将其插入到合适的节点和位置上，如果页面达到装载因子（INNODB默认为15/16），则开辟新的页面（节点）<br>如果使用非自增主键（如果身份证号或学号等），由于每次插入主键的值近似于随机，因此每次新纪录都要被插到现有索引页得中间某个位置，此时MySQL不得不为了将新记录插到合适位置而移动数据，甚至目标页面可能已经被回写到磁盘上而从缓存中清掉，此时又要从磁盘上读回来，这增加了很多开销，同时频繁的移动、分页操作造成了大量的碎片，得到了不够紧凑的索引结构，后续不得不通过OPTIMIZE TABLE来重建表并优化填充页面。</p>
+<h2 id="非聚集索引"><a href="#非聚集索引" class="headerlink" title="非聚集索引"></a>非聚集索引</h2><p>定义：该索引中索引的逻辑顺序与磁盘上行的物理存储顺序不同，一个表中可以拥有多个非聚集索引。<br>除了InnoDB的主键索引，在mysql中的其他索引形式都是非聚集索引。</p>
+<h2 id="覆盖索引"><a href="#覆盖索引" class="headerlink" title="覆盖索引"></a>覆盖索引</h2><p>指从辅助索引中就能获取到需要的记录，而不需要查找主键索引中的记录。使用覆盖索引的一个好处是因为辅助索引不包括一条记录的整行信息，所以数据量较聚集索引要少，可以减少大量io操作。</p>
+<h2 id="覆盖查询失效"><a href="#覆盖查询失效" class="headerlink" title="覆盖查询失效"></a>覆盖查询失效</h2><ol>
+<li>select选择的字段中含有不在索引中的字段 ，即索引没有覆盖全部的列。</li>
+<li>where条件中不能含有对索引进行like的操作。</li>
+</ol>
+<blockquote>
+<p>作者：全菜工程师小辉</p>
+<p>来源：<a href="https://www.toutiao.com/i6725182666620011012/" target="_blank" rel="noopener">https://www.toutiao.com/i6725182666620011012/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E7%B4%A2%E5%BC%95/" rel="tag"># 索引</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/27/%E6%B7%B1%E5%85%A5%E5%AD%A6%E4%B9%A0Java%E7%BA%BF%E7%A8%8B%E6%B1%A0/" rel="prev" title="深入学习Java线程池">
+      <i class="fa fa-chevron-left"></i> 深入学习Java线程池
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/27/TCP-IP-%E5%8D%8F%E8%AE%AE%E8%AF%A6%E8%A7%A3/" rel="next" title="TCP/IP 协议详解">
+      TCP/IP 协议详解 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#前言"><span class="nav-number">1.</span> <span class="nav-text">前言</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#B树与B-树"><span class="nav-number">2.</span> <span class="nav-text">B树与B+树</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#B树"><span class="nav-number">2.1.</span> <span class="nav-text">B树</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#B-树"><span class="nav-number">2.2.</span> <span class="nav-text">B+树</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#B-树做索引的原因"><span class="nav-number">2.3.</span> <span class="nav-text">B-/+树做索引的原因</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#局部性原理与磁盘预读"><span class="nav-number">2.3.1.</span> <span class="nav-text">局部性原理与磁盘预读</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#B-树做索引的原因分析"><span class="nav-number">2.3.2.</span> <span class="nav-text">B-/+树做索引的原因分析</span></a></li></ol></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#MyISAM"><span class="nav-number">3.</span> <span class="nav-text">MyISAM</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#磁盘存储"><span class="nav-number">3.1.</span> <span class="nav-text">磁盘存储</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#索引"><span class="nav-number">3.2.</span> <span class="nav-text">索引</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#主键索引"><span class="nav-number">3.2.1.</span> <span class="nav-text">主键索引</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#辅助索引"><span class="nav-number">3.2.2.</span> <span class="nav-text">辅助索引</span></a></li></ol></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#Innodb"><span class="nav-number">4.</span> <span class="nav-text">Innodb</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#磁盘存储-1"><span class="nav-number">4.1.</span> <span class="nav-text">磁盘存储</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#索引-1"><span class="nav-number">4.2.</span> <span class="nav-text">索引</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#主键索引-1"><span class="nav-number">4.2.1.</span> <span class="nav-text">主键索引</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#辅助索引-1"><span class="nav-number">4.2.2.</span> <span class="nav-text">辅助索引</span></a></li></ol></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#Innodb与MyISAM的区别"><span class="nav-number">5.</span> <span class="nav-text">Innodb与MyISAM的区别</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#1-存储结构"><span class="nav-number">5.1.</span> <span class="nav-text">1. 存储结构</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-事务支持"><span class="nav-number">5.2.</span> <span class="nav-text">2. 事务支持</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3-外键和主键"><span class="nav-number">5.3.</span> <span class="nav-text">3. 外键和主键</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#4-锁"><span class="nav-number">5.4.</span> <span class="nav-text">4. 锁</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#5-索引"><span class="nav-number">5.5.</span> <span class="nav-text">5. 索引</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#FAQ"><span class="nav-number">6.</span> <span class="nav-text">FAQ</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#索引有关的名词解释"><span class="nav-number">7.</span> <span class="nav-text">索引有关的名词解释</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#普通索引"><span class="nav-number">7.1.</span> <span class="nav-text">普通索引</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#唯一索引"><span class="nav-number">7.2.</span> <span class="nav-text">唯一索引</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#主键索引-2"><span class="nav-number">7.3.</span> <span class="nav-text">主键索引</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#全文索引"><span class="nav-number">7.4.</span> <span class="nav-text">全文索引</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#组合索引"><span class="nav-number">7.5.</span> <span class="nav-text">组合索引</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#最左前缀规则"><span class="nav-number">7.6.</span> <span class="nav-text">最左前缀规则</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#聚集索引"><span class="nav-number">7.7.</span> <span class="nav-text">聚集索引</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#非聚集索引"><span class="nav-number">7.8.</span> <span class="nav-text">非聚集索引</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#覆盖索引"><span class="nav-number">7.9.</span> <span class="nav-text">覆盖索引</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#覆盖查询失效"><span class="nav-number">7.10.</span> <span class="nav-text">覆盖查询失效</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">209</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">42</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">70</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

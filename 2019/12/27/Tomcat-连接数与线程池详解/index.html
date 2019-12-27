@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="前言在使用tomcat时，经常会遇到连接数、线程数之类的配置问题，要真正理解这些概念，必须先了解Tomcat的连接器（Connector）。 在前面的文章 详解Tomcat配置文件server.xml 中写到过：Connector的主要功能，是接收连接请求，创建Request和Response对象用于和请求端交换数据；然后分配线程让Engine（也就是Servlet容器）来处理这个请求，并把产生的">
+<meta name="keywords" content="线程池,连接数">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Tomcat 连接数与线程池详解">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;27&#x2F;Tomcat-%E8%BF%9E%E6%8E%A5%E6%95%B0%E4%B8%8E%E7%BA%BF%E7%A8%8B%E6%B1%A0%E8%AF%A6%E8%A7%A3&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="前言在使用tomcat时，经常会遇到连接数、线程数之类的配置问题，要真正理解这些概念，必须先了解Tomcat的连接器（Connector）。 在前面的文章 详解Tomcat配置文件server.xml 中写到过：Connector的主要功能，是接收连接请求，创建Request和Response对象用于和请求端交换数据；然后分配线程让Engine（也就是Servlet容器）来处理这个请求，并把产生的">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190822102514-d8b8e.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190822102514-476dc.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190822102514-214cb.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190822102514-85c96.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190822102514-1b84d.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190822102514-8ecca.jpeg">
+<meta property="og:updated_time" content="2019-12-27T02:12:11.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;20190822102514-d8b8e.jpeg">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/27/Tomcat-%E8%BF%9E%E6%8E%A5%E6%95%B0%E4%B8%8E%E7%BA%BF%E7%A8%8B%E6%B1%A0%E8%AF%A6%E8%A7%A3/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Tomcat 连接数与线程池详解 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">70</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">42</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">209</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/27/Tomcat-%E8%BF%9E%E6%8E%A5%E6%95%B0%E4%B8%8E%E7%BA%BF%E7%A8%8B%E6%B1%A0%E8%AF%A6%E8%A7%A3/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Tomcat 连接数与线程池详解
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-27 10:12:11" itemprop="dateCreated datePublished" datetime="2019-12-27T10:12:11+08:00">2019-12-27</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/Tomcat/" itemprop="url" rel="index">
+                    <span itemprop="name">Tomcat</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a><strong>前言</strong></h2><p>在使用tomcat时，经常会遇到连接数、线程数之类的配置问题，要真正理解这些概念，必须先了解Tomcat的连接器（Connector）。</p>
+<p>在前面的文章 详解Tomcat配置文件server.xml 中写到过：Connector的主要功能，是接收连接请求，创建Request和Response对象用于和请求端交换数据；然后分配线程让Engine（也就是Servlet容器）来处理这个请求，并把产生的Request和Response对象传给Engine。当Engine处理完请求后，也会通过Connector将响应返回给客户端。</p>
+<p>可以说，Servlet容器处理请求，是需要Connector进行调度和控制的，Connector是Tomcat处理请求的主干，因此Connector的配置和使用对Tomcat的性能有着重要的影响。这篇文章将从Connector入手，讨论一些与Connector有关的重要问题，包括NIO/BIO模式、线程池、连接数等。</p>
+<p>根据协议的不同，Connector可以分为HTTP Connector、AJP Connector等，本文只讨论HTTP Connector。</p>
+<a id="more"></a>
+
+<h2 id="一、Nio、Bio、APR"><a href="#一、Nio、Bio、APR" class="headerlink" title="一、Nio、Bio、APR"></a>一、Nio、Bio、APR</h2><h3 id="1、Connector的protocol"><a href="#1、Connector的protocol" class="headerlink" title="1、Connector的protocol"></a><strong>1、Connector的protocol</strong></h3><p>Connector在处理HTTP请求时，会使用不同的protocol。不同的Tomcat版本支持的protocol不同，其中最典型的protocol包括BIO、NIO和APR（Tomcat7中支持这3种，Tomcat8增加了对NIO2的支持，而到了Tomcat8.5和Tomcat9.0，则去掉了对BIO的支持）。</p>
+<p>BIO是Blocking IO，顾名思义是阻塞的IO；NIO是Non-blocking IO，则是非阻塞的IO。而APR是Apache Portable Runtime，是Apache可移植运行库，利用本地库可以实现高可扩展性、高性能；Apr是在Tomcat上运行高并发应用的首选模式，但是需要安装apr、apr-utils、tomcat-native等包。</p>
+<h3 id="2、如何指定protocol"><a href="#2、如何指定protocol" class="headerlink" title="2、如何指定protocol"></a><strong>2、如何指定protocol</strong></h3><p>Connector使用哪种protocol，可以通过<connector>元素中的protocol属性进行指定，也可以使用默认值。</p>
+<p>指定的protocol取值及对应的协议如下：</p>
+<ul>
+<li>HTTP/1.1：默认值，使用的协议与Tomcat版本有关</li>
+<li>org.apache.coyote.http11.Http11Protocol：BIO</li>
+<li>org.apache.coyote.http11.Http11NioProtocol：NIO</li>
+<li>org.apache.coyote.http11.Http11Nio2Protocol：NIO2</li>
+<li>org.apache.coyote.http11.Http11AprProtocol：APR</li>
+</ul>
+<p>如果没有指定protocol，则使用默认值HTTP/1.1，其含义如下：在Tomcat7中，自动选取使用BIO或APR（如果找到APR需要的本地库，则使用APR，否则使用BIO）；在Tomcat8中，自动选取使用NIO或APR（如果找到APR需要的本地库，则使用APR，否则使用NIO）。</p>
+<h3 id="3、BIO-NIO有何不同"><a href="#3、BIO-NIO有何不同" class="headerlink" title="3、BIO/NIO有何不同"></a><strong>3、BIO/NIO有何不同</strong></h3><p>无论是BIO，还是NIO，Connector处理请求的大致流程是一样的：</p>
+<p>在accept队列中接收连接（当客户端向服务器发送请求时，如果客户端与OS完成三次握手建立了连接，则OS将该连接放入accept队列）；在连接中获取请求的数据，生成request；调用servlet容器处理请求；返回response。为了便于后面的说明，首先明确一下连接与请求的关系：连接是TCP层面的（传输层），对应socket；请求是HTTP层面的（应用层），必须依赖于TCP的连接实现；一个TCP连接中可能传输多个HTTP请求。</p>
+<p>在BIO实现的Connector中，处理请求的主要实体是JIoEndpoint对象。JIoEndpoint维护了Acceptor和Worker：Acceptor接收socket，然后从Worker线程池中找出空闲的线程处理socket，如果worker线程池没有空闲线程，则Acceptor将阻塞。其中Worker是Tomcat自带的线程池，如果通过<Executor>配置了其他线程池，原理与Worker类似。</p>
+<p>在NIO实现的Connector中，处理请求的主要实体是NIoEndpoint对象。NIoEndpoint中除了包含Acceptor和Worker外，还是用了Poller，处理流程如下图所示（图片来源：<a href="http://gearever.iteye.com/blog/1844203）。" target="_blank" rel="noopener">http://gearever.iteye.com/blog/1844203）。</a></p>
+<p><img src="http://image.winrains.cn/2019/08/20190822102514-d8b8e.jpeg" alt="干货 | Tomcat 连接数与线程池详解"></p>
+<p>Acceptor接收socket后，不是直接使用Worker中的线程处理请求，而是先将请求发送给了Poller，而Poller是实现NIO的关键。Acceptor向Poller发送请求通过队列实现，使用了典型的生产者-消费者模式。在Poller中，维护了一个Selector对象；当Poller从队列中取出socket后，注册到该Selector中；然后通过遍历Selector，找出其中可读的socket，并使用Worker中的线程处理相应请求。与BIO类似，Worker也可以被自定义的线程池代替。</p>
+<p>通过上述过程可以看出，在NIoEndpoint处理请求的过程中，无论是Acceptor接收socket，还是线程处理请求，使用的仍然是阻塞方式；但在“读取socket并交给Worker中的线程”的这个过程中，使用非阻塞的NIO实现，这是NIO模式与BIO模式的最主要区别（其他区别对性能影响较小，暂时略去不提）。而这个区别，在并发量较大的情形下可以带来Tomcat效率的显著提升：</p>
+<p>目前大多数HTTP请求使用的是长连接（HTTP/1.1默认keep-alive为true），而长连接意味着，一个TCP的socket在当前请求结束后，如果没有新的请求到来，socket不会立马释放，而是等timeout后再释放。如果使用BIO，“读取socket并交给Worker中的线程”这个过程是阻塞的，也就意味着在socket等待下一个请求或等待释放的过程中，处理这个socket的工作线程会一直被占用，无法释放；因此Tomcat可以同时处理的socket数目不能超过最大线程数，性能受到了极大限制。而使用NIO，“读取socket并交给Worker中的线程”这个过程是非阻塞的，当socket在等待下一个请求或等待释放时，并不会占用工作线程，因此Tomcat可以同时处理的socket数目远大于最大线程数，并发性能大大提高。</p>
+<h2 id="二、3个参数：acceptCount、maxConnections、maxThreads"><a href="#二、3个参数：acceptCount、maxConnections、maxThreads" class="headerlink" title="二、3个参数：acceptCount、maxConnections、maxThreads"></a>二、3个参数：acceptCount、maxConnections、maxThreads</h2><p>再回顾一下Tomcat处理请求的过程：在accept队列中接收连接（当客户端向服务器发送请求时，如果客户端与OS完成三次握手建立了连接，则OS将该连接放入accept队列）；在连接中获取请求的数据，生成request；调用servlet容器处理请求；返回response。</p>
+<p>相对应的，Connector中的几个参数功能如下：</p>
+<h3 id="1、acceptCount"><a href="#1、acceptCount" class="headerlink" title="1、acceptCount"></a><strong>1、acceptCount</strong></h3><p>accept队列的长度；当accept队列中连接的个数达到acceptCount时，队列满，进来的请求一律被拒绝。默认值是100。</p>
+<h3 id="2、maxConnections"><a href="#2、maxConnections" class="headerlink" title="2、maxConnections"></a><strong>2、maxConnections</strong></h3><p>Tomcat在任意时刻接收和处理的最大连接数。当Tomcat接收的连接数达到maxConnections时，Acceptor线程不会读取accept队列中的连接；这时accept队列中的线程会一直阻塞着，直到Tomcat接收的连接数小于maxConnections。如果设置为-1，则连接数不受限制。</p>
+<p>默认值与连接器使用的协议有关：NIO的默认值是10000，APR/native的默认值是8192，而BIO的默认值为maxThreads（如果配置了Executor，则默认值是Executor的maxThreads）。</p>
+<p>在windows下，APR/native的maxConnections值会自动调整为设置值以下最大的1024的整数倍；如设置为2000，则最大值实际是1024。</p>
+<h3 id="3、maxThreads"><a href="#3、maxThreads" class="headerlink" title="3、maxThreads"></a><strong>3、maxThreads</strong></h3><p>请求处理线程的最大数量。默认值是200（Tomcat7和8都是的）。如果该Connector绑定了Executor，这个值会被忽略，因为该Connector将使用绑定的Executor，而不是内置的线程池来执行任务。</p>
+<p>maxThreads规定的是最大的线程数目，并不是实际running的CPU数量；实际上，maxThreads的大小比CPU核心数量要大得多。这是因为，处理请求的线程真正用于计算的时间可能很少，大多数时间可能在阻塞，如等待数据库返回数据、等待硬盘读写数据等。因此，在某一时刻，只有少数的线程真正的在使用物理CPU，大多数线程都在等待；因此线程数远大于物理核心数才是合理的。</p>
+<p>换句话说，Tomcat通过使用比CPU核心数量多得多的线程数，可以使CPU忙碌起来，大大提高CPU的利用率。</p>
+<h3 id="4、参数设置"><a href="#4、参数设置" class="headerlink" title="4、参数设置"></a><strong>4、参数设置</strong></h3><p>（1）maxThreads的设置既与应用的特点有关，也与服务器的CPU核心数量有关。通过前面介绍可以知道，maxThreads数量应该远大于CPU核心数量；而且CPU核心数越大，maxThreads应该越大；应用中CPU越不密集（IO越密集），maxThreads应该越大，以便能够充分利用CPU。当然，maxThreads的值并不是越大越好，如果maxThreads过大，那么CPU会花费大量的时间用于线程的切换，整体效率会降低。</p>
+<p>（2）maxConnections的设置与Tomcat的运行模式有关。如果tomcat使用的是BIO，那么maxConnections的值应该与maxThreads一致；如果tomcat使用的是NIO，那么类似于Tomcat的默认值，maxConnections值应该远大于maxThreads。</p>
+<p>（3）通过前面的介绍可以知道，虽然tomcat同时可以处理的连接数目是maxConnections，但服务器中可以同时接收的连接数为maxConnections+acceptCount 。acceptCount的设置，与应用在连接过高情况下希望做出什么反应有关系。如果设置过大，后面进入的请求等待时间会很长；如果设置过小，后面进入的请求立马返回connection refused。</p>
+<h2 id="三、线程池Executor"><a href="#三、线程池Executor" class="headerlink" title="三、线程池Executor"></a>三、线程池Executor</h2><p>Executor元素代表Tomcat中的线程池，可以由其他组件共享使用；要使用该线程池，组件需要通过executor属性指定该线程池。</p>
+<p>Executor是Service元素的内嵌元素。一般来说，使用线程池的是Connector组件；为了使Connector能使用线程池，Executor元素应该放在Connector前面。Executor与Connector的配置举例如下：</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">&lt;Executor <span class="attribute">name</span>=<span class="string">"tomcatThreadPool"</span> namePrefix =<span class="string">"catalina-exec-"</span> <span class="attribute">maxThreads</span>=<span class="string">"150"</span> <span class="attribute">minSpareThreads</span>=<span class="string">"4"</span> /&gt;&lt;Connector <span class="attribute">executor</span>=<span class="string">"tomcatThreadPool"</span> <span class="attribute">port</span>=<span class="string">"8080"</span> <span class="attribute">protocol</span>=<span class="string">"HTTP/1.1"</span> <span class="attribute">connectionTimeout</span>=<span class="string">"20000"</span> <span class="attribute">redirectPort</span>=<span class="string">"8443"</span> <span class="attribute">acceptCount</span>=<span class="string">"1000"</span> /&gt;</span></pre></td></tr></table></figure>
+
+<p>Executor的主要属性包括：</p>
+<ul>
+<li>name：该线程池的标记</li>
+<li>maxThreads：线程池中最大活跃线程数，默认值200（Tomcat7和8都是）</li>
+<li>minSpareThreads：线程池中保持的最小线程数，最小值是25</li>
+<li>maxIdleTime：线程空闲的最大时间，当空闲超过该值时关闭线程（除非线程数小于minSpareThreads），单位是ms，默认值60000（1分钟）</li>
+<li>daemon：是否后台线程，默认值true</li>
+<li>threadPriority：线程优先级，默认值5</li>
+<li>namePrefix：线程名字的前缀，线程池中线程名字为：namePrefix+线程编号</li>
+</ul>
+<h2 id="四、查看当前状态"><a href="#四、查看当前状态" class="headerlink" title="四、查看当前状态"></a><strong>四、查看当前状态</strong></h2><p>上面介绍了Tomcat连接数、线程数的概念以及如何设置，下面说明如何查看服务器中的连接数和线程数。</p>
+<p>查看服务器的状态，大致分为两种方案：（1）使用现成的工具，（2）直接使用Linux的命令查看。</p>
+<p>现成的工具，如JDK自带的jconsole工具可以方便的查看线程信息（此外还可以查看CPU、内存、类、JVM基本信息等），Tomcat自带的manager，收费工具New Relic等。下图是jconsole查看线程信息的界面：</p>
+<p><img src="http://image.winrains.cn/2019/08/20190822102514-476dc.jpeg" alt="干货 | Tomcat 连接数与线程池详解"></p>
+<p>下面说一下如何通过Linux命令行，查看服务器中的连接数和线程数。</p>
+<h3 id="1、连接数"><a href="#1、连接数" class="headerlink" title="1、连接数"></a><strong>1、连接数</strong></h3><p>假设Tomcat接收http请求的端口是8083，则可以使用如下语句查看连接情况：</p>
+<figure class="highlight 1c"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">netstat –nat <span class="string">| grep 8083</span></span></pre></td></tr></table></figure>
+
+<p>结果如下所示：</p>
+<p><img src="http://image.winrains.cn/2019/08/20190822102514-214cb.jpeg" alt="干货 | Tomcat 连接数与线程池详解"></p>
+<p>可以看出，有一个连接处于listen状态，监听请求；除此之外，还有4个已经建立的连接（ESTABLISHED）和2个等待关闭的连接（CLOSE_WAIT）。</p>
+<h3 id="2、线程"><a href="#2、线程" class="headerlink" title="2、线程"></a><strong>2、线程</strong></h3><p>ps命令可以查看进程状态，如执行如下命令：</p>
+<figure class="highlight vim"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">ps</span> –<span class="keyword">e</span> | <span class="keyword">grep</span> java</span></pre></td></tr></table></figure>
+
+<p>结果如下图：</p>
+<p><img src="http://image.winrains.cn/2019/08/20190822102514-85c96.jpeg" alt="干货 | Tomcat 连接数与线程池详解"></p>
+<p>可以看到，只打印了一个进程的信息；27989是线程id，java是指执行的java命令。这是因为启动一个tomcat，内部所有的工作都在这一个进程里完成，包括主线程、垃圾回收线程、Acceptor线程、请求处理线程等等。</p>
+<p>通过如下命令，可以看到该进程内有多少个线程；其中，nlwp含义是number of light-weight process。</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">ps –o nlwp <span class="number">27989</span></span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/08/20190822102514-1b84d.jpeg" alt="干货 | Tomcat 连接数与线程池详解"></p>
+<p>可以看到，该进程内部有73个线程；但是73并没有排除处于idle状态的线程。要想获得真正在running的线程数量，可以通过以下语句完成：</p>
+<figure class="highlight coq"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">ps -eLo pid ,stat | <span class="type">grep</span> <span class="number">27989</span> | <span class="type">grep</span> running | <span class="type">wc</span> -l</span></pre></td></tr></table></figure>
+
+<p>其中ps -eLo pid ,stat可以找出所有线程，并打印其所在的进程号和线程当前的状态；两个grep命令分别筛选进程号和线程状态；wc统计个数。其中，ps -eLo pid ,stat | grep 27989输出的结果如下：</p>
+<p><img src="http://image.winrains.cn/2019/08/20190822102514-8ecca.jpeg" alt="干货 | Tomcat 连接数与线程池详解"></p>
+<p>图中只截图了部分结果；Sl表示大多数线程都处于空闲状态。</p>
+<blockquote>
+<p>作者：编程迷思</p>
+<p>来源：<a href="http://www.cnblogs.com/kismetv/p/7806063.html" target="_blank" rel="noopener">www.cnblogs.com/kismetv/p/7806063.html</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E7%BA%BF%E7%A8%8B%E6%B1%A0/" rel="tag"># 线程池</a>
+              <a href="/tags/%E8%BF%9E%E6%8E%A5%E6%95%B0/" rel="tag"># 连接数</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/27/%E4%B9%90%E8%A7%82%E9%94%81%E5%92%8C%E6%82%B2%E8%A7%82%E9%94%81/" rel="prev" title="乐观锁和悲观锁">
+      <i class="fa fa-chevron-left"></i> 乐观锁和悲观锁
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/27/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3synchronized%E5%BA%95%E5%B1%82%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/" rel="next" title="深入理解synchronized底层实现原理">
+      深入理解synchronized底层实现原理 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#前言"><span class="nav-number">1.</span> <span class="nav-text">前言</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#一、Nio、Bio、APR"><span class="nav-number">2.</span> <span class="nav-text">一、Nio、Bio、APR</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1、Connector的protocol"><span class="nav-number">2.1.</span> <span class="nav-text">1、Connector的protocol</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2、如何指定protocol"><span class="nav-number">2.2.</span> <span class="nav-text">2、如何指定protocol</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#3、BIO-NIO有何不同"><span class="nav-number">2.3.</span> <span class="nav-text">3、BIO/NIO有何不同</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#二、3个参数：acceptCount、maxConnections、maxThreads"><span class="nav-number">3.</span> <span class="nav-text">二、3个参数：acceptCount、maxConnections、maxThreads</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1、acceptCount"><span class="nav-number">3.1.</span> <span class="nav-text">1、acceptCount</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2、maxConnections"><span class="nav-number">3.2.</span> <span class="nav-text">2、maxConnections</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#3、maxThreads"><span class="nav-number">3.3.</span> <span class="nav-text">3、maxThreads</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#4、参数设置"><span class="nav-number">3.4.</span> <span class="nav-text">4、参数设置</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#三、线程池Executor"><span class="nav-number">4.</span> <span class="nav-text">三、线程池Executor</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#四、查看当前状态"><span class="nav-number">5.</span> <span class="nav-text">四、查看当前状态</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1、连接数"><span class="nav-number">5.1.</span> <span class="nav-text">1、连接数</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2、线程"><span class="nav-number">5.2.</span> <span class="nav-text">2、线程</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">209</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">42</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">70</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

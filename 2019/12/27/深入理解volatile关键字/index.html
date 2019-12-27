@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="volatile关键字修饰的成员变量具有两大特性：保证了该成员变量在不同线程之间的可见性；禁止对该成员变量进行重排序，也就保证了其有序性。但是volatile修饰的成员变量并不具有原子性，在并发下对它的修改是线程不安全的。下面分别举例来演示这两个特性，并且分析为什么volatile不是线程安全的。">
+<meta name="keywords" content="volatile">
+<meta property="og:type" content="article">
+<meta property="og:title" content="深入理解volatile关键字">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;27&#x2F;%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3volatile%E5%85%B3%E9%94%AE%E5%AD%97&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="volatile关键字修饰的成员变量具有两大特性：保证了该成员变量在不同线程之间的可见性；禁止对该成员变量进行重排序，也就保证了其有序性。但是volatile修饰的成员变量并不具有原子性，在并发下对它的修改是线程不安全的。下面分别举例来演示这两个特性，并且分析为什么volatile不是线程安全的。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;QQ%E6%88%AA%E5%9B%BE20190514143804-300x110.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;QQ%E6%88%AA%E5%9B%BE20190514150227-300x67.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;QQ%E6%88%AA%E5%9B%BE20190514145045-300x78.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;7d156-asdfjwqefj.gif">
+<meta property="og:updated_time" content="2019-12-27T02:22:46.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;08&#x2F;QQ%E6%88%AA%E5%9B%BE20190514143804-300x110.png">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/27/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3volatile%E5%85%B3%E9%94%AE%E5%AD%97/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>深入理解volatile关键字 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">70</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">42</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">209</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/27/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3volatile%E5%85%B3%E9%94%AE%E5%AD%97/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          深入理解volatile关键字
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-27 10:22:46" itemprop="dateCreated datePublished" datetime="2019-12-27T10:22:46+08:00">2019-12-27</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>volatile关键字修饰的成员变量具有两大特性：保证了该成员变量在不同线程之间的可见性；禁止对该成员变量进行重排序，也就保证了其有序性。但是volatile修饰的成员变量并不具有原子性，在并发下对它的修改是线程不安全的。下面分别举例来演示这两个特性，并且分析为什么volatile不是线程安全的。</p>
+<a id="more"></a>
+
+<h2 id="可见性"><a href="#可见性" class="headerlink" title="可见性"></a>可见性</h2><p>通过对<a href="https://mrbird.cc/Java-Memory-model.html" target="_blank" rel="noopener">JMM</a>的学习，我们都知道线程对主内存中共享变量的修改首先会从主内存获取值的拷贝，然后保存到线程的工作内存中。接着在工作内存中对值进行修改，最终刷回主内存。由于不同线程拥有各自的工作内存，所以它们对某个共享变量值的修改在没有刷回主内存的时候只对自己可见。<br>举个例子，假如有两个线程，其中一个线程用于修改共享变量value，另一个线程用于获取修改后的value：</p>
+<figure class="highlight cs"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">class</span> <span class="title">VolatileTest</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">static</span> <span class="keyword">int</span> INIT_VALUE = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> final <span class="keyword">static</span> <span class="keyword">int</span> LIMIT = <span class="number">5</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">main</span>(<span class="params">String[] args</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">new</span> Thread(() -&gt; &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">int</span> <span class="keyword">value</span> = INIT_VALUE;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">while</span> (<span class="keyword">value</span> &lt; LIMIT) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (<span class="keyword">value</span> != INIT_VALUE) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">                    System.<span class="keyword">out</span>.println(<span class="string">"获取更新后的值："</span> + INIT_VALUE);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">value</span> = INIT_VALUE;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        &#125;, <span class="string">"reader"</span>).start();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">new</span> Thread(() -&gt; &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">int</span> <span class="keyword">value</span> = INIT_VALUE;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">while</span> (INIT_VALUE &lt; LIMIT) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">                System.<span class="keyword">out</span>.println(<span class="string">"将值更新为："</span> + ++<span class="keyword">value</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">                INIT_VALUE = <span class="keyword">value</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">                    TimeUnit.MICROSECONDS.sleep(<span class="number">500</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">                &#125; <span class="keyword">catch</span> (InterruptedException e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">                    e.printStackTrace();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">        &#125;, <span class="string">"writer"</span>).start();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>writer线程每隔0.5秒将INIT_VALUE值递增，直到INIT_VALUE大于等于5。而reader线程则是不停的去获取INIT_VALUE的值，直到INIT_VALUE的值大于等于5。程序执行结果如下：<br><img src="http://image.winrains.cn/2019/08/QQ%E6%88%AA%E5%9B%BE20190514143804-300x110.png" alt="img"><br><img src="http://image.winrains.cn/2019/08/QQ%E6%88%AA%E5%9B%BE20190514150227-300x67.png" alt="img"><br>多执行几次可能每次结果都不一样，但是可以确定的是，writer对值的修改reader并不能马上感知到（如果能感知到的话，reader线程就不会停不下来了）。<br>为什么会出现上面的结果呢？因为writer线程在工作内存中修改了<code>INIT_VALUE</code>的值，即使它刷回主内存了，但是reader线程在此之前已经从主内存获取了<code>INIT_VALUE</code>的值（因为线程获取CPU时间片不确定性，这个值可能是0，也可能是被writer修改后的值，但writer线程是每隔0.5秒才会去修改值，所以reader获取到的<code>INIT_VALUE</code>的值一般不会是writer修改的最终值5），并保存到了reader线程的工作内存中。reader线程通过while不断的轮询判断value和<code>INIT_VALUE</code>的值是否相等，但是由于reader线程工作内存中已经有<code>INIT_VALUE</code>的值的拷贝了，所以reader并不会重新从主内存中获取被writer修改后的<code>INIT_VALUE</code>的值，reader线程里while条件一直成立，这就是为什么reader线程不会正常停止并且没有输出修改后的值的原因。<br>修改上面的例子，将<code>INIT_VALUE</code>成员变量使用volatile关键字修饰：</p>
+<figure class="highlight cs"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">class</span> <span class="title">VolatileTest</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">volatile</span> <span class="keyword">static</span> <span class="keyword">int</span> INIT_VALUE = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> final <span class="keyword">static</span> <span class="keyword">int</span> LIMIT = <span class="number">5</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">main</span>(<span class="params">String[] args</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">new</span> Thread(() -&gt; &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">int</span> <span class="keyword">value</span> = INIT_VALUE;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">while</span> (<span class="keyword">value</span> &lt; LIMIT) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (<span class="keyword">value</span> != INIT_VALUE) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">                    System.<span class="keyword">out</span>.println(<span class="string">"获取更新后的值："</span> + INIT_VALUE);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">value</span> = INIT_VALUE;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        &#125;, <span class="string">"reader"</span>).start();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">new</span> Thread(() -&gt; &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">int</span> <span class="keyword">value</span> = INIT_VALUE;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">while</span> (INIT_VALUE &lt; LIMIT) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">                System.<span class="keyword">out</span>.println(<span class="string">"将值更新为："</span> + ++<span class="keyword">value</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">                INIT_VALUE = <span class="keyword">value</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">                    TimeUnit.MICROSECONDS.sleep(<span class="number">500</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">                &#125; <span class="keyword">catch</span> (InterruptedException e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">                    e.printStackTrace();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">        &#125;, <span class="string">"writer"</span>).start();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/08/QQ%E6%88%AA%E5%9B%BE20190514145045-300x78.png" alt="img"><br>可以看到，reader线程已经可以正常停止了，因为最终<code>INIT_VALUE</code>的值肯定是5，并且reader可以感知到这个值被修改为5了。<br>为什么volatile修饰的成员变量在线程间具有可见性呢？因为通过volatile修饰，对此变量进行写操作时，汇编指令中会有一个LOCK前缀指令，加了这个指令后，会引发两件事情：</p>
+<ol>
+<li>将当前处理器缓存行的内容写回到系统内存，也就是强制将工作内存中的值刷回主内存；</li>
+<li>这个写回到内存的操作会使得在其他CPU里缓存了该内存地址的数据失效。其他CPU缓存数据失效，则会重新去内存中读取值，也就是被修改的数据。</li>
+</ol>
+<p>通过上面这两个特性，我们可以确定的是，writer对值进行修改并刷回主内存后，reader里<code>INIT_VALUE</code>值的拷贝就失效了，所以reader线程会再次从主内存中获取<code>INIT_VALUE</code>的值，这时候这个值已经是被writer线程修改刷新后的值了。</p>
+<h2 id="有序性"><a href="#有序性" class="headerlink" title="有序性"></a>有序性</h2><p>来看一个线程不安全的单例实现（双重同步锁单例模式，更多关于单例的介绍可以参考<a href="https://mrbird.cc/singleton.html" target="_blank" rel="noopener">单例的几种写法和对比</a>）:</p>
+<figure class="highlight smali"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public class SingletonTest &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    // 私有化构造函数，让外部没办法直接通过new来创建</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">   <span class="keyword"> private</span> SingletonTest() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    // 单例对象</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">   <span class="keyword"> private</span><span class="keyword"> static</span> SingletonTest<span class="built_in"> instance </span>= null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    // 静态工厂方法</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">   <span class="keyword"> public</span><span class="keyword"> static</span> SingletonTest getInstance() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">       <span class="built_in"> if </span>(instance == null) &#123; // 双重检测</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            synchronized (SingletonTest.class) &#123; // 同步锁</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">               <span class="built_in"> if </span>(instance == null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">                   <span class="built_in"> instance </span>=<span class="built_in"> new </span>SingletonTest();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">       <span class="built_in"> return </span>instance;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>上面的例子虽然加了同步锁，但是在多线程下并不是线程安全的。第12行<code>instance = new SingletonTest()</code>在实际执行的时候会被拆分为以下三个步骤:</p>
+<ol>
+<li>分配存储<code>SingletonTest</code>对象的内存空间；</li>
+<li>初始化<code>SingletonTest</code>对象；</li>
+<li>将<code>instance</code>指向刚刚分配的内存空间。</li>
+</ol>
+<p>通过JMM的学习我们都知道，在执行程序时，为了提高性能，编译器和处理器常常会对指令做重排序，因为第2步和第3步并没有依赖关系，所以可能发生重排序，排序后的步骤为：</p>
+<ol>
+<li>分配存储<code>SingletonTest</code>对象的内存空间；</li>
+<li>将<code>instance</code>指向刚刚分配的内存空间；</li>
+<li>初始化<code>SingletonTest</code>对象。</li>
+</ol>
+<p>经过重排序后，上面的例子在多线程下就会出现问题。假如现在有两个线程<code>A</code>和<code>B</code>同时调用<code>SingletonTest#getInstance</code>，线程<code>A</code>执行到了代码的第12行<code>instance = new SingletonTest()</code>，已经完成了对象内存空间的分配并将<code>instance</code>指向了该内存空间，线程<code>B</code>执行到了第9行，发现<code>instance</code>并不是null（因为已经指向了内存空间），所以就直接返回<code>instance</code>了。但是线程<code>A</code>并还没有执行初始化<code>SingletonTest</code>操作，所以实际线程<code>B</code>拿到的<code>SingletonTest</code>实例是空的，那么线程<code>B</code>后续对<code>SingletonTest</code>操控将抛出空指针异常。<br>要让上面的例子是线程安全的，只需要用volatile修饰单例对象即可：</p>
+<figure class="highlight smali"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public class SingletonTest &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    // 私有化构造函数，让外部没办法直接通过new来创建</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">   <span class="keyword"> private</span> SingletonTest() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    // 单例对象</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">   <span class="keyword"> private</span> volatile<span class="keyword"> static</span> SingletonTest<span class="built_in"> instance </span>= null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    // 静态工厂方法</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">   <span class="keyword"> public</span><span class="keyword"> static</span> SingletonTest getInstance() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">       <span class="built_in"> if </span>(instance == null) &#123; // 双重检测</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            synchronized (SingletonTest.class) &#123; // 同步锁</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">               <span class="built_in"> if </span>(instance == null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">                   <span class="built_in"> instance </span>=<span class="built_in"> new </span>SingletonTest();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">       <span class="built_in"> return </span>instance;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>因为通过volatile修饰的成员变量会添加内存屏障来阻止JVM进行指令重排优化。</p>
+<h2 id="线程不安全"><a href="#线程不安全" class="headerlink" title="线程不安全"></a>线程不安全</h2><p>举个递增的例子：</p>
+<figure class="highlight livescript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public <span class="class"><span class="keyword">class</span> <span class="title">VolatileTest2</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    private volatile static int value;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    public static <span class="literal">void</span> main(String[] args) throws InterruptedException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        Thread thread1 = <span class="keyword">new</span> Thread<span class="function"><span class="params">(() -&gt; IntStream.range(<span class="number">0</span>, <span class="number">500</span>).forEach(i -&gt; value += <span class="number">1</span>))</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="function">        <span class="title">Thread</span> <span class="title">thread2</span> = <span class="title">new</span> <span class="title">Thread</span><span class="params">(() -&gt; IntStream.range(<span class="number">0</span>, <span class="number">500</span>).forEach(i -&gt; value += <span class="number">1</span>))</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="function">        <span class="title">thread1</span>.<span class="title">start</span><span class="params">()</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="function">        <span class="title">thread2</span>.<span class="title">start</span><span class="params">()</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="function">        <span class="title">thread1</span>.<span class="title">join</span><span class="params">()</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="function">        <span class="title">thread2</span>.<span class="title">join</span><span class="params">()</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="function">        <span class="title">System</span>.<span class="title">out</span>.<span class="title">println</span><span class="params">(value)</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="function">    &#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="function">&#125;</span></span></pre></td></tr></table></figure>
+
+<p>多次运行上面的例子：<br><img src="http://image.winrains.cn/2019/08/7d156-asdfjwqefj.gif" alt="asdfjwqefj.gif"><br>可以看到最终的值有可能小于1000。<br>volatile可以保证修改的值能够马上更新到主内存，其他线程也会捕捉到被修改后的值，那么为什么不能保证原子性呢？<br>因为在Java中，只有对基本类型的赋值和修改才是原子性的，而对共享变量的修改并不是原子性的。通过<a href="https://mrbird.cc/Java-Memory-model.html" target="_blank" rel="noopener">JMM</a>内存交互协议我们可以知道，一个线程修改共享变量的值需要经过下面这些步骤：</p>
+<ol>
+<li>线程从主内存中读取（read）共享变量的值，然后载入（load）到线程的工作内存中的变量；</li>
+<li>使用（use）工作内存变量的值，执行加减操作，然后将修改后的值赋值（assign）给工作内存中的变量；</li>
+<li>将工作内存中修改后的变量的值存储（store）到主内存中，并执行写入（write）操作。</li>
+</ol>
+<p>所以上面的例子中，可能出现下面这种情况：<br><code>thread1</code>和<code>thread2</code>同时获取了value<code>的值</code>，比如为100。<code>thread1</code>执行了+1操作，然后写回主内存，这个时候<code>thread2</code>刚好执行完<code>use</code>操作（+1），准备执行assign（将+1后的值写回工作内存对应的变量中）操作。虽然这时候<code>thread2</code>工作内存中value值的拷贝无效了（因为volatile的特性），但是<code>thread2</code>已经执行完+1操作了，它并不需要再从主内存中获取value的值，所以<code>thread2</code>可以顺利地将+1后的值赋值给工作内存中的变量，然后刷回主存。这就是为什么上面的累加结果可能会小于1000的原因。<br>要让上面的例子是线程安全的话可以加同步锁，或者使用atomic类，后续会介绍到。</p>
+<blockquote>
+<p>作者：MrBird</p>
+<p>来源：<a href="https://mrbird.cc/volatile.html" target="_blank" rel="noopener">https://mrbird.cc/volatile.html</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/volatile/" rel="tag"># volatile</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/27/Spring-Boot%E6%95%B4%E5%90%88Kafka/" rel="prev" title="Spring Boot整合Kafka">
+      <i class="fa fa-chevron-left"></i> Spring Boot整合Kafka
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/27/Java-Concurrency-Lock/" rel="next" title="Java Concurrency Lock">
+      Java Concurrency Lock <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#可见性"><span class="nav-number">1.</span> <span class="nav-text">可见性</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#有序性"><span class="nav-number">2.</span> <span class="nav-text">有序性</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#线程不安全"><span class="nav-number">3.</span> <span class="nav-text">线程不安全</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">209</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">42</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">70</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
