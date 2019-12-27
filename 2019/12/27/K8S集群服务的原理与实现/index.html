@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="以我的经验来讲，理解K8S集群服务的概念，是比较不容易的一件事情。尤其是当我们基于似是而非的理解，去排查服务相关问题的时候，会非常不顺利。这体现在，对于新手来说，ping不通服务的IP地址这样基础的问题，都很难理解；而就算对经验很丰富的工程师来说，看懂服务相关的iptables配置，也是相当的挑战。今天这边文章，我来深入解释一下K8S集群服务的原理与实现，便于大家理解。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="K8S集群服务的原理与实现">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;27&#x2F;K8S%E9%9B%86%E7%BE%A4%E6%9C%8D%E5%8A%A1%E7%9A%84%E5%8E%9F%E7%90%86%E4%B8%8E%E5%AE%9E%E7%8E%B0&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="以我的经验来讲，理解K8S集群服务的概念，是比较不容易的一件事情。尤其是当我们基于似是而非的理解，去排查服务相关问题的时候，会非常不顺利。这体现在，对于新手来说，ping不通服务的IP地址这样基础的问题，都很难理解；而就算对经验很丰富的工程师来说，看懂服务相关的iptables配置，也是相当的挑战。今天这边文章，我来深入解释一下K8S集群服务的原理与实现，便于大家理解。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190901193553-dfa83.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190901193553-1d3ec.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190901193553-7d27c.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190901193554-18883.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190901193554-af290.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190901193554-c7ad2.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190901193555-ccf89.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190901193555-5b661.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190901193555-a086c.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190901193555-9d3f0.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190901193555-a6a94.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190901193556-d0569.jpeg">
+<meta property="og:updated_time" content="2019-12-27T03:40:21.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190901193553-dfa83.jpeg">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/27/K8S%E9%9B%86%E7%BE%A4%E6%9C%8D%E5%8A%A1%E7%9A%84%E5%8E%9F%E7%90%86%E4%B8%8E%E5%AE%9E%E7%8E%B0/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>K8S集群服务的原理与实现 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">76</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">48</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">229</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/27/K8S%E9%9B%86%E7%BE%A4%E6%9C%8D%E5%8A%A1%E7%9A%84%E5%8E%9F%E7%90%86%E4%B8%8E%E5%AE%9E%E7%8E%B0/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          K8S集群服务的原理与实现
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-27 11:40:21" itemprop="dateCreated datePublished" datetime="2019-12-27T11:40:21+08:00">2019-12-27</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">其它技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/Kubernetes/" itemprop="url" rel="index">
+                    <span itemprop="name">Kubernetes</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>以我的经验来讲，理解K8S集群服务的概念，是比较不容易的一件事情。尤其是当我们基于似是而非的理解，去排查服务相关问题的时候，会非常不顺利。<br>这体现在，对于新手来说，ping不通服务的IP地址这样基础的问题，都很难理解；而就算对经验很丰富的工程师来说，看懂服务相关的iptables配置，也是相当的挑战。<br>今天这边文章，我来深入解释一下K8S集群服务的原理与实现，便于大家理解。</p>
+<a id="more"></a>
+
+<h1 id="K8S集群服务的本质是什么"><a href="#K8S集群服务的本质是什么" class="headerlink" title="K8S集群服务的本质是什么"></a><strong>K8S集群服务的本质是什么</strong></h1><p>概念上来讲，K8S集群的服务，其实就是负载均衡、或反向代理。这跟阿里云的负载均衡产品，有很多类似的地方。和负载均衡一样，服务有它的IP地址以及前端端口；服务后边会挂载多个容器组Pod作为其“后端服务器”，这些“后端服务器”有自己的IP以及监听端口。</p>
+<p><img src="http://image.winrains.cn/2019/09/20190901193553-dfa83.jpeg" alt="K8S从懵圈到熟练 – 集群服务的三个要点和一种实现"></p>
+<p>当这样的负载均衡和后端的架构，与K8S集群结合的时候，我们可以想到的最直观的实现方式，就是集群中某一个节点专门做负载均衡（类似LVS）的角色，而其他节点则用来负载后端容器组。</p>
+<p><img src="http://image.winrains.cn/2019/09/20190901193553-1d3ec.jpeg" alt="K8S从懵圈到熟练 – 集群服务的三个要点和一种实现"></p>
+<p>这样的实现方法，有一个巨大的缺陷，就是单点问题。K8S集群是Google多年来自动化运维实践的结晶，这样的实现显然与其智能运维的哲学相背离的。</p>
+<h1 id="自带通信员"><a href="#自带通信员" class="headerlink" title="自带通信员"></a><strong>自带通信员</strong></h1><p>边车模式（Sidecar）是微服务领域的核心概念。边车模式，换一句通俗一点的说法，就是自带通信员。熟悉服务网格的同学肯定对这个很熟悉了。但是可能比较少人注意到，其实K8S集群原始服务的实现，也是基于Sidecar模式的。</p>
+<p><img src="http://image.winrains.cn/2019/09/20190901193553-7d27c.jpeg" alt="K8S从懵圈到熟练 – 集群服务的三个要点和一种实现"></p>
+<p>在K8S集群中，服务的实现，实际上是为每一个集群节点上，部署了一个反向代理Sidecar。而所有对集群服务的访问，都会被节点上的反向代理转换成对服务后端容器组的访问。基本上来说，节点和这些Sidecar的关系如下图所示。</p>
+<p><img src="http://image.winrains.cn/2019/09/20190901193554-18883.jpeg" alt="K8S从懵圈到熟练 – 集群服务的三个要点和一种实现"></p>
+<h1 id="把服务照进现实"><a href="#把服务照进现实" class="headerlink" title="把服务照进现实"></a><strong>把服务照进现实</strong></h1><p>前边两节，我们看到了，K8S集群的服务，本质上是负载均衡，即反向代理；同时我们知道了，在实际实现中，这个反向代理，并不是部署在集群某一个节点上，而是作为集群节点的边车，部署在每个节点上的。<br>在这里把服务照进反向代理这个现实的，是K8S集群的一个控制器，即kube-proxy。关于K8S集群控制器的原理，请参考我另外一篇关于控制器的文章。简单来说，kube-proxy作为部署在集群节点上的控制器，它们通过集群API Server监听着集群状态变化。当有新的服务被创建的时候，kube-proxy则会把集群服务的状态、属性，翻译成反向代理的配置。</p>
+<p><img src="http://image.winrains.cn/2019/09/20190901193554-af290.jpeg" alt="K8S从懵圈到熟练 – 集群服务的三个要点和一种实现"></p>
+<p>那剩下的问题，就是反向代理，即上图中Proxy的实现。</p>
+<h1 id="一种实现"><a href="#一种实现" class="headerlink" title="一种实现"></a><strong>一种实现</strong></h1><p>K8S集群节点实现服务反向代理的方法，目前主要有三种，即userspace、iptables以及ipvs。今天我们只深入分析iptables的方式，底层网络基于阿里云flannel集群网络。<br><strong>过滤器框架</strong><br>现在，我们来设想一种场景。我们有一个屋子。这个屋子有一个入水管和出水管。从入水管进入的水，是不能直接饮用的，因为有杂质。而我们期望，从出水管流出的水，可以直接饮用。为了达到目的，我们切开水管，在中间加一个杂质过滤器。</p>
+<p><img src="http://image.winrains.cn/2019/09/20190901193554-c7ad2.jpeg" alt="K8S从懵圈到熟练 – 集群服务的三个要点和一种实现"></p>
+<p>过了几天，我们的需求变了，我们不止要求从屋子里流出来的水可以直接饮用，我们还希望水是热水。所以我们不得不再在水管上增加一个切口，然后增加一个加热器。</p>
+<p><img src="http://image.winrains.cn/2019/09/20190901193555-ccf89.jpeg" alt="K8S从懵圈到熟练 – 集群服务的三个要点和一种实现"></p>
+<p>很明显，这种切开水管，增加新功能的方式是很丑陋的。因为需求可能随时会变，我们甚至很难保证，在经过一年半载之后，这跟水管还能找得到可以被切开的地方。<br>所以我们需要重新设计。首先我们不能随便切开水管，所以我们要把水管的切口固定下来。以上边的场景为例，我们确保水管只能有一个切口位置。其次，我们抽象出对水的两种处理方式：物理变化和化学变化。</p>
+<p><img src="http://image.winrains.cn/2019/09/20190901193555-5b661.jpeg" alt="K8S从懵圈到熟练 – 集群服务的三个要点和一种实现"></p>
+<p>基于以上的设计，如果我们需要过滤杂质，就可以在化学变化这个功能模块里增加一条过滤杂质的规则；如果我们需要增加温度的话，就可以在物理变化这个功能模块里增加一条加热的规则。<br>以上的过滤器框架，显然比切水管的方式，要优秀很多。设计这个框架，我们主要做了两件事情，一个是固定水管切口位置，另外一个是抽象出两种水处理方式。<br>理解这两件事情之后，我们可以来看下iptables，或者更准确的说法，netfilter的工作原理。netfilter实际上就是一个过滤器框架。netfilter在网络包收发及路由的管道上，一共切了5个口，分别是PREROUTING，FORWARD，POSTROUTING，INPUT以及OUTPUT；同时netfilter定义了包括nat、filter在内的若干个网络包处理方式。</p>
+<p><img src="http://image.winrains.cn/2019/09/20190901193555-a086c.jpeg" alt="K8S从懵圈到熟练 – 集群服务的三个要点和一种实现"></p>
+<p>需要注意的是，routing和forwarding很大程度上增加了以上netfilter的复杂程度，如果我们不考虑routing和forwarding，那么netfilter会变得更我们的水质过滤器框架一样简单。<br><strong>节点网络大图</strong><br>现在我们看一下K8S集群节点的网络全貌。横向来看，节点上的网络环境，被分割成不同的网络命名空间，包括主机网络命名空间和Pod网络命名空间；纵向来看，每个网络命名空间包括完整的网络栈，从应用到协议栈，再到网络设备。<br>在网络设备这一层，我们通过cni0虚拟网桥，组建出系统内部的一个虚拟局域网。Pod网络通过veth对连接到这个虚拟局域网内。cni0虚拟局域网通过主机路由以及网口eth0与外部通信。<br>在网络协议栈这一层，我们可以通过编程netfilter过滤器框架，来实现集群节点的反向代理。</p>
+<p><img src="http://image.winrains.cn/2019/09/20190901193555-9d3f0.jpeg" alt="K8S从懵圈到熟练 – 集群服务的三个要点和一种实现"></p>
+<p>实现反向代理，归根结底，就是做DNAT，即把发送给集群服务IP和端口的数据包，修改成发给具体容器组的IP和端口。<br>参考netfilter过滤器框架的图，我们知道，在netfilter里，可以通过在PREROUTING，OUTPUT以及POSTROUGING三个位置加入NAT规则，来改变数据包的源地址或目的地址。<br>因为这里需要做的是DNAT，即改变目的地址，这样的修改，必须在路由（ROUTING）之前发生以保证数据包可以被路由正确处理，所以实现反向代理的规则，需要被加到PREROUTING和OUTPUT两个位置。<br>其中，PREOURTING的规则，用来处理从Pod访问服务的流量。数据包从Pod网络veth发送到cni0之后，进入主机协议栈，首先会经过netfilter PREROUTING来做处理，所以发给服务的数据包，会在这个位置做DNAT。经过DNAT处理之后，数据包的目的地址变成另外一个Pod的地址，从而经过主机路由，转发到eth0，发送给正确的集群节点。<br>而添加在OUTPUT这个位置的DNAT规则，则用来处理从主机网络发给服务的数据包，原理也是类似，即经过路由之前，修改目的地址，以方便路由转发。<br><strong>升级过滤器框架</strong><br>在过滤器框架一节，我们看到netfilter是一个过滤器框架。netfilter在数据“管到”上切了5个口，分别在这5个口上，做一些数据包处理工作。虽然固定切口位置以及网络包处理方式分类已经极大的优化了过滤器框架，但是有一个关键的问题，就是我们还是得在管道上做修改以满足新的功能。换句话说，这个框架没有做到管道和过滤功能两者的彻底解耦。<br>为了实现管道和过滤功能两者的解耦，netfilter用了表这个概念。表就是netfilter的过滤中心，其核心功能是过滤方式的分类（表），以及每种过滤方式中，过滤规则的组织（链）。</p>
+<p><img src="http://image.winrains.cn/2019/09/20190901193555-a6a94.jpeg" alt="K8S从懵圈到熟练 – 集群服务的三个要点和一种实现"></p>
+<p>把过滤功能和管道解耦之后，所有对数据包的处理，都变成了对表的配置。而管道上的5个切口，仅仅变成了流量的出入口，负责把流量发送到过滤中心，并把处理之后的流量沿着管道继续传送下去。<br>如上图，在表中，netfilter把规则组织成为链。表中有针对每个管道切口的默认链，也有我们自己加入的自定义链。默认链是数据的入口，默认链可以通过跳转到自定义链来完成一些复杂的功能。这里允许增加自定义链的好处是显然的。为了完成一个复杂过滤功能，比如实现K8S集群节点的反向代理，我们可以使用自定义链来模块化我们规则。<br><strong>用自定义链实现服务的反向代理</strong><br>集群服务的反向代理，实际上就是利用自定义链，模块化地实现了数据包的DNAT转换。KUBE-SERVICE是整个反向代理的入口链，其对应所有服务的总入口；KUBE-SVC-XXXX链是具体某一个服务的入口链，KUBE-SERVICE链会根据服务IP，跳转到具体服务的KUBE-SVC-XXXX链；而KUBE-SEP-XXXX链代表着某一个具体Pod的地址和端口，即endpoint，具体服务链KUBE-SVC-XXXX会以一定算法（一般是随机），跳转到endpoint链。</p>
+<p><img src="http://image.winrains.cn/2019/09/20190901193556-d0569.jpeg" alt="K8S从懵圈到熟练 – 集群服务的三个要点和一种实现"></p>
+<p>而如前文中提到的，因为这里需要做的是DNAT，即改变目的地址，这样的修改，必须在路由之前发生以保证数据包可以被路由正确处理。所以KUBE-SERVICE会被PREROUTING和OUTPUT两个默认链所调用。</p>
+<h1 id="总结"><a href="#总结" class="headerlink" title="总结"></a><strong>总结</strong></h1><p>通过这篇文章，大家应该对K8S集群服务的概念以及实现，有了更深层次的认识。我们基本上需要把握三个要点。一、服务本质上是负载均衡；二、服务负载均衡的实现采用了与服务网格类似的Sidecar的模式，而不是LVS类型的独占模式；三、kube-proxy本质上是一个集群控制器。除此之外，我们思考了过滤器框架的设计，并在此基础上，理解使用iptables实现的服务负载均衡的原理。</p>
+<blockquote>
+<p>作者：阿里云云栖号</p>
+<p>来源：<a href="https://www.toutiao.com/a6719293878215639566/" target="_blank" rel="noopener">https://www.toutiao.com/a6719293878215639566/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/27/K8s-%E5%AE%9E%E6%88%98%E4%B9%8B%E6%A6%82%E5%BF%B5%E3%80%81%E9%9B%86%E7%BE%A4%E9%83%A8%E7%BD%B2%E4%B8%8E%E6%9C%8D%E5%8A%A1%E9%85%8D%E7%BD%AE/" rel="prev" title="K8s 实战之概念、集群部署与服务配置">
+      <i class="fa fa-chevron-left"></i> K8s 实战之概念、集群部署与服务配置
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/27/k8s%E5%92%8C%E5%AE%B9%E5%99%A8%E7%9A%84%E5%85%B3%E7%B3%BB/" rel="next" title="k8s和容器的关系">
+      k8s和容器的关系 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#K8S集群服务的本质是什么"><span class="nav-number">1.</span> <span class="nav-text">K8S集群服务的本质是什么</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#自带通信员"><span class="nav-number">2.</span> <span class="nav-text">自带通信员</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#把服务照进现实"><span class="nav-number">3.</span> <span class="nav-text">把服务照进现实</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#一种实现"><span class="nav-number">4.</span> <span class="nav-text">一种实现</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#总结"><span class="nav-number">5.</span> <span class="nav-text">总结</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">229</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">48</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">76</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

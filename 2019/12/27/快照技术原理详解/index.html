@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="一、概念解释像照相机一样，机器快门一闪，很快就把刚刚的人像停留在了相纸上。存储系统中的数据“快照”与我们生活中所说的“照片”非常相似，所不同的是，照片的对象不是人，而是数据。如同照片留住了我们过去的摸样和岁月，快照把数据在某一时刻的映像也保留了下来。因此我们可以根据快照查找数据在过去某一时刻的映像，常常用来作为增强数据备份系统的一种技术，它可以很大的缩短RTO和RPO两个指标。 SNIA（存储网络">
+<meta name="keywords" content="快照">
+<meta property="og:type" content="article">
+<meta property="og:title" content="快照技术原理详解">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;27&#x2F;%E5%BF%AB%E7%85%A7%E6%8A%80%E6%9C%AF%E5%8E%9F%E7%90%86%E8%AF%A6%E8%A7%A3&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="一、概念解释像照相机一样，机器快门一闪，很快就把刚刚的人像停留在了相纸上。存储系统中的数据“快照”与我们生活中所说的“照片”非常相似，所不同的是，照片的对象不是人，而是数据。如同照片留住了我们过去的摸样和岁月，快照把数据在某一时刻的映像也保留了下来。因此我们可以根据快照查找数据在过去某一时刻的映像，常常用来作为增强数据备份系统的一种技术，它可以很大的缩短RTO和RPO两个指标。 SNIA（存储网络">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:updated_time" content="2019-12-27T03:17:26.000Z">
+<meta name="twitter:card" content="summary">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/27/%E5%BF%AB%E7%85%A7%E6%8A%80%E6%9C%AF%E5%8E%9F%E7%90%86%E8%AF%A6%E8%A7%A3/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>快照技术原理详解 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">76</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">48</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">229</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/27/%E5%BF%AB%E7%85%A7%E6%8A%80%E6%9C%AF%E5%8E%9F%E7%90%86%E8%AF%A6%E8%A7%A3/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          快照技术原理详解
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-27 11:17:26" itemprop="dateCreated datePublished" datetime="2019-12-27T11:17:26+08:00">2019-12-27</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%AD%98%E5%82%A8/" itemprop="url" rel="index">
+                    <span itemprop="name">数据存储</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="一、概念解释"><a href="#一、概念解释" class="headerlink" title="一、概念解释"></a>一、概念解释</h1><p>像照相机一样，机器快门一闪，很快就把刚刚的人像停留在了相纸上。存储系统中的数据“快照”与我们生活中所说的“照片”非常相似，所不同的是，照片的对象不是人，而是数据。如同照片留住了我们过去的摸样和岁月，快照把数据在某一时刻的映像也保留了下来。因此我们可以根据快照查找数据在过去某一时刻的映像，常常用来作为增强数据备份系统的一种技术，它可以很大的缩短RTO和RPO两个指标。</p>
+<p>SNIA（存储网络行业协会）对快照（Snapshot）的定义是：关于指定数据集合的一个完全可用拷贝，该拷贝包括相应数据在某个时间点（拷贝开始的时间点）的映像。快照可以是其所表示的数据的一个副本，也可以是数据的一个复制品。而从具体的技术细节来讲，快照是指向保存在存储设备中的数据的引用标记或指针。</p>
+<p>磁盘快照(Snapshot)是针对整个磁盘卷册进行快速的档案系统备份，与其它备份方式最主要的不同点在于「速度」。进行磁盘快照时，并不牵涉到任何档案复制动作。就算数据量再大，一般来说，通常可以在一秒之内完成备份动作。</p>
+<a id="more"></a>
+
+<p>磁盘快照的基本概念与磁带备份等机制有非常大的不同。在建立磁盘快照时，并不需要复制数据本身，它所作的只是通知LX Series NAS服务器将目前有数据的磁盘区块全部保留起来，不被覆写。这个通知动作只需花费极短的时间。接下来的档案修改或任何新增、删除动作，均不会覆写原本数据所在的磁盘区块，而是将修改部分写入其它可用的磁盘区块中。所以可以说，数据复制，或者说数据备份，是在平常档案存取时就做好了，而且对效能影响极低。LX Series NAS档案系统内部会建立一份数据结构，纪录磁盘快照备份及目前作用中档案系统所使用到的磁盘区块及指针，让使用者可以同时存取到主要档案系统及过去的磁盘快照版本。</p>
+<h1 id="二、快照技术类型"><a href="#二、快照技术类型" class="headerlink" title="二、快照技术类型"></a>二、快照技术类型</h1><p>快照技术的作用：主要是能够进行在线数据恢复，当存储设备发生应用故障或者文件损坏时可以进行及时数据恢复，将数据恢复成快照产生时间点的状态。快照的另一个作用是为存储用户提供了另外一个数据访问通道，当原数据进行在线应用处理时，用户可以访问快照数据，还可以利用快照进行测试等工作。 因此，所有存储系统，不论高中低端，只要应用于在线系统，那么快照就成为一个不可或缺的功能。创建一个快照不同的设备需要不同的命令，但对于系统来说，基本都包括如下几个步骤：</p>
+<p>1、首先发起创建指令;</p>
+<p>2、在发起时间点，指令通知操作系统暂停应用程序和文件系统的操作;</p>
+<p>3、刷新文件系统缓存，结束所有的读写事务;</p>
+<p>4、创建快照点;</p>
+<p>5、创建完成之后，释放文件系统和应用程序，系统恢复正常运行。</p>
+<p>现在，快照技术已经超越了简单的数据保护范畴。我们可以用快照进行高效且无风险的应用软件测试。用快照数据做测试，不会对生产数据造成任何的破坏。对于数据挖掘(data mining)和电子发现(eDiscovery)应用，快照也是理想的测试数据源。在灾难恢复方面，快照是一种非常有效的方法——甚至是首选，非常适合遭到恶意软件攻击、人为误操作和数据损坏等逻辑错误发生时的数据恢复。过去我们认为只有磁盘阵列具备快照功能，但事实上磁盘阵列只是其中之一而已。广义的快照技术通常可有7个不同类型的实现主体：</p>
+<p>1、主机文件系统(包括服务器、台式机、笔记本电脑);</p>
+<p>2、逻辑卷管理器(LVM);</p>
+<p>3、网络附加存储系统(NAS);</p>
+<p>4、磁盘阵列;</p>
+<p>5、存储虚拟化设备;</p>
+<p>6、主机虚拟化管理程序;</p>
+<p>7、数据库。</p>
+<p>下面将逐项介绍一下在各个系统中快照技术的应用，并对其进行详细的说明。</p>
+<h2 id="1、基于文件系统的快照"><a href="#1、基于文件系统的快照" class="headerlink" title="1、基于文件系统的快照"></a>1、基于文件系统的快照</h2><p>很多文件系统都支持快照功能，微软的Windows NTFS有VSS卷影拷贝服务(Volume Shadow Copy Services， Vista称作Shadow Copy);Sun Solaris的最新文件系统ZFS(Zettabyte File System);Apple公司的Mac OS X 10.6(雪豹);Novell NetWare 4.11(或更高版本)的Novell Storage Services (NSS) ; Novell SUSE Linux操作系统下的OES-Linux等等。</p>
+<p>“免费”是文件系统快照的优势之一，因为它集成在文件系统内部;另一个优点是非常好用，最新版文件系统的快照功能通常使用起来很简单。不利的一方面是，每个文件系统都必须独立进行管理，当系统数量激增时，管理工作会变得非常繁重。想象一下，如果我们要做快照复制的话，需要给每一个文件系统都配置一套复制关系，而且还只能复制该文件系统自己的快照。此外，不同文件系统所提供的快照种类、快照频率、预留空间等参数也可能不一样，当然也包括设置、操作和管理上的差异。总之，需要管理的服务器和文件系统越多，复杂程度就越高。</p>
+<h2 id="2、基于LVM-逻辑卷管理器-的快照"><a href="#2、基于LVM-逻辑卷管理器-的快照" class="headerlink" title="2、基于LVM(逻辑卷管理器)的快照"></a>2、基于LVM(逻辑卷管理器)的快照</h2><p>带有快照功能的LVM也很多，比如惠普HP-UX操作系统的 Logical Volume Manager;Linux平台的Logical Volume Manager 和Enterprise Volume Management System系统 ;微软Windows 2000及后续版本自带的Logical Disk Manager系统;SUN Solaris 10操作系统的ZFS;以及赛门铁克公司的Veritas Volume Manager(注：Veritas Volume Manager是赛门铁克Veritas Storage Foundation产品的一部分)。</p>
+<p>我们可以创建跨多个文件系统的LVM快照。像赛门铁克的Veritas Volume Manager可以支持大多数常见的操作系统和文件系统。LVM通常还包括存储多路径和存储虚拟化等功能。</p>
+<p>使用LVM时，通常要付出额外的成本，包括为每台服务器购买license(许可证)和维护费。而且，像基于文件系统的快照一样，我们可能还要面对系统之间的协调问题和复杂的技术实施问题。</p>
+<h2 id="3、基于NAS的快照"><a href="#3、基于NAS的快照" class="headerlink" title="3、基于NAS的快照"></a>3、基于NAS的快照</h2><p>NAS本质上就是一个经过优化的、或是专门定制的文件系统，运行在特定的设备上，或集成在存储设备里。大多数中端和企业级NAS系统都提供快照功能，其中既有使用专有操作系统的设备，也包括大量基于Microsoft Windows Storage Server软件的各种NAS。</p>
+<p>通过网络连接到NAS的计算机系统都可以使用这种标准的通用快照，包括物理服务器、虚拟机、台式机和笔记本电脑。它也非常容易操作和管理。基于NAS的快照往往同Windows Volume Shadow Copy Services(卷影复制服务VSS)、备份服务器和备份Agent等软件集成在一起使用。一些NAS厂商还为非Windows平台的数据应用系统开发了Agent代理程序。其他一些与NAS快照有关的技术还包括重复数据删除(EMC公司，FalconStor软件公司和NetApp的产品)，有些厂商甚至提供了带有自动精简配置功能的快照，目的是让快照占用的空间变得更少。</p>
+<p>但是，使用便利的工具和附加功能也需要成本，软件license和维护费相当昂贵，一般是按照机器数量和磁盘卷容量来计算。大多数公司的数据量增长很快，需要使用NAS快照的地方也越来越多，因此，操作和管理也将更复杂。</p>
+<h2 id="4、基于磁盘阵列的快照"><a href="#4、基于磁盘阵列的快照" class="headerlink" title="4、基于磁盘阵列的快照"></a>4、基于磁盘阵列的快照</h2><p>大多数磁盘阵列的软件系统里都含有快照功能。基于磁盘阵列的快照与基于NAS的快照有非常相似的优点，即所有与磁盘阵列相连的计算机系统都可以使用这种标准的通用快照功能，包括物理服务器、虚拟机、台式机和笔记本电脑等等。快照的实施、操作和管理也都很简单。像NAS一样，很多磁盘阵列的快照功能也可以被Windows VSS、备份服务器和备份Agent等软件直接调用。一些磁盘阵列厂商还有可供非Windows平台应用系统使用的Agent代理程序。</p>
+<p>基于磁盘阵列的快照也有一些缺点：license和维护费用昂贵;对非Windows平台的应用程序支持有限;磁盘阵列的数量越多，快照的管理也就越复杂。</p>
+<h2 id="5、基于存储虚拟化设备的快照"><a href="#5、基于存储虚拟化设备的快照" class="headerlink" title="5、基于存储虚拟化设备的快照"></a>5、基于存储虚拟化设备的快照</h2><p>这里所说的存储虚拟化设备主要用于SAN光纤网络环境，不同于基于文件(NFS)应用的网络设备，像F5 Network公司的Acopia ARX产品就是排除在这个范畴之外的。主要的存储虚拟化软硬件设备(或融合了虚拟化功能的存储系统)包括：Cloverleaf Communication公司的Intelligent Storage Networking System (iSN);DataCore Software公司的 SANsymphony和SANmelody;EMC的Celerra Gateway blades;FalconStor公司的IPStor;HP的XP系列存储;HDS的Universal Storage Platform V/VM;IBM的SAN Volume Controller;LSI的StoreAge Storage Virtualization Manager (SVM)以及NetApp的V-Series storage controllers等等。</p>
+<p>磁盘阵列和NAS快照所具备的优点在存储虚拟化设备上同样能够体现，而且某些方面还能做的更好。我们可以将来自不同厂商的很多存储设备聚集在少量的几个控制点或单一控制点上进行管理，提供通用的标准化快照。这样做最大程度的简化了快照的管理操作成本和学习成本。</p>
+<p>存储虚拟化快照的缺点与上述类型相比则有些不同。使用存储虚拟化设备会导致I/O延迟的增加，即使是采用旁路架构的设计，最终还是会影响应用程序的响应时间。增加存储虚拟化设备还会使故障分析变得更加困难，潜在的还可能激化厂商之间对故障责任的推诿。从另一个角度看，虽然增加额外的虚拟化存储硬件或软件要产生一定的费用，但是与每个存储系统都独立购买快照功能相比，它的软件license和维护费用都要低一些。</p>
+<h2 id="6、基于主机虚拟化软件的快照"><a href="#6、基于主机虚拟化软件的快照" class="headerlink" title="6、基于主机虚拟化软件的快照"></a>6、基于主机虚拟化软件的快照</h2><p>随着服务器虚拟化应用的普及，基于主机虚拟化管理软件(hypervisor)的快照技术也逐渐流行起来。像Citrix公司的 XenServer、微软的Hyper – V、SUN的xVM Ops Center、以及VMware的ESX和vSphere4等主机虚拟化产品都支持快照功能。</p>
+<p>在主机虚拟化软件层实现快照的优点是简单直接。由于同虚拟机管理软件绑定在一起，因此可以为所有的虚拟机 (VMs) 提供统一的快照，并且还可以同微软的VSS集成，随时调用。相对而言，基于虚拟机的快照很容易部署、使用和管理。</p>
+<p>但是，如果非要找出不喜欢这种快照的理由?我想应该是每一套虚拟机软件的快照需要单独管理;而且当我们在非Windows平台下使用这种快照技术时，必须针对整个VM。这意味着我们只能做粗粒度的数据恢复，还要消耗更多的恢复时间。这种快照是在Windows操作系统外部创建，所以它不能架构在应用软件感知的层面，导致快照出来的映像数据有可能是不一致状态。</p>
+<h2 id="7、基于数据库的快照"><a href="#7、基于数据库的快照" class="headerlink" title="7、基于数据库的快照"></a>7、基于数据库的快照</h2><p>在数据库中，快照动作被称为“snapshot isolation(快照隔离)”。像Oracle和PostgreSQL这样的数据库需要做快照隔离以确保所有的交易命令序列化，就好像被一个个隔开一样，然后再逐个执行。其他的一些数据库也支持快照隔离，但并不要求将交易序列化。在一般情况下，数据库备份工具会利用快照隔离的功能，用快照来恢复崩溃(出现一致性问题)的数据表。</p>
+<p>针对数据库内部数据和基于该数据库的相关应用，使用数据库自带的快照比较有效。</p>
+<p>相反，数据库快照的重要缺欠就是覆盖的范围非常有限，其作用仅限于特定的数据库内部和数据库相关的应用，无法管理同在一台服务器上的文件系统、文件类应用或其他数据库，更不用说管理到其他的服务器了。有时候我们不得不通过其他层次的快照技术来解决数据库之外的数据保护问题，这样，操作和管理将变得有些复杂。</p>
+<h3 id="不同类型的快照及工作原理"><a href="#不同类型的快照及工作原理" class="headerlink" title="不同类型的快照及工作原理"></a>不同类型的快照及工作原理</h3><p>通常，我们会提到6种类型的快照技术：</p>
+<p>1、Copy-on-write 复制写</p>
+<p>2、Redirect-on-write 重定向写</p>
+<p>3、Clone or split mirror 克隆或镜像</p>
+<p>4、Copy-on-write with background copy后台拷贝的复制写</p>
+<p>5、Incremental 增量快照</p>
+<p>6、Continuous data protection 持续数据保护</p>
+<h3 id="复制写和重定向写快照"><a href="#复制写和重定向写快照" class="headerlink" title="复制写和重定向写快照"></a>复制写和重定向写快照</h3><h4 id="Copy-on-write-COW-复制写快照"><a href="#Copy-on-write-COW-复制写快照" class="headerlink" title="Copy-on-write (COW) 复制写快照"></a>Copy-on-write (COW) 复制写快照</h4><p>COW快照需要消耗一些存储空间–建立快照卷。当我们为一个数据卷创建一个快照之后，这些预留的空间用来存放被变化数据更新的旧数据。COW快照在初始化的过程中仅仅创建用来描述源数据块位置的指针信息(元数据)，而不是完整的将源数据块拷贝过来。因此初始化的过程几乎可以在瞬间完成，对系统的影响也很小。</p>
+<p>COW快照会跟踪数据卷的写操作和数据块变化。当某个数据块发生改变时，在将旧的数据覆盖之前，首先将该块的旧数据复制到预留的快照卷，该步骤仅在数据卷相应数据块位置发生第一次写操作请求时进行。这个处理过程确保快照出来的数据与发起快照的那个精确时间点保持完全一致。这个过程也描述了“copy on write”这个名字的含义。</p>
+<p>如果我们需要访问某个时间点的快照数据，对没有改变过的块直接从数据卷读取;对已经改变并被复制的块则从快照空间读取。从快照被创建那一刻开始，每个快照都会跟踪记录描述块改变的元数据信息。</p>
+<p>COW快照的主要优势在于空间的高效利用，因为快照卷只需要保留发生过变化的数据块，与数据卷相比要小得多。但是我们也知道COW快照有个缺点，它会引起数据卷性能的下降，这是因为创建快照之后，对数据卷的写操作会增加一个等待的过程 –即旧数据块复制到快照卷的过程。另外一个关键问题是每个快照卷必须依赖一个完整的数据卷。</p>
+<h4 id="Redirect-on-write-ROW-重定向写快照"><a href="#Redirect-on-write-ROW-重定向写快照" class="headerlink" title="Redirect-on-write (ROW) 重定向写快照"></a>Redirect-on-write (ROW) 重定向写快照</h4><p>“ROW重定向写”与“COW复制写”是相对的概念，它可以避免两次写操作引起的性能损失。ROW同COW一样在空间利用方面效率非常高。那是什么让ROW快照避免了写性能的损耗?其中的原因是ROW把对数据卷的写请求重定向给了快照预留的存储空间，而写操作的重定向设计则把需要两次写才能完成的操作减少为一次写。我们知道COW的两次写包括：1、将旧数据写入快照卷;2、在数据卷写入新数据。而ROW只有写入新数据一步。</p>
+<p>使用ROW快照，数据卷存放的是上一个快照时间点的旧数据，新数据最终存放在预留的快照空间。这里也有一个复杂的问题，就是快照的删除。被删除的快照上的数据必须被复制到原始数据卷，并且做一致性回退。创建的快照越多，维护快照的复杂度也会以指数级别上升。这些复杂性包括对原始数据的访问、快照数据和原始数据卷的跟踪、以及快照删除后的数据调整。另一个直接引发的严重问题是，原始数据集中会产生大量的碎片。</p>
+<h3 id="克隆或分割镜像快照与后台拷贝的复制写快照"><a href="#克隆或分割镜像快照与后台拷贝的复制写快照" class="headerlink" title="克隆或分割镜像快照与后台拷贝的复制写快照"></a>克隆或分割镜像快照与后台拷贝的复制写快照</h3><h4 id="Clone-or-split-mirror-克隆或分割镜像快照"><a href="#Clone-or-split-mirror-克隆或分割镜像快照" class="headerlink" title="Clone or split-mirror 克隆或分割镜像快照"></a>Clone or split-mirror 克隆或分割镜像快照</h4><p>Clone(或split-mirror)快照所创建的是数据的完整副本。Clone(或split-mirror)快照的对象可以是一个存储卷、一个文件系统或者是一个LUN(logical unit number 逻辑单元号)。Clone快照的优点是它们具有高可用性;缺点是所有的数据都要完整的复制一份，复制的过程也不可能在瞬间完成。我们可以分割一对保持同步状态的镜像卷来启用Clone快照，分割的过程瞬间即可完成。然而，当镜像被分割成Clone快照之后，数据卷也就失去了他的同步镜像。</p>
+<p>使用Clone快照需要面对的一个非常严重的问题是每个快照都需要和数据卷一样大的存储空间。尤其是当我们在任何时刻都需要保持一份以上Clone卷的情况，这个成本会非常高。另一个缺点是影响性能，因为在镜像卷之间保持写同步需要一定的系统开销。</p>
+<h4 id="Copy-on-write-with-background-copy-后台拷贝的复制写快照"><a href="#Copy-on-write-with-background-copy-后台拷贝的复制写快照" class="headerlink" title="Copy-on-write with background copy 后台拷贝的复制写快照"></a>Copy-on-write with background copy 后台拷贝的复制写快照</h4><p>Copy-on-write with background copy快照有两个生成步骤：首先创建一个瞬时即可生成的COW快照;然后利用后台进程将数据卷的数据复制到快照空间，最后生成一份数据卷的克隆或镜像。</p>
+<p>创建这种快照的目的是发挥COW快照的优势，同时尽量屏蔽它的不足。因此，这种快照常常被形容为COW和Clone快照的混合体。</p>
+<h3 id="增量快照与持续数据保护"><a href="#增量快照与持续数据保护" class="headerlink" title="增量快照与持续数据保护"></a>增量快照与持续数据保护</h3><h4 id="Incremental-增量快照"><a href="#Incremental-增量快照" class="headerlink" title="(Incremental)增量快照"></a>(Incremental)增量快照</h4><p>增量快照的特点是可以跟踪数据卷和快照卷的变化。当一个新的增量快照生成之后，旧的快照数据将被刷新。第一个快照和随后创建的每一个增量快照数据上都有时间戳标记，利用时间戳我们能够将快照数据回滚到任意的一个时间点。增量快照技术能够加快后续快照的生成速度，而且仅仅在名义上多消耗了一点空间而已。由此，我们可以提高创建快照的频率，也能让快照保留得更久一点。</p>
+<p>增量快照的不足之处是它需要依靠上面所提到的其他基础技术来创建第一个快照 (COW、ROW、clone/split mirror、copy-on-write with background copy) 。如果用Clone方式，那么第一个快照需要较长的初始化时间;如果用COW方式，数据卷的性能会降低。</p>
+<h4 id="持续数据保护-CDP"><a href="#持续数据保护-CDP" class="headerlink" title="持续数据保护(CDP)"></a>持续数据保护(CDP)</h4><p>CDP的出现是为了实现零数据丢失的RPO指标，以及瞬时数据恢复的RTO指标。它本身与同步数据镜像很类似，不同之处在于CDP还可以对软性灾难进行恢复。包括人为误操作、恶意软件攻击、意外删除、数据损坏等情况。</p>
+<p>持续数据保护颇像频率很高的增量快照。它会捕获并复制任何时刻发生的数据变化，并且给这些数据块打上时间戳。CDP本质上相当于每个时刻都创建一份增量快照，提供细粒度的精确数据恢复。有些CDP产品同时提供基于时间和基于事件(例如应用程序升级事件)两种粒度的恢复方式。还有一个理解CDP概念的好方法就是将它看成一个快照的journal日志。</p>
+<p>对于邮件系统、数据库和基于数据库的应用来说，CDP是一个极好的保护方案，能将数据回滚到任意的历史时间点，恢复过程也简便、迅速。最有代表性的CDP产品是飞康公司的IPStor，它是一个集成了CDP功能的存储系统兼存储虚拟化设备。</p>
+<p>随着越来越多的数据需要保护，备份窗口也变得越来越紧张，因此需要快照技术来帮助我们解决备份问题。在现实的应用环境中，快照利用的是否恰当对数据保护的等级和恢复的速度有着很大的影响。尽管各类型快照之间存在的技术差异不太容易理解，但无论如何，快照技术都将在数据保护领域和日常存储管理中扮演重要的角色。</p>
+<h1 id="三、特别注意：快照的一致性问题"><a href="#三、特别注意：快照的一致性问题" class="headerlink" title="三、特别注意：快照的一致性问题"></a>三、特别注意：快照的一致性问题</h1><p>如果用快照来处理结构化数据，可能会存在一些问题。结构化数据涉及到数据库，以及数据库类应用(例如邮件系统、ERP或CRM等等)。许多产品中的快照并不能与这些应用程序集成或被直接调用。有一种可能的情况是，在我们创建快照的瞬间，数据库恰好不在静止状态(缓存正在刷新、写操作事务尚未完成、索引和元数据正在更新等等)，此刻生成的快照数据是不一致的，很有可能无法正常使用。</p>
+<p>在微软的Windows Server平台上，这个问题要简单得多，利用Windows Volume Shadow Copy Services (VSS)和它的API，数据库应用程序可以集成并调用快照工具。VSS是专门为结构化数据应用设计的服务框架，可以驱动数据库等应用进入数据一致性的静止状态，在快照开始初始化之前，完成刷新缓存、结束写操作以及系统状态的更新。</p>
+<p>遗憾的是，目前在Linux和Unix操作系统平台上还没有类似VSS的服务或API。VMware公司的vCenter storage API可以说是一个部分解决方案。快照的发起者可以通过vCenter storage API给vCenter发出一个指令，让虚拟机进入静止状态，然后再执行快照。但这个时候，快照由于没有通过应用程序感知，也许会存在不一致的问题。</p>
+<p>这里还有一个好办法，可以不通过Windows VSS，获得数据库的一致性快照。这个办法需要备份软件的配合。将快照的API同备份软件集成，就可以从备份服务器端驱动备份软件的数据库代理Agent。Agent备份代理程序可以驱动数据库进入静止状态，然后反向让备份服务器通知快照工具开始执行创建快照的操作。这也是一个比较有效的办法。</p>
+<h1 id="四、快照技术使用方法"><a href="#四、快照技术使用方法" class="headerlink" title="四、快照技术使用方法"></a>四、快照技术使用方法</h1><p>具体使用快照时，存储管理员可以有三种形式，即冷快照拷贝、暖快照拷贝和热快照拷贝。</p>
+<p>冷快照拷贝：进行冷快照拷贝是保证系统可以被完全恢复的最安全的方式。在进行任何大的配置变化或维护过程之前和之后，一般都需要进行冷拷贝，以保证完全的恢复原状（rollback）。冷拷贝还可以与克隆技术相结合复制整个服务器系统，以实现各种目的，如扩展、制作生产系统的复本供测试/开发之用以及向二层存储迁移。</p>
+<p>暖快照拷贝：暖快照拷贝利用服务器的挂起功能。当执行挂起行动时，程序计数器被停止，所有的活动内存都被保存在引导硬盘所在的文件系统中的一个临时文件（.vmss文件）中，并且暂停服务器应用。在这个时间点上，复制整个服务器（包括内存内容文件和所有的LUN以及相关的活动文件系统）的快照拷贝。在这个拷贝中，机器和所有的数据将被冻结在完成挂起操作时的处理点上。</p>
+<p>当快照操作完成时，服务器可以被重新启动，在挂起行动开始的点上恢复运行。应用程序和服务器过程将从同一时间点上恢复运行。从表面上看，就好像在快照活动期间按下了一个暂停键一样。对于服务器的网络客户机看来，就好像网络服务暂时中断了一下一样。对于适度加载的服务器来说，这段时间通常在30到120秒。</p>
+<p>热快照拷贝：在这种状态下，发生的所有的写操作都立即应用在一个虚拟硬盘上，系统的文件以保持高度的一致性。服务器提供让持续的虚拟硬盘处于热备份模式的工具，以通过添加REDO日志文件在硬盘子系统层上复制快照拷贝。</p>
+<p>一旦REDO日志被激活，复制包含服务器文件系统的LUN的快照是安全的。在快照操作完成后，可以发出另一个命令，这个命令将REDO日志处理提交给下面的虚拟硬盘文件。当提交活动完成时，所有的日志项都将被应用，REDO文件将被删除。在执行这个操作过程中，会出现处理速度的略微下降，不过所有的操作将继续执行。但是，在多数情况下，快照进程几乎是瞬间完成的，REDO的创建和提交之间的时间非常短。热快照操作过程从表面上看基本上察觉不到服务器速度下降。在最差情况下，它看起来就是网络拥塞或超载的CPU可能造成的一般服务器速度下降。在最好情况下，不会出现可察觉到的影响。</p>
+<h1 id="五、快照与镜像、复制的区别"><a href="#五、快照与镜像、复制的区别" class="headerlink" title="五、快照与镜像、复制的区别"></a>五、快照与镜像、复制的区别</h1><p>镜像、快照和复制是三种不同的功能</p>
+<p>镜像是通过从一个I/O创建两个I/O来复制数据。磁盘镜像通过OS或卷管理软件在主系统上创建。磁盘镜像是依靠平台和本地连接特性的本地选件。镜像可用于DAS和SAN并且大多数NAS支持它。存储转发式镜像磁盘子系统（例如，EMC SRDF, IBM PPRC, Hitachi TrueCopy）主要用于SAN产品。 复制是通过网络传输数据对象（文件、表格等）。传输是从系统到系统进行的，而不是在存储设备之间或子系统之间进行。复制一般也针对具体平台，因此用于Windows 2000复制产品的运行方式与Unix平台存在很大不同。</p>
+<blockquote>
+<p>作者：sky1203850702</p>
+<p>来源：<a href="https://blog.csdn.net/sky1203850702/article/details/46830851" target="_blank" rel="noopener">https://blog.csdn.net/sky1203850702/article/details/46830851</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E5%BF%AB%E7%85%A7/" rel="tag"># 快照</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/27/IntelliJ-IDEA-%E4%BD%BF%E7%94%A8%E6%95%99%E7%A8%8B-2019%E5%9B%BE%E6%96%87%E7%89%88/" rel="prev" title="IntelliJ IDEA 使用教程(2019图文版)">
+      <i class="fa fa-chevron-left"></i> IntelliJ IDEA 使用教程(2019图文版)
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/27/Jenkins-Git-Maven-Shell-Tomcat%E6%8C%81%E7%BB%AD%E9%9B%86%E6%88%90%E7%BB%8F%E5%85%B8%E6%95%99%E7%A8%8B/" rel="next" title="Jenkins + Git + Maven + Shell + Tomcat持续集成经典教程">
+      Jenkins + Git + Maven + Shell + Tomcat持续集成经典教程 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#一、概念解释"><span class="nav-number">1.</span> <span class="nav-text">一、概念解释</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#二、快照技术类型"><span class="nav-number">2.</span> <span class="nav-text">二、快照技术类型</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#1、基于文件系统的快照"><span class="nav-number">2.1.</span> <span class="nav-text">1、基于文件系统的快照</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2、基于LVM-逻辑卷管理器-的快照"><span class="nav-number">2.2.</span> <span class="nav-text">2、基于LVM(逻辑卷管理器)的快照</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3、基于NAS的快照"><span class="nav-number">2.3.</span> <span class="nav-text">3、基于NAS的快照</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#4、基于磁盘阵列的快照"><span class="nav-number">2.4.</span> <span class="nav-text">4、基于磁盘阵列的快照</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#5、基于存储虚拟化设备的快照"><span class="nav-number">2.5.</span> <span class="nav-text">5、基于存储虚拟化设备的快照</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#6、基于主机虚拟化软件的快照"><span class="nav-number">2.6.</span> <span class="nav-text">6、基于主机虚拟化软件的快照</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#7、基于数据库的快照"><span class="nav-number">2.7.</span> <span class="nav-text">7、基于数据库的快照</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#不同类型的快照及工作原理"><span class="nav-number">2.7.1.</span> <span class="nav-text">不同类型的快照及工作原理</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#复制写和重定向写快照"><span class="nav-number">2.7.2.</span> <span class="nav-text">复制写和重定向写快照</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#Copy-on-write-COW-复制写快照"><span class="nav-number">2.7.2.1.</span> <span class="nav-text">Copy-on-write (COW) 复制写快照</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#Redirect-on-write-ROW-重定向写快照"><span class="nav-number">2.7.2.2.</span> <span class="nav-text">Redirect-on-write (ROW) 重定向写快照</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#克隆或分割镜像快照与后台拷贝的复制写快照"><span class="nav-number">2.7.3.</span> <span class="nav-text">克隆或分割镜像快照与后台拷贝的复制写快照</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#Clone-or-split-mirror-克隆或分割镜像快照"><span class="nav-number">2.7.3.1.</span> <span class="nav-text">Clone or split-mirror 克隆或分割镜像快照</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#Copy-on-write-with-background-copy-后台拷贝的复制写快照"><span class="nav-number">2.7.3.2.</span> <span class="nav-text">Copy-on-write with background copy 后台拷贝的复制写快照</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#增量快照与持续数据保护"><span class="nav-number">2.7.4.</span> <span class="nav-text">增量快照与持续数据保护</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#Incremental-增量快照"><span class="nav-number">2.7.4.1.</span> <span class="nav-text">(Incremental)增量快照</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#持续数据保护-CDP"><span class="nav-number">2.7.4.2.</span> <span class="nav-text">持续数据保护(CDP)</span></a></li></ol></li></ol></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#三、特别注意：快照的一致性问题"><span class="nav-number">3.</span> <span class="nav-text">三、特别注意：快照的一致性问题</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#四、快照技术使用方法"><span class="nav-number">4.</span> <span class="nav-text">四、快照技术使用方法</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#五、快照与镜像、复制的区别"><span class="nav-number">5.</span> <span class="nav-text">五、快照与镜像、复制的区别</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">229</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">48</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">76</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

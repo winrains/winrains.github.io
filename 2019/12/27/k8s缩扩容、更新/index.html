@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://winrains.cn').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="前言自动缩扩容是现代化的容器调度平台带给我们的最激动人心的一项能力。在上规模的业务系统中我们无时无刻不面临着这样的难题：用户的流量往往随着时间波动，甚至偶尔出现不可预测的峰值（毛刺流量），每当流量增加时都需要手工的对应用进行扩容，峰值流量消失后又需要将扩容的机器回收，运维起来费时费力。幸运的是，k8s这样的容器调度平台正在逐渐帮助我们解决这样的问题，它带来的AutoScaler功能目前已经支持在多">
+<meta property="og:type" content="article">
+<meta property="og:title" content="k8s缩扩容、更新">
+<meta property="og:url" content="http:&#x2F;&#x2F;winrains.cn&#x2F;2019&#x2F;12&#x2F;27&#x2F;k8s%E7%BC%A9%E6%89%A9%E5%AE%B9%E3%80%81%E6%9B%B4%E6%96%B0&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="前言自动缩扩容是现代化的容器调度平台带给我们的最激动人心的一项能力。在上规模的业务系统中我们无时无刻不面临着这样的难题：用户的流量往往随着时间波动，甚至偶尔出现不可预测的峰值（毛刺流量），每当流量增加时都需要手工的对应用进行扩容，峰值流量消失后又需要将扩容的机器回收，运维起来费时费力。幸运的是，k8s这样的容器调度平台正在逐渐帮助我们解决这样的问题，它带来的AutoScaler功能目前已经支持在多">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;6dced-20190307124705.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;6c28b-20190307125503.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;4b099-20190307125924.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;57c4f-20190307214416.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;cc940-20190307215755.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;300d5-20190307221112.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;dcae1-20190307232833.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;ee035-20190308135513.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;cd6d9-20190308135607.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;e308b-20190308140303.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;60a5a-20190308153123.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;b1bb9-20190308153204.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;c053b-20190308153521.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;8a51f-20190308170448.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;a57c0-20190308172001.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;7fff3-20190308172156.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;c0d1a-20190308172751.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;42e66-20190307213902.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;6a230-20190307214010.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;a0965-20190307214213.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;74c6a-20190307214343.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;98217-20190307214852.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;73cde-20190307215230.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;90bd6-20190307215254.png">
+<meta property="og:updated_time" content="2019-12-27T03:38:49.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;6dced-20190307124705.png">
+
+<link rel="canonical" href="http://winrains.cn/2019/12/27/k8s%E7%BC%A9%E6%89%A9%E5%AE%B9%E3%80%81%E6%9B%B4%E6%96%B0/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>k8s缩扩容、更新 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">76</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">48</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">229</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://winrains.cn/2019/12/27/k8s%E7%BC%A9%E6%89%A9%E5%AE%B9%E3%80%81%E6%9B%B4%E6%96%B0/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          k8s缩扩容、更新
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-27 11:38:49" itemprop="dateCreated datePublished" datetime="2019-12-27T11:38:49+08:00">2019-12-27</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">其它技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/Kubernetes/" itemprop="url" rel="index">
+                    <span itemprop="name">Kubernetes</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>自动缩扩容是现代化的容器调度平台带给我们的最激动人心的一项能力。在上规模的业务系统中我们无时无刻不面临着这样的难题：用户的流量往往随着时间波动，甚至偶尔出现不可预测的峰值（毛刺流量），每当流量增加时都需要手工的对应用进行扩容，峰值流量消失后又需要将扩容的机器回收，运维起来费时费力。<br>幸运的是，k8s这样的容器调度平台正在逐渐帮助我们解决这样的问题，它带来的AutoScaler功能目前已经支持在多个不同维度上的弹性缩扩容，可以根据应用的负载情况进行自适应。尽管在一些较为苛刻的场景下，由于容器启动速度等原因的限制，AutoScaler的效果还不尽人意，但相信在不久的将来，自动缩扩容方案将会完全成熟，届时我们将轻松获取具有强大弹性能力的服务集群。<br>现在来试着使用一下k8s的Scale相关功能吧</p>
+<a id="more"></a>
+
+<h2 id="手动调整服务规模"><a href="#手动调整服务规模" class="headerlink" title="手动调整服务规模"></a>手动调整服务规模</h2><p>我们可以使用<code>kubectl</code>提供的命令来手动调整某个<code>Deployment</code>的规模，也就是其包含的Pod数量，这里拿上一节里创建的HelloWorld服务来作为例子，当前的deployment状态如下：<br><img src="http://image.winrains.cn/2019/09/6dced-20190307124705.png" alt="img"></p>
+<ul>
+<li>DISIRED 表示配置时声明的期望副本数</li>
+<li>CURRENT 表示当前正在运行的副本数</li>
+<li>UP-TO_DATE 表示符合预期状态的副本数（比如某个副本宕机了，这里就不会计算那个副本）</li>
+<li>AVAILABLE 表示目前可用的副本数</li>
+</ul>
+<p>我们可以使用<code>kubectl scale</code>命令来手动调整deployment的规模，现在尝试把helloworld服务的副本数量扩充到4个：<br><img src="http://image.winrains.cn/2019/09/6c28b-20190307125503.png" alt="img"><br>执行命令后，k8s很快就为我们创建了另外3个helloworld的副本，这时候整个服务就有多个实例在运行了，那么对应Service的负载均衡功能便会生效，可以看到Service的状态里已经侦测到多个EndPoint:<br><img src="http://image.winrains.cn/2019/09/4b099-20190307125924.png" alt="img"><br>当我们连续调用service时，可以看到每次实际调用的pod都不同（这里对服务的源码做了一些修改，打印出了hostname）：<br><img src="http://image.winrains.cn/2019/09/57c4f-20190307214416.png" alt="img"><br>同理，我们也可以用同样的方式把服务缩容，比如把副本集的数量下调到两个：<br><img src="http://image.winrains.cn/2019/09/cc940-20190307215755.png" alt="img"></p>
+<h2 id="自动缩扩容：极致弹性？"><a href="#自动缩扩容：极致弹性？" class="headerlink" title="自动缩扩容：极致弹性？"></a>自动缩扩容：极致弹性？</h2><p><a href="https://yq.aliyun.com/articles/679125" target="_blank" rel="noopener">参考好文</a><br>刚才的例子中，我们是通过命令行的方式来手动调整服务规模的，显然在面对线上真实流量时是不能这么做的，我们希望调度平台能够根据服务的负载来智能地调控规模，进行弹性缩扩容。这时候就轮到k8s中的<strong>AutoScaler</strong>出场了<br>到目前为止，k8s一共提供了3个不同维度的AutoScaler，如下图：<br><img src="http://image.winrains.cn/2019/09/300d5-20190307221112.png" alt="img"><br>k8s把弹性伸缩分为两类：</p>
+<ul>
+<li>资源维度：保障集群资源池大小满足整体规划，当集群内的资源不足以支撑产出新的pod时，就会触发边界进行扩容</li>
+<li>应用维度：保障应用的负载处在预期的容量规划内</li>
+</ul>
+<p>对应两种伸缩策略：</p>
+<ul>
+<li>水平伸缩- 集群维度：自动调整资源池规模（新增/删除Worker节点） - Pod维度：自动调整Pod的副本集数量</li>
+<li>垂直伸缩- 集群维度：不支持 - Pod维度：自动调整应用的资源分配（增大/减少pod的cpu、内存占用）</li>
+</ul>
+<p>其中最为成熟也是最为常用的伸缩策略就是<strong>HPA（水平Pod伸缩）</strong>，所以下面以它为例来重点分析，官方文档在此：<a href="https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/" target="_blank" rel="noopener">https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/</a></p>
+<h3 id="基本流程"><a href="#基本流程" class="headerlink" title="基本流程"></a>基本流程</h3><p>任何弹性系统的缩扩容都无外乎于以下几个步骤：</p>
+<ol>
+<li>采集监控指标</li>
+<li>聚合监控指标，判断是否需要执行缩扩容</li>
+<li>执行缩扩容动作</li>
+</ol>
+<p>下面就按照这个顺序来分析HPA的工作方式，这里先给出一个HPA大体的架构图：<br><img src="http://image.winrains.cn/2019/09/dcae1-20190307232833.png" alt="img"></p>
+<h3 id="监控指标"><a href="#监控指标" class="headerlink" title="监控指标"></a>监控指标</h3><p>根据官方文档的描述，HPA是使用巡检（Control Loop）的机制来采集Pod资源使用情况的，默认采集间隔为15s，可以通过Controller Manager（Master节点上的一个进程）的<code>--horizontal-pod-autoscaler-sync-period</code>参数来手动控制。<br>目前HPA默认采集指标的实现是<code>Heapster</code>，它主要采集CPU的使用率；beta版本也支持自定义的监控指标采集，但尚不稳定，不推荐使用<br>因此可以简单认为，HPA就是通过CPU的使用率作为监控指标的</p>
+<h3 id="聚合算法"><a href="#聚合算法" class="headerlink" title="聚合算法"></a>聚合算法</h3><p>采集到CPU指标后，k8s通过下面的公式来判断需要扩容多少个pod</p>
+<figure class="highlight ini"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="attr">desiredReplicas</span> = ceil[currentReplicas * ( currentMetricValue / desiredMetricValue )]</span></pre></td></tr></table></figure>
+
+<p>ceil表示向上取整，举个实际例子，假设某个服务运行了4个Pod，当前的CPU使用率为50%，预期的CPU使用率为25%，那么满足预期的实际Pod数量就是<code>4 * (50% / 25%) = 8</code>个，即需要将Pod容量扩大一倍，增加4个Pod来满足需求<br>当然上述的指标并不是绝对精确的，首先，k8s会尽可能的让指标往期望值靠近，而不是完全相等，其次HPA设置了一个容忍度（tolerance）的概念，允许指标在一定范围内偏离期望值，默认是0.1，这就意味着如果你设置调度策略为CPU预期使用率 = 50%，实际的调度策略会是小于45%或者大于55%进行缩扩容，HPA会尽力把指标控制在这个范围内（容忍度可以通过<code>--horizontal-pod-autoscaler-tolerance</code>来调整）<br>另外有两点需要说明的细节：<br>一是k8s做出决策的间隔，它不会连续地执行扩缩容动作，而是存在一定的cd，目前扩容动作的cd为3分钟，缩容则为5分钟<br>二是k8s针对扩容做了一个最大限制，每次扩容的pod数量不会大于当前副本数量的2倍</p>
+<h3 id="HPA实践"><a href="#HPA实践" class="headerlink" title="HPA实践"></a>HPA实践</h3><p>最后我们来尝试实际使用一下HPA，依然是使用kubectl命令行的方式来创建：</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">kubectl autoscale deployment helloworld <span class="attribute">--cpu-percent</span>=10 <span class="attribute">--min</span>=1 <span class="attribute">--max</span>=5</span></pre></td></tr></table></figure>
+
+<p>运行上面的命令后，可以在dashboard看到HPA已经被创建，策略是以CPU使用率10%为临界值，最少副本集数量为1，最大为5：<br><img src="http://image.winrains.cn/2019/09/ee035-20190308135513.png" alt="img"><br>使用<code>kubectl get hpa</code>也可以看到：<br><img src="http://image.winrains.cn/2019/09/cd6d9-20190308135607.png" alt="img"><br>但是这里出现了异常，targets的当前CPU使用率始终显示为unknown，网上说是因为副本集里没有配置resources导致的。我们需要在dashboard里找到对应的副本集，然后在spec.containers.resources里声明requests和limits值：<br><img src="http://image.winrains.cn/2019/09/e308b-20190308140303.png" alt="img"><br>其中<code>requests</code>表示pod所需要分配的资源配额，<code>limits</code>表示单个pod最大能够获取到的资源配额。<br>配置完之后还是没有出现指标，继续百度，发现没有安装<code>heapster</code>支持，那就安装，具体方法可见<a href="https://blog.csdn.net/aixiaoyang168/article/details/78356033" target="_blank" rel="noopener">此文</a>，注意需要把国外gcr的镜像通过阿里云代理一把才能安装，<code>influxDB</code>，<code>grafana</code>和<code>heapster</code>三个组件都装好后，记得再装一把<code>heapster rbac</code>（在<code>kubeconfig/rbac</code>目录下），最后重启一波minikube，打开控制台，可以看到节点页面已经有了指标图像：<br><img src="http://image.winrains.cn/2019/09/60a5a-20190308153123.png" alt="img"><br><code>kubectl top</code>命令也能正常返回数值了：<br><img src="http://image.winrains.cn/2019/09/b1bb9-20190308153204.png" alt="img"><br>然而，<code>kubectl get hpa</code>显示cpu的当前指标还是unknown，郁闷，进到deployment里看一把日志：<br><img src="http://image.winrains.cn/2019/09/c053b-20190308153521.png" alt="img"><br>可以看到HPA一直在报无法从metrics API获取请求资源的错误，github走一波，找到一个类似的<a href="https://github.com/kubernetes/kubernetes/issues/57673" target="_blank" rel="noopener">issue</a>，原因是1.9版本以后的k8s默认的监控指标来源从heapster变成了metrics-server（我用的1.0，坑），不过要再安装一套metrics-server实在太麻烦了，可以通过修改<code>kube-controller-manager</code>的启动参数来禁用这个新特性。<br><code>minikube ssh</code>进入到vm内部，然后找到<code>/etc/kubernetes/manifests/kube-controller-manager.yaml</code>这个文件，在启动参数里加上<code>--horizontal-pod-autoscaler-use-rest-clients=false</code>，这时候对应的容器组会自动重启更新，再执行<code>kubectl get hpa</code>，可以看到cpu的指标终于Ok了：<br><img src="http://image.winrains.cn/2019/09/8a51f-20190308170448.png" alt="img"><br>留下了感动的泪水，终于可以开始压测试水了，赶紧搞个<code>buzybox</code>压起来：</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">kubectl <span class="builtin-name">run</span> -i --tty load-generator <span class="attribute">--image</span>=busybox /bin/sh</span></pre></td></tr></table></figure>
+
+<p>写个循环去访问我们的helloworld服务（为了更快的出效果，我把服务的scale缩减到只有一个副本集，直接压这个pod的ip）</p>
+<figure class="highlight d"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">/ # <span class="keyword">while</span> <span class="literal">true</span>; <span class="keyword">do</span> wget -q -O- http:<span class="comment">//172.17.0.5:8080; done</span></span></pre></td></tr></table></figure>
+
+<p>大概2，3分钟后就能看到结果，此时查看hpa的状态，可以看到已经触发水平扩容，副本集的数量由1个追加到4个：<br><img src="http://image.winrains.cn/2019/09/a57c0-20190308172001.png" alt="img"><br>dashboard上也能看到效果：<br><img src="http://image.winrains.cn/2019/09/7fff3-20190308172156.png" alt="img"><br>关掉压测脚本，静置一会儿，再看HPA的状态：<br><img src="http://image.winrains.cn/2019/09/c0d1a-20190308172751.png" alt="img"><br>自动缩容到了1个副本集，那么HPA的实践使用到这里就算是结束了</p>
+<h2 id="更新、发布、回滚"><a href="#更新、发布、回滚" class="headerlink" title="更新、发布、回滚"></a>更新、发布、回滚</h2><p>服务代码必然是会经常修改的，当代码发生变动时，就需要重新打包生成镜像，然后进行发布和部署，来看看在k8s中是如何对这些步骤进行处理的。<br>现在我们对代码做了一些改动，加上了hostname的输出，然后打包形成了一个<code>2.0</code>版本的新镜像，下面需要把这个新版本的镜像部署到k8s的容器集群上，使用<code>kubectl set image</code>在deployment上指定新的镜像：</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">kubectl <span class="builtin-name">set</span> image deployments/helloworld <span class="attribute">helloworld</span>=registry.cn-qingdao.aliyuncs.com/gold-faas/gold-demo-service:2.0</span></pre></td></tr></table></figure>
+
+<p>执行该命令后，可以从kubectl和dashboard中看到，新的容器组正在被创建，同时旧的容器组也在被回收：<br><img src="http://image.winrains.cn/2019/09/42e66-20190307213902.png" alt="img"><br><img src="http://image.winrains.cn/2019/09/6a230-20190307214010.png" alt="img"><br>最终所有的旧版本pod都会被回收，只留下新发布版本的容器组副本集：<br><img src="http://image.winrains.cn/2019/09/a0965-20190307214213.png" alt="img"><br>来测试一下服务是否更新：<br><img src="http://image.winrains.cn/2019/09/74c6a-20190307214343.png" alt="img"><br>假设我们的发布到线上的版本出现了致命的问题，需要紧急将服务回退到上一个版本，该怎么做呢？使用<code>kubectl rollout undo</code>即可，来看看效果：<br><img src="http://image.winrains.cn/2019/09/98217-20190307214852.png" alt="img"><br>可以看到执行回滚命令后，新版本的pod开始被回收，同时上一个版本镜像所对应的pod被唤醒（这里速度非常快，我感觉k8s在发布完新服务后可能并不会立刻销毁历史版本的pod实例，而是会缓存一段时间，这样非常快速的回滚，只要把service的负载均衡指回历史版本的pod就可以了）<br><img src="http://image.winrains.cn/2019/09/73cde-20190307215230.png" alt="img"><br>回滚完成后再度请求服务，可以发现服务已经变回了上一个版本的内容：<br><img src="http://image.winrains.cn/2019/09/90bd6-20190307215254.png" alt="img"><br>上面这些发布和回滚的特性在k8s中被称为<strong>滚动更新</strong>，它允许我们按照一定的比例逐步（可以手工设置百分比）更新pod，从而实现平滑的更新和回滚，也可以借此实现类似蓝绿发布和金丝雀发布的功能。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2><p>通过实际操作体验了k8s的缩扩容以及发布机制，虽然遇到了几个坑，但整体上用起来还是非常丝滑的，到这里k8s的基本功能就探索的差不多了，从下一篇开始将会继续深入分析k8s的原理，敬请期待！</p>
+<blockquote>
+<p>作者：MarkLux</p>
+<p>来源：<a href="http://marklux.cn/blog/107" target="_blank" rel="noopener">http://marklux.cn/blog/107</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/27/k8s%E5%85%A5%E9%97%A8/" rel="prev" title="k8s入门">
+      <i class="fa fa-chevron-left"></i> k8s入门
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/27/K8s-%E5%AE%9E%E6%88%98%E4%B9%8B%E6%A6%82%E5%BF%B5%E3%80%81%E9%9B%86%E7%BE%A4%E9%83%A8%E7%BD%B2%E4%B8%8E%E6%9C%8D%E5%8A%A1%E9%85%8D%E7%BD%AE/" rel="next" title="K8s 实战之概念、集群部署与服务配置">
+      K8s 实战之概念、集群部署与服务配置 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#前言"><span class="nav-number">1.</span> <span class="nav-text">前言</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#手动调整服务规模"><span class="nav-number">2.</span> <span class="nav-text">手动调整服务规模</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#自动缩扩容：极致弹性？"><span class="nav-number">3.</span> <span class="nav-text">自动缩扩容：极致弹性？</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#基本流程"><span class="nav-number">3.1.</span> <span class="nav-text">基本流程</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#监控指标"><span class="nav-number">3.2.</span> <span class="nav-text">监控指标</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#聚合算法"><span class="nav-number">3.3.</span> <span class="nav-text">聚合算法</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#HPA实践"><span class="nav-number">3.4.</span> <span class="nav-text">HPA实践</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#更新、发布、回滚"><span class="nav-number">4.</span> <span class="nav-text">更新、发布、回滚</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#小结"><span class="nav-number">5.</span> <span class="nav-text">小结</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">229</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">48</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">76</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
