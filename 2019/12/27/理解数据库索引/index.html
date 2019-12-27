@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="在日常开发中，数据库降低了我们操作数据的门槛，我们只要编写特定的 SQL，就能对数据做增删改查操作。在简化的背后，往往都隐藏着性能优化的福利，数据库也是如此，我们知道假如没有索引，查询数据就会全表扫描，而索引就如书的目录一般，大大提高了查询效率。本文将对数据库索引进行介绍，认识索引的数据结构，同时也介绍索引的其他概念。">
+<meta name="keywords" content="索引">
+<meta property="og:type" content="article">
+<meta property="og:title" content="理解数据库索引">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2019&#x2F;12&#x2F;27&#x2F;%E7%90%86%E8%A7%A3%E6%95%B0%E6%8D%AE%E5%BA%93%E7%B4%A2%E5%BC%95&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="在日常开发中，数据库降低了我们操作数据的门槛，我们只要编写特定的 SQL，就能对数据做增删改查操作。在简化的背后，往往都隐藏着性能优化的福利，数据库也是如此，我们知道假如没有索引，查询数据就会全表扫描，而索引就如书的目录一般，大大提高了查询效率。本文将对数据库索引进行介绍，认识索引的数据结构，同时也介绍索引的其他概念。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190911112040-e5555.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190911112041-51dbf.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190911112041-60e94.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190911112041-85bc7.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190911112042-c9215.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190911112042-bde22.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190911112042-807a7.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190911112042-69bb1.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190911112043-3175f.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190911112043-9ac05.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190911112043-c81bd.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190911112044-86eb5.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190911112044-cb169.png">
+<meta property="og:updated_time" content="2019-12-27T12:01:52.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190911112040-e5555.jpeg">
+
+<link rel="canonical" href="http://congsheng.wang/2019/12/27/%E7%90%86%E8%A7%A3%E6%95%B0%E6%8D%AE%E5%BA%93%E7%B4%A2%E5%BC%95/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>理解数据库索引 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">96</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">78</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">360</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2019/12/27/%E7%90%86%E8%A7%A3%E6%95%B0%E6%8D%AE%E5%BA%93%E7%B4%A2%E5%BC%95/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          理解数据库索引
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-27 20:01:52" itemprop="dateCreated datePublished" datetime="2019-12-27T20:01:52+08:00">2019-12-27</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>在日常开发中，数据库降低了我们操作数据的门槛，我们只要编写特定的 SQL，就能对数据做增删改查操作。在简化的背后，往往都隐藏着性能优化的福利，数据库也是如此，我们知道假如没有索引，查询数据就会全表扫描，而索引就如书的目录一般，大大提高了查询效率。本文将对数据库索引进行介绍，认识索引的数据结构，同时也介绍索引的其他概念。</p>
+<a id="more"></a>
+
+<h2 id="索引的数据结构"><a href="#索引的数据结构" class="headerlink" title="索引的数据结构"></a>索引的数据结构</h2><p>索引在本质上是为了优化查找的速度，对于给定的数据，我们可以使用顺序查找，如果数据已经排好序，我们可以使用二分查找，如果查找的数据量不大，我们可以构造二叉查找树将查找放在内存中，而索引的数据结构是由平衡二叉树演化而来，在正式介绍索引的数据结构之前，让我们先来看看二叉查找树。</p>
+<h3 id="二叉查找树"><a href="#二叉查找树" class="headerlink" title="二叉查找树"></a>二叉查找树</h3><p>二叉查找树要求左子树的键值总是小于根的键值，右子树的键值总是大于根的键值。</p>
+<p><img src="http://image.winrains.cn/2019/09/20190911112040-e5555.jpeg" alt="1527218750414"></p>
+<p><img src="http://image.winrains.cn/2019/09/20190911112041-51dbf.jpeg" alt="1527217930423"></p>
+<p>二叉查找树的问题是假如单支过长就会大大影响其查找效率，甚至退化成顺序查找</p>
+<p><img src="http://image.winrains.cn/2019/09/20190911112041-60e94.jpeg" alt="1527218408243"></p>
+<p>为了提高二叉树的查找效率，需要构造的这棵二叉树是平衡的——平衡二叉树要求任何结点的两个子树的高度最大差为1。平衡二叉树通常需要左旋、右旋来达到平衡。</p>
+<p><img src="http://image.winrains.cn/2019/09/20190911112041-85bc7.jpeg" alt="1527219158761"></p>
+<h3 id="B-树"><a href="#B-树" class="headerlink" title="B* 树"></a>B* 树</h3><h4 id="B-树-1"><a href="#B-树-1" class="headerlink" title="B- 树"></a>B- 树</h4><p>我们先来看看对 B 树的描述：</p>
+<ul>
+<li>B 树的 B 不是表示二叉，而是表示平衡</li>
+<li>B 树并不是一颗二叉树，B 树是 n 叉的（n &gt; 2）</li>
+<li>每个结点有多个关键字，关键字之间又有指向孩子结点的指针</li>
+<li>一个结点内的关键字都有序排列</li>
+<li>所有叶子结点都在同一层</li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/09/20190911112042-c9215.jpeg" alt="1527237093708"></p>
+<p>对于查找而言，B 树的查找类似二叉树，因为每个结点内的关键字都是排序好的 key[1…n]，我们可运用二分查找将查找关键字 k 与 key[i] 比较，从而找出相应区间的子树。<br>B 树查找的简化代码：</p>
+<figure class="highlight lisp"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">Result BTreeSearch(<span class="name">BTNode</span> *t, KeyType k) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    BTNode *p = <span class="literal">t</span><span class="comment">; *q = NULL; // q 指向 p 的双亲</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    int found = <span class="number">0</span>, i = <span class="number">0</span><span class="comment">;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    while (<span class="name">p</span> != NULL <span class="symbol">&amp;&amp;</span> found == <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        i = BinarySearch(<span class="name">p</span>, k)<span class="comment">;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        if (<span class="name">i</span> &gt; <span class="number">0</span> <span class="symbol">&amp;&amp;</span> p-&gt;key[i] == k) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            found = <span class="number">1</span><span class="comment">;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        &#125; else &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">            q = p<span class="comment">;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            p = p-&gt;ptr[i]<span class="comment">;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    ...</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>上述代码也可以使用递归。有了这些基本的认识后，不难发现 B 树的查找效率与树的高度有关，高度越小，查找的次数就越少。<br>接下来看看 B 树的插入和删除。 对插入而言，如果该结点还有空位置，直接插入，否则，会将结点分成两部分，中间位置的关键字插入到父结点中，如果父结点也不满足，再往上插，直到这个过程传到根结点。</p>
+<p><img src="http://image.winrains.cn/2019/09/20190911112042-bde22.jpeg" alt="1527237417928"></p>
+<p>插入15<br>删除比插入稍微复杂一点，如果删除一个关键字后，结点的关键字个数没有少于它的装填因子，则直接删除</p>
+<p><img src="http://image.winrains.cn/2019/09/20190911112042-807a7.jpeg" alt="1527237872376"></p>
+<p>删除8，16<br>否则分两种情况：</p>
+<ul>
+<li>如果左（右）兄弟结点的关键字个数大于装填因子，则将左（右）结点最大或最小关键字上移到父结点，再把父结点中大于或小于上移关键字的关键字下移到要被删除的结点中。</li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/09/20190911112042-69bb1.jpeg" alt="1527582084766"></p>
+<p>删除15</p>
+<ul>
+<li>如果左（右）兄弟结点的关键字个数等于装填因子，这时需要把删除关键字的结点与左（右）结点关键字和分割二者关键字的双亲结点关键字合并成一个结点，如果因此使双亲结点关键字个数小于装填因子，则对双亲结点也做同样处理，以致可能使整棵树的高度减少一层。</li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/09/20190911112043-3175f.jpeg" alt="1527238316921"></p>
+<p>删除4后的结果<br>由上可知，B 树的插入和删除都是需要代价的，所以我们对数据库索引的建立也需要特别谨慎，否则不合理的索引反而降低了效率。</p>
+<h4 id="B-树-2"><a href="#B-树-2" class="headerlink" title="B+ 树"></a>B+ 树</h4><p>B+ 树是 B- 树的变形，常用于索引结构中，它与 B- 树的主要差异有：</p>
+<ul>
+<li>B+ 树中所有叶子结点包含了全部关键字，即非叶子结点的关键字也出现在叶子结点中</li>
+<li>叶子结点的指针不再指向另一级索引，而是直接指向数据文件的记录</li>
+<li>分支结点不包含关键字对应的存储地址，只包含指向各个子结点的指针</li>
+<li>所有叶子结点链接成一个线性链表</li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/09/20190911112043-9ac05.jpeg" alt="1527582980853"></p>
+<p>B 树和平衡二叉树的一个重要区别是结点的大小及其造成的树的高度不同，B+ 树的结点大小一般是一个磁盘块的大小，也就是数据页的大小，因此 B 树矮而胖，二叉树高而瘦。前面已经提到 B 树的查找效率和其高度有关，假设当前数据表的数据为 N，每个磁盘块的数据项的数量是 m，则有 h = ㏒(m+1)N，而 m = 磁盘块的大小 / 数据项的大小，磁盘块的大小又是固定的，故数据项的大小越小，树的高度也就越小。这就是为什么要求索引字段尽可能小的原因。同理，将数据不存储在分支结点，也是为了尽可能多的存放数据项。</p>
+<h2 id="B-树索引"><a href="#B-树索引" class="headerlink" title="B+ 树索引"></a>B+ 树索引</h2><p>B+ 树索引就是 B+ 树在数据库中的实现。B+ 索引在数据库中有一个特点是高扇出性，因此在数据库中，B+ 树的高度一般都在2～4层，这也就是说查找某一键值的行记录时最多只需要2到4次 IO。<br>B+ 树索引并不能找到一个给定键值的具体行。B+树索引能找到的只是被查找数据行所在的页。然后数据库通过把页读入到内存，再在内存中进行查找，最后得到要查找的数据。</p>
+<h3 id="聚集索引和辅助索引"><a href="#聚集索引和辅助索引" class="headerlink" title="聚集索引和辅助索引"></a>聚集索引和辅助索引</h3><p>B+ 树索引可分为聚集索引和辅助索引（secondary index），它们的主要区别是聚集索引要求以唯一的 key（一般是主键）来构造索引，文件中记录的物理存储顺序和索引顺序一致，由于实际的数据页只能按照一棵 B+ 树进行排序，因此每张表只能拥有一个聚集索引，辅助索引的 key 可以不是唯一的，辅助索引能提高聚集索引以外 key 的查找性能，这也会增加一定的开销。<br>下面表有三个列，分别是 id（主键）、name 和 salary，我们来看看聚集索引和辅助索引的原理：</p>
+<p><img src="http://image.winrains.cn/2019/09/20190911112043-c81bd.jpeg" alt="1527560106240"></p>
+<p>以上是聚集索引</p>
+<p><img src="http://image.winrains.cn/2019/09/20190911112044-86eb5.jpeg" alt="1527560883816"></p>
+<p>以上是辅助索引</p>
+<h3 id="联合索引"><a href="#联合索引" class="headerlink" title="联合索引"></a>联合索引</h3><p>我们已经介绍过了在单个列上使用索引，联合索引是指对表上的多个列进行索引，联合索引的本质也是一棵 B+ 树，下面看看联合索引的内部结构：</p>
+<p><img src="http://image.winrains.cn/2019/09/20190911112044-cb169.png" alt="dff64b61-998e-47be-910d-02b596227f71"></p>
+<p>对上图而言，（1，1）、（1，2）、（2，1）、（2，4）、（3，1）、（3，2），数据按（a，b）的顺序进行了存放，第一列是升序排序的，第二列是根据第一列排序而排序的。<br>因此，对于查询 <code>SELECT*FROM TABLE WHERE a=xxx and b=xxx</code>，显然是可以使用（a，b）这个联合索引的。对于单个的a列查询 <code>SELECT*FROM TABLE WHERE a=xxx</code>，也可以使用这个（a，b）索引。但对于b列的查询 <code>SELECT*FROM TABLE WHERE b=xxx</code>，则不可以使用这棵B+树索引。可以发现叶子节点上的b值为1、2、1、4、1、2，显然不是排序的，因此对于b列的查询使用不到（a，b）的索引。<br>联合索引能在索引到第一个键值后对第二个键值进行排序。例如，查询某个用户的购物情况，并按照时间进行排序，最后取出最近三次的购买记录，这时使用联合索引可以避免多一次的排序操作，因为索引到某个用户 id 后，购买记录已经是有序的了。<br>正如前面所介绍的那样，联合索引（a，b）其实是根据列a、b进行排序，因此语句 <code>SELECT...FROM TABLE WHERE a=xxx ORDER BY b</code> 可以直接使用联合索引得到结果。<br>然而对于联合索引（a，b，c）来说，语句 <code>SELECT...FROM TABLE WHERE a=xxx AND b=xxx ORDER BY c</code> 或 <code>SELECT...FROM TABLE WHERE a=xxx ORDER BY b</code> 同样可以直接通过联合索引得到结果。<br>但对于语句 <code>SELECT...FROM TABLE WHERE a=xxx ORDER BY c</code>，联合索引不能直接得到结果，因为 c 是用不到索引的。<br>这就是索引最左前缀匹配的特性。根据该原则，我们建立联合索引时要考虑好查询尽可能地用得上索引，这也要求我们尽可能选择区分度高的列作为索引。</p>
+<h3 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h3><ul>
+<li>在作为主键的列上，强制该列的唯一性和组织表中数据的排列结构。</li>
+<li>在经常用在连接的列上，这些列主要是一些外键，可以加快连接的速度。</li>
+<li>在经常需要根据范围进行搜索的列上创建索引，因为索引已经排序，其指定的范围是连续的。</li>
+<li>在经常需要排序的列上创建索引，因为索引已经排序，这样查询可以利用索引的排序，加快排序查询时间。</li>
+<li>在经常使用在where子句中的列上面创建索引，加快条件的判断速度。</li>
+</ul>
+<h2 id="哈希索引和位图索引"><a href="#哈希索引和位图索引" class="headerlink" title="哈希索引和位图索引"></a>哈希索引和位图索引</h2><p>最后再简单介绍下另外两种索引结构</p>
+<h3 id="哈希索引"><a href="#哈希索引" class="headerlink" title="哈希索引"></a>哈希索引</h3><p>哈希索引通过哈希算法来实现查找，其冲突解决采用链地址法，我们知道哈希算法的时间复杂度为 O(1)，所以哈希索引是非常高效的。<br>因为哈希索引的记录不以任何特定方式排序，这也导致哈希索引无法应用在范围查找中。</p>
+<h3 id="位图索引"><a href="#位图索引" class="headerlink" title="位图索引"></a>位图索引</h3><p>位图索引（bitmap index）是为多个列查询设计的特殊索引，位图索引适合用于列上的值大量重复出现。<br>表结构：</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>gender</th>
+<th>income_level</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>43123</td>
+<td>m</td>
+<td>L1</td>
+</tr>
+<tr>
+<td>65654</td>
+<td>f</td>
+<td>L2</td>
+</tr>
+<tr>
+<td>76534</td>
+<td>f</td>
+<td>L1</td>
+</tr>
+<tr>
+<td>12343</td>
+<td>m</td>
+<td>L4</td>
+</tr>
+<tr>
+<td>65765</td>
+<td>f</td>
+<td>L3</td>
+</tr>
+</tbody></table>
+<p>gender 的位图：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td>m</td>
+<td>10010</td>
+</tr>
+<tr>
+<td>f</td>
+<td>01101</td>
+</tr>
+</tbody></table>
+<p>income_level 的位图：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td>L1</td>
+<td>10100</td>
+</tr>
+<tr>
+<td>L2</td>
+<td>01000</td>
+</tr>
+<tr>
+<td>L3</td>
+<td>00001</td>
+</tr>
+<tr>
+<td>L4</td>
+<td>00010</td>
+</tr>
+<tr>
+<td>L5</td>
+<td>00000</td>
+</tr>
+</tbody></table>
+<p>上述表对于只以性别为条件的查询，位图索引并不能带来什么性能的提升。然而对查询 <code>Select * from t where gender = &#39;f&#39; and income_level = &#39;L3&#39;</code>，位图索引会执行两个位图的交操作（逻辑与）。即 gender 的位图 = f(01101) 和 income_level 的位图 = L2(01000) 的交得到位图 01000。显然对于多个列上大量重复数据项的查询，位图索引可以提高查找效率。此外，位图索引还有体积小的优点。</p>
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>本文是我学习数据库索引的笔记，仅仅介绍了数据库的几种索引的原理，并没有深入到更加底层的研究，只能对日常开发中如何建立索引、选择索引起到一定的指示作用，而对于查询性能的优化还是需要从大量的实践中总结出经验。</p>
+<h2 id="参考文章"><a href="#参考文章" class="headerlink" title="参考文章"></a>参考文章</h2><p><a href="https://link.juejin.im?target=https%3A%2F%2Ftech.meituan.com%2Fmysql-index.html">MySQL索引原理及慢查询优化</a><br><a href="https://link.juejin.im?target=http%3A%2F%2Fblog.codinglabs.org%2Farticles%2Ftheory-of-mysql-index.html">MySQL索引背后的数据结构及算法原理</a></p>
+<blockquote>
+<p>作者：贝聊科技</p>
+<p>来源：<a href="https://juejin.im/post/5b0ccdd151882515926468eb" target="_blank" rel="noopener">https://juejin.im/post/5b0ccdd151882515926468eb</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E7%B4%A2%E5%BC%95/" rel="tag"># 索引</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/27/%E6%9E%B6%E6%9E%84%E8%AE%BE%E8%AE%A1%E6%96%B9%E6%B3%95%E5%88%9D%E6%8E%A2/" rel="prev" title="架构设计方法初探">
+      <i class="fa fa-chevron-left"></i> 架构设计方法初探
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/27/MySQL%E7%B4%A2%E5%BC%95%E8%83%8C%E5%90%8E%E7%9A%84%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84%E5%8F%8A%E7%AE%97%E6%B3%95%E5%8E%9F%E7%90%86/" rel="next" title="MySQL索引背后的数据结构及算法原理">
+      MySQL索引背后的数据结构及算法原理 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#索引的数据结构"><span class="nav-number">1.</span> <span class="nav-text">索引的数据结构</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#二叉查找树"><span class="nav-number">1.1.</span> <span class="nav-text">二叉查找树</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#B-树"><span class="nav-number">1.2.</span> <span class="nav-text">B* 树</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#B-树-1"><span class="nav-number">1.2.1.</span> <span class="nav-text">B- 树</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#B-树-2"><span class="nav-number">1.2.2.</span> <span class="nav-text">B+ 树</span></a></li></ol></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#B-树索引"><span class="nav-number">2.</span> <span class="nav-text">B+ 树索引</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#聚集索引和辅助索引"><span class="nav-number">2.1.</span> <span class="nav-text">聚集索引和辅助索引</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#联合索引"><span class="nav-number">2.2.</span> <span class="nav-text">联合索引</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#小结"><span class="nav-number">2.3.</span> <span class="nav-text">小结</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#哈希索引和位图索引"><span class="nav-number">3.</span> <span class="nav-text">哈希索引和位图索引</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#哈希索引"><span class="nav-number">3.1.</span> <span class="nav-text">哈希索引</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#位图索引"><span class="nav-number">3.2.</span> <span class="nav-text">位图索引</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#总结"><span class="nav-number">4.</span> <span class="nav-text">总结</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#参考文章"><span class="nav-number">5.</span> <span class="nav-text">参考文章</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">360</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">78</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">96</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

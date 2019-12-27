@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="0. 前言Spring作为Java框架王者，当前已经是基础容器框架的实际标准。Spring 除了提供了 IoC、AOP特性外，还有一个极其核心和重要的特性：数据库事务。事务管理涉及到的技术点比较多，想完全理解需要花费一定的时间，本系列《Spring设计思想-事务篇》将通过如下几个方面来阐述Spring的数据库事务：数据库连接java.sql.Connection的特性、事务表示、以及和Java线程">
+<meta name="keywords" content="事务">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Spring设计思想-事务篇（1）：数据库连接和Java线程的关系">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2019&#x2F;12&#x2F;27&#x2F;Spring%E8%AE%BE%E8%AE%A1%E6%80%9D%E6%83%B3-%E4%BA%8B%E5%8A%A1%E7%AF%87%EF%BC%881%EF%BC%89%EF%BC%9A%E6%95%B0%E6%8D%AE%E5%BA%93%E8%BF%9E%E6%8E%A5%E5%92%8CJava%E7%BA%BF%E7%A8%8B%E7%9A%84%E5%85%B3%E7%B3%BB&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="0. 前言Spring作为Java框架王者，当前已经是基础容器框架的实际标准。Spring 除了提供了 IoC、AOP特性外，还有一个极其核心和重要的特性：数据库事务。事务管理涉及到的技术点比较多，想完全理解需要花费一定的时间，本系列《Spring设计思想-事务篇》将通过如下几个方面来阐述Spring的数据库事务：数据库连接java.sql.Connection的特性、事务表示、以及和Java线程">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190926085930-e0e90.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190926085931-1fcd3.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190926085931-9ecd6.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190926085932-5d07a.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190926085933-455b1.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190926085934-ef0e2.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190926085934-bc42b.png">
+<meta property="og:updated_time" content="2019-12-27T12:46:10.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190926085930-e0e90.png">
+
+<link rel="canonical" href="http://congsheng.wang/2019/12/27/Spring%E8%AE%BE%E8%AE%A1%E6%80%9D%E6%83%B3-%E4%BA%8B%E5%8A%A1%E7%AF%87%EF%BC%881%EF%BC%89%EF%BC%9A%E6%95%B0%E6%8D%AE%E5%BA%93%E8%BF%9E%E6%8E%A5%E5%92%8CJava%E7%BA%BF%E7%A8%8B%E7%9A%84%E5%85%B3%E7%B3%BB/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Spring设计思想-事务篇（1）：数据库连接和Java线程的关系 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">96</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">78</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">360</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2019/12/27/Spring%E8%AE%BE%E8%AE%A1%E6%80%9D%E6%83%B3-%E4%BA%8B%E5%8A%A1%E7%AF%87%EF%BC%881%EF%BC%89%EF%BC%9A%E6%95%B0%E6%8D%AE%E5%BA%93%E8%BF%9E%E6%8E%A5%E5%92%8CJava%E7%BA%BF%E7%A8%8B%E7%9A%84%E5%85%B3%E7%B3%BB/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Spring设计思想-事务篇（1）：数据库连接和Java线程的关系
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-27 20:46:10" itemprop="dateCreated datePublished" datetime="2019-12-27T20:46:10+08:00">2019-12-27</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Spring%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Spring技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Spring%E6%8A%80%E6%9C%AF/Spring/" itemprop="url" rel="index">
+                    <span itemprop="name">Spring</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="0-前言"><a href="#0-前言" class="headerlink" title="0. 前言"></a>0. 前言</h1><p>Spring作为Java框架王者，当前已经是基础容器框架的实际标准。Spring 除了提供了 IoC、AOP特性外，还有一个极其核心和重要的特性：数据库事务。事务管理涉及到的技术点比较多，想完全理解需要花费一定的时间，本系列《Spring设计思想-事务篇》将通过如下几个方面来阐述Spring的数据库事务：<br>数据库连接java.sql.Connection的特性、事务表示、以及和Java线程之间的天然关系；<br>数据库的隔离级别和传播机制<br>Spring 基于事务和连接池的抽象和设计<br>Spring 事务的实现原理<br>而本文作为<strong>《Spring设计思想-事务篇》</strong> 的开篇，将深入数据库连接 (<code>java.sql.Connection</code>对象）的特性，事务表示，以及和Java线程之间的天然关系。懂得了底层的基本原理，在这些基础的概念之上再来理解Spring 事务，就会容易很多。</p>
+<a id="more"></a>
+
+<h1 id="1-Java事务控制的基本单位-：-java-sql-Conection"><a href="#1-Java事务控制的基本单位-：-java-sql-Conection" class="headerlink" title="1. Java事务控制的基本单位 ： java.sql.Conection"></a>1. Java事务控制的基本单位 ： java.sql.Conection</h1><p>在Java中，使用了<code>java.sql.Connection</code>实例来表示和数据库的一个连接，通信的方式目前基本上采用的是TCP/IP 连接方式。通过对Connection进行一系列的事务控制。<br><img src="http://image.winrains.cn/2019/09/20190926085930-e0e90.png" alt="http://image.winrains.cn/2019/09/20190926085930-e0e90.png"></p>
+<blockquote>
+<p>可能有人有如下的想法：<br>既然<code>java.sql.Connection</code>可以完成事务操作，那我在写代码的时候，直接创建一个然后使用不就行了？<br>然而在事实上，我们并不能这么做，这是因为，<code>java.sql.Connection</code>和数据库之间有非常紧密的关系，其数据库的资源是很有限的。</p>
+</blockquote>
+<h2 id="1-1-java-sql-Connection-有限的系统资源"><a href="#1-1-java-sql-Connection-有限的系统资源" class="headerlink" title="1.1 java.sql.Connection-有限的系统资源"></a>1.1 java.sql.Connection-有限的系统资源</h2><p>应用程序和数据库之间建立 Connection连接，则数据库机器会为之分配一定的线程资源来维护这种连接，连接数越多，消耗数据库的线程资源也就越多；另外不同的connection实例之间，可能会操作相同的表数据，也就是高并发，为了支持数据库对ACID特性的支持，数据库又会牺牲更多的资源。简单地来说，建立Connection连接，会消耗数据库系统的如下资源：</p>
+<table>
+<thead>
+<tr>
+<th><strong>资源</strong></th>
+<th><strong>说明</strong></th>
+</tr>
+</thead>
+<tbody><tr>
+<td>线程数</td>
+<td>线程越多，线程的上下文切换会越频繁，会影响其处理能力</td>
+</tr>
+<tr>
+<td>创建Connection的开销</td>
+<td>由于Connection负责和数据库之间的通信，在创建环节会做大量的初始化 ，创建过程所需时间和内存资源上都有一定的开销</td>
+</tr>
+<tr>
+<td>内存资源</td>
+<td>为了维护Connection对象会消耗一定的内存</td>
+</tr>
+<tr>
+<td>锁占用</td>
+<td>在高并发模式下，不同的Connection可能会操作相同的表数据，就会存在锁的情况，数据库为了维护这种锁会有不少的内存开销</td>
+</tr>
+</tbody></table>
+<p>上述的几种资源会限制数据库的链接数和处理性能。</p>
+<blockquote>
+<p>结论：<br>数据库资源是比较宝贵的有限资源，当应用程序有数据库连接需求过大时，很容易会达到数据库的连接并发瓶颈。<br>关于创建Connection过程的开销，可以参考 《深入理解mybatis原理》 Mybatis数据源与连接池 第五节 “为什么要使用连接池？”</p>
+</blockquote>
+<h2 id="1-2-数据库最多支持多少Connection连接？"><a href="#1-2-数据库最多支持多少Connection连接？" class="headerlink" title="1.2 数据库最多支持多少Connection连接？"></a>1.2 数据库最多支持多少Connection连接？</h2><p>以 MYSQL为例，可以通过如下语句查询数据库的最大支持情况：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">-- 查看当前数据库最多支持多少数据库连接</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">show</span> <span class="keyword">variables</span> <span class="keyword">like</span> <span class="string">'%max_connections%'</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment">-- 设置当前运行时mysql的最大连接数，服务重启连接数将还原</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">set</span> <span class="keyword">GLOBAL</span> max_connections = <span class="number">200</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment">-- 修改 my.ini 或者my.cnf 配置文件</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">max_connections = 200;</span></pre></td></tr></table></figure>
+
+<blockquote>
+<p>数据库的连接数设置的越大越好吗？<br>肯定不是的，连接数越大，对使用大量的线程维护，伴随着大量的线程上下文切换，并且与此同时，连接数越多，表数据锁使用的概率会更大，反而会导致整体数据库的性能下降。具体的设置范围，应当具体的业务背景来调优。</p>
+</blockquote>
+<h1 id="2-java-sql-Connection对象本身的特性—-线性操作和可以不限次数执行SQL事务操作"><a href="#2-java-sql-Connection对象本身的特性—-线性操作和可以不限次数执行SQL事务操作" class="headerlink" title="2. java.sql.Connection对象本身的特性— 线性操作和可以不限次数执行SQL事务操作"></a>2. java.sql.Connection对象本身的特性— 线性操作和可以不限次数执行SQL事务操作</h1><p><code>java.sql.Connection</code> 本身有如下两个比较关键的特性：</p>
+<ul>
+<li><strong>线性操作：即在操作的时序上，事务和事务之间的执行是线性排开依次执行的</strong></li>
+<li><strong>当建立了 <code>java.sql.Connection</code> 连接后，可以不限次数执行事务SQL请求</strong><br>由于Connection对象的通信值基于TCP/IP协议的，当初始化后在手动关闭之前和数据库保持心跳存活连接，所以，可以使用Connection对象执行不限次数的SQL语句请求，包括事务请求<br><strong>注意！！</strong> 这个看似比较简单的表述，在实际使用过程中非常重要，数据库连接池就是基于此特性建立的</li>
+</ul>
+<p>如下图所示：<br><img src="http://image.winrains.cn/2019/09/20190926085931-1fcd3.png" alt="http://image.winrains.cn/2019/09/20190926085931-1fcd3.png"><br>有上图所示，对于<code>java.sql.Connection</code>对象的操作，一般会遵循序列化的事务操作模式，即：一个新事务的开启，必须在上一个事务完成之后(如果存在的话)；换成另外一种表述方式就是：对connection的操作必须是线性的。</p>
+<h1 id="3-如何在Java中实现对java-sql-Connection对象的线性操作？"><a href="#3-如何在Java中实现对java-sql-Connection对象的线性操作？" class="headerlink" title="3. 如何在Java中实现对java.sql.Connection对象的线性操作？"></a>3. 如何在Java中实现对java.sql.Connection对象的线性操作？</h1><h2 id="3-1-一个线程的整个生命周期中，可以独占一个java-sql-Connection-连接吗？"><a href="#3-1-一个线程的整个生命周期中，可以独占一个java-sql-Connection-连接吗？" class="headerlink" title="3.1. 一个线程的整个生命周期中，可以独占一个java.sql.Connection 连接吗？"></a>3.1. 一个线程的整个生命周期中，可以独占一个java.sql.Connection 连接吗？</h2><p>Java中，当然一个线程可以在整个生命周期独占一个<code>java.sql.Connection</code>，使用该对象完成各种数据库操作，因为一个线程内的所有操作都是同步的和线性的。然而，在实际的项目中，并不会这样做，原因有两个：</p>
+<ul>
+<li><strong>Java中的线程数量可能远超数据库连接数量，会出现僧多粥少的情况</strong><br>如上面章节1.2中提到的，一个MYSQL服务器的最大连接数量是有上限的，例子中提到的就是上限200;而在稍微大型一点的Java WEB项目中，光用户的HTTP请求线程数，就不止200个，这样就会出现部分线程无法获取到数据库连接，进而无法完成业务操作。</li>
+<li><strong>Java线程在工作过程中，真正访问JDBC数据库连接所占用的时间比例很短</strong><br>线程在接收到用户请求后，有很多业务逻辑需要处理：比如参数校验，权限验证，数值计算，然后持久化结果；其中可能只有持久化结果环节需要访问JDBC数据库连接,其余的时间范围内，JDBC数据库连接 都是空闲状态。<strong>换言之，如果线程整个生命周期中独占JDBC数据库连接，那么，真个连接池的空闲率很高，使用率很低。</strong><br>综上所述，Java线程和JDBC数据库连接的关系如下：<br><img src="http://image.winrains.cn/2019/09/20190926085931-9ecd6.png" alt="http://image.winrains.cn/2019/09/20190926085931-9ecd6.png"></li>
+</ul>
+<blockquote>
+<p>结论：<br>结合上述的两个症结，为了提高JDBC数据库连接的使用效率，目前普遍的解决方案是：当线程需要做数据库操作时，才会真正请求获取JDBC数据库连接,线程使用完了之后，立即释放，被释放的JDBC数据库连接等待下次分配使用<br>基于这个结论，会衍生两个问题需要解决：</p>
+</blockquote>
+<p>Java多线程访问同一个<code>java.sql.Connection</code>会有什么问题？如何解决？<br>JDBC数据库连接 如何管理和分配？(这个解决方案是：连接池，后面章节会详细阐述)<br><strong>通过上述的图示中，可以看到，一个数据库连接对象,在线程进行事务操作时，线程在此期间内是独占数据库连接对象的，也就是说，在事务进行期间，有一个非常重要的特性，就是：数据库连接对象可以吸附在线程上，我把这种特性称之为事务对象的线程吸附性 这种特性，正是由于这种特性，在Spring实现上，使用了基于线程的<code>ThreadLocal</code>来表示这种线程依附行为。</strong></p>
+<h2 id="3-2-Java多线程访问同一个java-sql-Connection会有什么问题？"><a href="#3-2-Java多线程访问同一个java-sql-Connection会有什么问题？" class="headerlink" title="3.2 Java多线程访问同一个java.sql.Connection会有什么问题？"></a>3.2 Java多线程访问同一个java.sql.Connection会有什么问题？</h2><p>Java多线程访问同一个<code>java.sql.Connection</code>会导致事务错乱。例如：现有线程<code>thread #1</code> 和线程<code>thread #2</code>,两个线程会有如下数据库操作:</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">thread <span class="comment">#1:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">update</span> xxx; <span class="keyword">update</span> yyy; <span class="keyword">commit</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">thread <span class="comment">#2:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">delete</span> zzz; <span class="keyword">insert</span> ttt; <span class="keyword">rollback</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">语句执行的序列在connection对象上，可能表现成了：</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">delete</span> zzz; <span class="keyword">update</span> xxx; <span class="keyword">insert</span> ttt; <span class="keyword">rollback</span>; <span class="keyword">update</span> yyy; <span class="keyword">commit</span>;</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/09/20190926085932-5d07a.png" alt="http://image.winrains.cn/2019/09/20190926085932-5d07a.png"><br>由上图可以看到，<strong><code>Thread #1</code>的请求 <code>update xxx</code> 被<code>thread #2</code>回退掉，导致语句丢失，<code>thread #1</code>的事务不完整</strong></p>
+<h2 id="3-3-Java多线程访问同一个java-sql-Connection-的原则"><a href="#3-3-Java多线程访问同一个java-sql-Connection-的原则" class="headerlink" title="3.3 Java多线程访问同一个java.sql.Connection 的原则"></a>3.3 Java多线程访问同一个java.sql.Connection 的原则</h2><p>解决上述事务不完整的问题，从本质上而言，就是多线程访互斥资源的方法。多线程互斥访问资源的方式在Java中的实现方式有很多，如下使用有一个最简单的使用 <code>synchronized</code> 关键字来实现 :</p>
+<figure class="highlight n1ql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">java.sql.Connection sharedConnection = &lt;创建流程&gt;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">## thread #1 的业务伪代码：</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">synchronized(sharedConnection)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">         `<span class="keyword">update</span> xxx<span class="symbol">`;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">         `</span><span class="keyword">update</span> yyy<span class="symbol">`;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">         `</span><span class="keyword">commit</span><span class="symbol">`;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">&#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">## thread #2 的业务伪代码：</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">synchronized(sharedConnection)&#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">       `</span><span class="keyword">delete</span> zzz<span class="symbol">`;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">       `</span><span class="keyword">insert</span> ttt<span class="symbol">`;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">       `</span><span class="keyword">rollback</span><span class="symbol">`;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">&#125;</span></span></pre></td></tr></table></figure>
+
+<p>上述的伪代码在执行上能够体现成如下的形式，即同一时间内，只有一个线程占用<code>Connection</code>对象。<br>假设<code>Thread #2</code>先获取到了<code>Connection</code>锁，如下图所示：<br><img src="http://image.winrains.cn/2019/09/20190926085933-455b1.png" alt="http://image.winrains.cn/2019/09/20190926085933-455b1.png"></p>
+<blockquote>
+<p>存在的问题<br>那上述的流程还有有点问题：假如 <code>thread #2</code> 在执行语句 <code>delete zzz,insert ttt,rollback</code> 的过程中，在<code>insert ttt</code>之前有一段业务代码抛出了异常，导致语句只执行到了 <code>delete zzz</code>，这会导致在<code>connection</code>对象上有一个尚未提交的<code>delete zzz</code>请求; 当<code>thread #1</code>拿到了<code>connection</code> 对象的锁之后，接着执行 <code>update xxx; update yyy; commit;</code><br>即:在两个线程执行完了之后，对<code>connection</code>的操作为<code>delete zzz; update xxx; update yyy; commit;</code><br>示例如下：<br><img src="http://image.winrains.cn/2019/09/20190926085934-ef0e2.png" alt="http://image.winrains.cn/2019/09/20190926085934-ef0e2.png"><br>解决方案： 确保每个线程在使用<code>Connection</code>对象时，最终要明确对<code>Connection</code>做commit 或者rollback。<br>调整后的伪代码如下所示：</p>
+</blockquote>
+<figure class="highlight n1ql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">java.sql.Connection sharedConnection = &lt;创建流程&gt;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">## thread #1 的业务伪代码：</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">synchronized(sharedConnection)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">       try&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">         ` <span class="keyword">update</span> xxx<span class="symbol">`;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">         `</span><span class="keyword">update</span> yyy<span class="symbol">`;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">         `</span><span class="keyword">commit</span><span class="symbol">`;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">       &#125; catch(Exception e)&#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">          `</span><span class="keyword">rollback</span><span class="symbol">`; //之所以rollback ,是确保在执行事务的过程中，在connection对象上，清空尚未提交的所有SQL语句</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">      &#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">&#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">## thread #2 的业务伪代码：</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">synchronized(sharedConnection)&#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">       try&#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">       `</span><span class="keyword">delete</span> zzz<span class="symbol">`;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">       `</span><span class="keyword">insert</span> ttt<span class="symbol">`;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">       `</span><span class="keyword">rollback</span><span class="symbol">`;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">       &#125; catch(Exception e)&#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">          `</span><span class="keyword">rollback</span><span class="symbol">`; //之所以rollback ,是确保在执行事务的过程中，在connection对象上，清空尚未提交的所有SQL语句</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">      &#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">&#125;</span></span></pre></td></tr></table></figure>
+
+<p>综上所述，解决多个线程访问同一个<code>Connection</code>对象时，必须遵循两个基本原则：</p>
+<ul>
+<li><strong>以资源互斥的方式访问<code>Connection</code>对象；</strong></li>
+<li><strong>在线程执行结束时，应当最终及时提交(commit)或回滚(rollback)对Connection的影响；不允许存在尚未被提交或者回滚的语句。</strong></li>
+</ul>
+<h1 id="4-当一个事务结束，java-sql-Connection实例有必要释放销毁吗？"><a href="#4-当一个事务结束，java-sql-Connection实例有必要释放销毁吗？" class="headerlink" title="4. 当一个事务结束，java.sql.Connection实例有必要释放销毁吗？"></a>4. 当一个事务结束，java.sql.Connection实例有必要释放销毁吗？</h1><p>正常情况下，我们在写业务代码时，会有类似的流程：</p>
+<ol>
+<li>创建一个<code>java.sql.Connection</code>实例；</li>
+<li>基于<code>java.sql.Connection</code> 做相关事务提交操作</li>
+<li>销毁<code>java.sql.Connection</code> 实例</li>
+</ol>
+<p>而实际上，在第三步骤，是完全没有必要销毁<code>java.sql.Connection</code> 实例的，这是因为，在第二章节我们介绍的<code>Connection</code>的性质：<strong>当建立了 <code>java.sql.Connection</code> 连接后，可以不限次数执行事务SQL请求,</strong> 也就是说，当此次事务结束后，我可以紧接着使用这个<code>Connection</code>对象开启下一个事务。<br>另外，由于创建一个<code>java.sql.Connection</code> 实例的代价本身就比较大，笔者测试的数据库建立<code>Connection</code>的时间，一般都在至少0.1s级别，如果每一个事务在执行的时候，都要花费额外的0.1s 来做连接，会严重影响当前服务的性能和吞吐量。<br>结合上面的叙述，目前的做法，在完成事务后，并不会销毁<code>java.sql.Connection</code>实例，而是将其回收到<strong>连接池</strong>中。</p>
+<h1 id="5-连接池-—-统一管理java-sql-Connection的容器"><a href="#5-连接池-—-统一管理java-sql-Connection的容器" class="headerlink" title="5. 连接池 —- 统一管理java.sql.Connection的容器"></a>5. 连接池 —- 统一管理java.sql.Connection的容器</h1><p><img src="http://image.winrains.cn/2019/09/20190926085934-bc42b.png" alt="http://image.winrains.cn/2019/09/20190926085934-bc42b.png"><br>一般连接池需要如下几个功能：</p>
+<ul>
+<li>管理一批<code>Connection</code>对象，一般会有连接数上限设置；</li>
+<li>为每一个获取<code>Connection</code>请求做资源分配；如果资源不足，设置等待时间；</li>
+<li>根据实际<code>Connection</code>的使用情况，为了提高系统之间的利用率，动态调整连接池中<code>Connection</code>对象的数量，如应用实际使用的连接数比较少时，会自动关闭掉一些处于无用状态的连接；当请求量大的时候，再动态创建。</li>
+</ul>
+<p>目前比较流行的几个连接池解决方案有：HikariCP, 阿里的Druid, apache的DBCP等，具体的实现不是本文的重点，有兴趣的同学可以研究下。</p>
+<h1 id="6-结语"><a href="#6-结语" class="headerlink" title="6.结语"></a>6.结语</h1><p>本文对最基本的数据库连接和线程之间的关系进行了探讨，以及数据库连接的管理-**连接池的角色和职能进行了概括。本文没有复杂的概念陈述和实现介绍，是希望读者脑海里对数据库事务的jdbc表示对象<code>java.sql.Connection</code>对象有一个清晰的认知，方便后续更复杂的Spring事务原理的详细介绍。<br>接下来的几篇，将会开始细化，具体话题如下：</p>
+<ul>
+<li>数据库的隔离级别和传播机制</li>
+<li>Spring 基于事务和连接池的抽象和设计</li>
+<li>Spring 事务的实现原理</li>
+</ul>
+<p>有兴趣的同学可以持续关注，或者有感兴趣的话题可以抛出来，一起探讨。</p>
+<blockquote>
+<p>作者：亦山</p>
+<p>来源：<a href="https://blog.csdn.net/luanlouis/article/details/90760372" target="_blank" rel="noopener">https://blog.csdn.net/luanlouis/article/details/90760372</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E4%BA%8B%E5%8A%A1/" rel="tag"># 事务</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/27/%E5%9B%BE%E8%A7%A3%E8%AE%BE%E8%AE%A1%E6%A8%A1%E5%BC%8F%EF%BC%8822%EF%BC%89%EF%BC%9ACommand%E6%A8%A1%E5%BC%8F%EF%BC%88%E5%91%BD%E4%BB%A4%E4%B9%9F%E6%98%AF%E7%B1%BB%EF%BC%89/" rel="prev" title="图解设计模式（22）：Command模式（命令也是类）">
+      <i class="fa fa-chevron-left"></i> 图解设计模式（22）：Command模式（命令也是类）
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/27/Spring%E8%AE%BE%E8%AE%A1%E6%80%9D%E6%83%B3-%E4%BA%8B%E5%8A%A1%E7%AF%87%EF%BC%882%EF%BC%89%EF%BC%9A%E6%95%B0%E6%8D%AE%E5%BA%93%E9%9A%94%E7%A6%BB%E7%BA%A7%E5%88%AB/" rel="next" title="Spring设计思想-事务篇（2）：数据库隔离级别">
+      Spring设计思想-事务篇（2）：数据库隔离级别 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#0-前言"><span class="nav-number">1.</span> <span class="nav-text">0. 前言</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#1-Java事务控制的基本单位-：-java-sql-Conection"><span class="nav-number">2.</span> <span class="nav-text">1. Java事务控制的基本单位 ： java.sql.Conection</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#1-1-java-sql-Connection-有限的系统资源"><span class="nav-number">2.1.</span> <span class="nav-text">1.1 java.sql.Connection-有限的系统资源</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#1-2-数据库最多支持多少Connection连接？"><span class="nav-number">2.2.</span> <span class="nav-text">1.2 数据库最多支持多少Connection连接？</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#2-java-sql-Connection对象本身的特性—-线性操作和可以不限次数执行SQL事务操作"><span class="nav-number">3.</span> <span class="nav-text">2. java.sql.Connection对象本身的特性— 线性操作和可以不限次数执行SQL事务操作</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#3-如何在Java中实现对java-sql-Connection对象的线性操作？"><span class="nav-number">4.</span> <span class="nav-text">3. 如何在Java中实现对java.sql.Connection对象的线性操作？</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#3-1-一个线程的整个生命周期中，可以独占一个java-sql-Connection-连接吗？"><span class="nav-number">4.1.</span> <span class="nav-text">3.1. 一个线程的整个生命周期中，可以独占一个java.sql.Connection 连接吗？</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3-2-Java多线程访问同一个java-sql-Connection会有什么问题？"><span class="nav-number">4.2.</span> <span class="nav-text">3.2 Java多线程访问同一个java.sql.Connection会有什么问题？</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3-3-Java多线程访问同一个java-sql-Connection-的原则"><span class="nav-number">4.3.</span> <span class="nav-text">3.3 Java多线程访问同一个java.sql.Connection 的原则</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#4-当一个事务结束，java-sql-Connection实例有必要释放销毁吗？"><span class="nav-number">5.</span> <span class="nav-text">4. 当一个事务结束，java.sql.Connection实例有必要释放销毁吗？</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#5-连接池-—-统一管理java-sql-Connection的容器"><span class="nav-number">6.</span> <span class="nav-text">5. 连接池 —- 统一管理java.sql.Connection的容器</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#6-结语"><span class="nav-number">7.</span> <span class="nav-text">6.结语</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">360</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">78</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">96</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
