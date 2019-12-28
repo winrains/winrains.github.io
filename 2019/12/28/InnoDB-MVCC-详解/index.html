@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="1. 概述InnoDB支持MVCC（Multi-Version Concurrency Control), undo日志中保存了多版本的记录，undo支持事务回滚的同时，也支持数据的一致性读。undo日志保存在回滚段中，undo日志的回收由purge操作进行。InnoDB行记录中保存了事务相关信息如事务id，roll_ptr。id用于可见性判断，roll_ptr用于从undo中回溯历史版本。一致性">
+<meta name="keywords" content="MVCC">
+<meta property="og:type" content="article">
+<meta property="og:title" content="InnoDB MVCC 详解">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2019&#x2F;12&#x2F;28&#x2F;InnoDB-MVCC-%E8%AF%A6%E8%A7%A3&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="1. 概述InnoDB支持MVCC（Multi-Version Concurrency Control), undo日志中保存了多版本的记录，undo支持事务回滚的同时，也支持数据的一致性读。undo日志保存在回滚段中，undo日志的回收由purge操作进行。InnoDB行记录中保存了事务相关信息如事务id，roll_ptr。id用于可见性判断，roll_ptr用于从undo中回溯历史版本。一致性">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170447-66ba5.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170447-98d69.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170447-9b45f.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170447-a1b6b.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170448-4f201.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170448-61e67.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170449-eef87.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170449-3e536.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170449-2d4aa.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170450-b838b.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170450-1be34.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170450-68b26.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170451-5f1bd.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170451-dc8e9.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170451-39efc.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170451-87f6a.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170451-f3042.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170451-4a93e.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170452-d137f.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170452-7a094.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170452-aeb5f.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170452-3233c.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170452-2ab7e.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170453-7d46d.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170453-b34ad.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170453-45197.png">
+<meta property="og:updated_time" content="2019-12-28T12:10:55.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016170447-66ba5.png">
+
+<link rel="canonical" href="http://congsheng.wang/2019/12/28/InnoDB-MVCC-%E8%AF%A6%E8%A7%A3/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>InnoDB MVCC 详解 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">108</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">82</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">469</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2019/12/28/InnoDB-MVCC-%E8%AF%A6%E8%A7%A3/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          InnoDB MVCC 详解
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-28 20:10:55" itemprop="dateCreated datePublished" datetime="2019-12-28T20:10:55+08:00">2019-12-28</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/MySQL/" itemprop="url" rel="index">
+                    <span itemprop="name">MySQL</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="1-概述"><a href="#1-概述" class="headerlink" title="1. 概述"></a>1. 概述</h1><p>InnoDB支持MVCC（Multi-Version Concurrency Control), <code>undo</code>日志中保存了多版本的记录，<code>undo</code>支持事务回滚的同时，也支持数据的一致性读。<code>undo</code>日志保存在回滚段中，<code>undo</code>日志的回收由purge操作进行。<br>InnoDB行记录中保存了事务相关信息如事务<code>id</code>，<code>roll_ptr</code>。<code>id</code>用于可见性判断，<code>roll_ptr</code>用于从undo中回溯历史版本。一致性读会开启一个<code>ReadView</code>，<code>ReadView</code>包含当前正在执行的事务信息，通过此<code>ReadView</code>来获取一致性的记录。<br>MVCC最重要的特点是一致性读不加锁，这样一致性读不会阻塞更新，从而提升了数据库的并发性能。</p>
+<a id="more"></a>
+
+<h1 id="2-InnoDB-行格式"><a href="#2-InnoDB-行格式" class="headerlink" title="2. InnoDB 行格式"></a><strong>2. InnoDB 行格式</strong></h1><hr>
+<p>InnoDB的行格式如下图，其中<code>cluster index</code>中的行记录包含了<code>DB_TRX_ID</code>和<code>DB_ROLL_PTR</code>字段：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170447-66ba5.png" alt="img"></p>
+<ul>
+<li><code>DB_TRX_ID</code>, 保存事务<code>id</code>，即<code>trx-&gt;id</code>， 用于可见性判断。</li>
+<li><code>DB_ROLL_PTR</code>, 保存回滚段地址信息（spaceid，pageno，offset），用于回溯上一个版本。</li>
+</ul>
+<p>例如<code>t1</code>表记录格式如下：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">create</span> <span class="keyword">table</span> t1(c1 <span class="built_in">int</span> primary <span class="keyword">key</span>, c2 <span class="built_in">int</span>, c3 <span class="built_in">char</span>(<span class="number">10</span>), <span class="keyword">index</span> i_c3(c3));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">insert</span> <span class="keyword">into</span> t1 <span class="keyword">values</span>(<span class="number">1</span>,<span class="number">1</span>,’a’);</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/10/20191016170447-98d69.png" alt="img"></p>
+<blockquote>
+<p>注：无主键表会自动加一个<code>DB_ROW_ID</code>字段代替<code>PK</code></p>
+</blockquote>
+<h1 id="3-undo"><a href="#3-undo" class="headerlink" title="3. undo"></a><strong>3. undo</strong></h1><hr>
+<p>undo日志保存在回滚段中，回滚段在ibdata或单独的undo tablespace中。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170447-9b45f.png" alt="img"></p>
+<p><code>undo</code>记录的主要类型如下，其中<code>TRX_UNDO_INSERT_REC</code>为insert的<code>undo</code>，其他为update和delete的<code>undo</code>。</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="meta">#<span class="meta-keyword">define</span> TRX_UNDO_INSERT_REC 11 <span class="comment">/* fresh insert into clustered index */</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="meta">#<span class="meta-keyword">define</span> TRX_UNDO_UPD_EXIST_REC        \</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="number">12</span> <span class="comment">/* update of a non-delete-marked \</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     record */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="meta">#<span class="meta-keyword">define</span> TRX_UNDO_UPD_DEL_REC                \</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  <span class="number">13</span> <span class="comment">/* update of a delete marked record to \</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     a not delete marked record; also the   \</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     fields of the record can change */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="meta">#<span class="meta-keyword">define</span> TRX_UNDO_DEL_MARK_REC              \</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">  <span class="number">14</span> <span class="comment">/* delete marking of a record; fields \</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     do not change */</span></span></pre></td></tr></table></figure>
+
+<p>对于insert和delete，<code>undo</code>中会记录键值，delete操作只是标记删除(delete mark)记录。对于update，如果是原地更新，<code>undo</code>中会记录键值和老值。<br>update如果是通过<code>delete+insert</code>方式进行的，则<code>undo</code>中记录键值，不需记录老值。其中delete也是标记删除记录。二级索引的更新总是<code>delete+insert</code>方式进行。具体日志格式参考<code>trx_undo_report_row_operation</code>。</p>
+<h1 id="4-ReadView"><a href="#4-ReadView" class="headerlink" title="4. ReadView"></a><strong>4. ReadView</strong></h1><hr>
+<p>InnoDB事务都有对应的<code>ReadView</code>，<code>ReadView</code>保存当前正在执行的事务信息。<code>ReadView</code>用于判断可见性。<br>关于可见性，虚线表示当前读的时间点，以此划为三部分：</p>
+<ul>
+<li>与虚线时间点相交的，称为活跃事务，不可见</li>
+<li>虚线时间点之前的，已提交事务，可见</li>
+<li>虚线时间点之后的，未开启的事务，不可见</li>
+</ul>
+<p>因此可见的事务为<code>T1,T2,T3,T5</code></p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170447-a1b6b.png" alt="img"></p>
+<p>在InnoDB中，读写事务都会分配<code>id(trx_id::id)</code>递增. <code>trx_sys-&gt;rw_trx_ids</code>保存活跃事务<code>id</code>。InnoDB的中<code>ReadView</code>和可见性判断如下：</p>
+<ul>
+<li><code>m_ids</code>，当前正在执行的事务<code>id</code>列表。这里面的事务为活跃事务，不可见；</li>
+<li><code>m_up_limit_id</code>，小于此值的是已提交事务，可见；</li>
+<li><code>m_low_limit_id</code>，大于等于此值的是未开启的事务，不可见；</li>
+<li><code>trx_id::id</code> 读写事务都会从<code>trx_sys-&gt;max_trx_id</code>分配<code>id</code>，递增。</li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/10/20191016170448-4f201.png" alt="img"></p>
+<p>上图ReadView为：</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">m_ids: (<span class="number">6</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">m_up_limit_id: <span class="number">6</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">m_low_limit_id: <span class="number">12</span></span></pre></td></tr></table></figure>
+
+<p>根据可见性规则，可推知：</p>
+<ul>
+<li><code>T1,T2,T3</code> 事务<code>id</code>都小于<code>m_up_limit_id</code>，可见；</li>
+<li><code>T5</code> 不在<code>m_ids</code>里，可见；</li>
+<li><code>T6 id &gt; m_low_limit_id</code> 不可见；</li>
+<li>因此可见的事务为<code>T1,T2,T3,T5</code>。</li>
+</ul>
+<p><code>cluster index</code>上的记录可见性判断的相关代码如下：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="built_in">bool</span> changes<span class="constructor">_visible(<span class="params">trx_id_t</span> <span class="params">id</span>, <span class="params">const</span> <span class="params">table_name_t</span> &amp;<span class="params">name</span>)</span> const</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="constructor">MY_ATTRIBUTE((<span class="params">warn_unused_result</span>)</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  ut<span class="constructor">_ad(<span class="params">id</span> &gt; 0)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">if</span> (id &lt; m_up_limit_id<span class="operator"> || </span>id<span class="operator"> == </span>m_creator_trx_id) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    return (<span class="literal">true</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  check<span class="constructor">_trx_id_sanity(<span class="params">id</span>, <span class="params">name</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">if</span> (id &gt;= m_low_limit_id) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    return (<span class="literal">false</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">  &#125; <span class="keyword">else</span> <span class="keyword">if</span> (m_ids.empty<span class="literal">()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    return (<span class="literal">true</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">  const ids_t::value_type *p = m_ids.data<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">  return (!std::binary<span class="constructor">_search(<span class="params">p</span>, <span class="params">p</span> + <span class="params">m_ids</span>.<span class="params">size</span>()</span>, id));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<blockquote>
+<p>在<code>ReadCommit</code>隔离级别下，事务中的每个语句执行前都会分配一次<code>ReadView</code>。 在<code>RepeatableRead</code>隔离级别下，只在事务开始时才分配一次<code>ReadView</code>。</p>
+</blockquote>
+<h1 id="5-Purge"><a href="#5-Purge" class="headerlink" title="5. Purge"></a><strong>5. Purge</strong></h1><hr>
+<p><code>Purge</code>操作控制<code>undo</code>日志的回收和真正删除已标记删除的记录。</p>
+<h2 id="5-1-undo回收"><a href="#5-1-undo回收" class="headerlink" title="5.1 undo回收"></a><strong>5.1 undo回收</strong></h2><p><code>undo</code>中保存老记录的历史版本, 当这些历史版本不再需要时，交由<code>purge</code>清理。<br>在InnoDB中，<code>trx-&gt;no</code>用于保存事务提交的顺序，<code>trx-&gt;no</code>在事务提交时从<code>trx_sys-&gt;max_trx_id</code>获取。在<code>ReadView</code>中，<code>m_low_limit_no</code>表示当前已经提交事务的最大<code>trx-&gt;no</code>，即小于此值的事务都已提交，且当前<code>ReadView</code>不需要这些事务的<code>undo</code>日志。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170448-61e67.png" alt="img"></p>
+<p><code>trx_sys-&gt;mvcc-&gt;m_views</code>保存了当前所有的<code>ReadView</code>，<code>oldest_view</code>为其中最老的<code>ReadView</code>，只有小于<code>oldest_view-&gt;m_low_limit_no</code>的<code>undo</code>才可以<code>purge</code>。<br>下图中<code>ReadView1</code>的<code>m_low_limit_no</code>为9，<code>ReadView2</code>的<code>m_low_limit_no</code>为12, <code>oldest_view</code>为<code>ReadView1</code>。<br>因此只有<code>trx-&gt;no</code>小于9的<code>T1</code>和<code>T3</code>的<code>undo</code>可以清理。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170449-eef87.png" alt="img"></p>
+<p>事务提交后，会将<code>undo</code>日志信息(保存在<code>trx_rseg_t</code>中）加入到队列<code>purge_queue</code>中，<code>purge_queue</code>是以<code>trx-&gt;id</code>排序的最小堆。<br><code>purge</code>线程从<code>purge_queue</code>中获取符合条件（<code>trx-&gt;id &lt; oldest_view-&gt;m_low_limit_no</code>)的<code>undo</code>并依次<code>purge</code>回收。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170449-3e536.png" alt="img"></p>
+<h2 id="5-2-删除记录"><a href="#5-2-删除记录" class="headerlink" title="5.2 删除记录"></a><strong>5.2 删除记录</strong></h2><p>事务提交后，仍然可能有标记删除的记录存在。这些记录在<code>purge</code>时真正删除。</p>
+<blockquote>
+<p><code>undo</code>日志应该及时<code>purge</code>，<code>undo</code>日志的堆积不仅会导致回滚段空间的增长，而且<code>delete mark</code>的记录没有真正删除，也会影响查询的效率。</p>
+</blockquote>
+<h1 id="6-Multi-Version"><a href="#6-Multi-Version" class="headerlink" title="6. Multi-Version"></a><strong>6. Multi-Version</strong></h1><hr>
+<p>InnoDB多版本数据是通过<code>delete mark</code>的行数据和回滚段中的<code>undo</code>信息组成的。例如下图中记录存在三个版本，在<code>Repeatable-Read</code>下<code>select * from t1</code> 查询返回的是第一个老的版本<code>(1,1,’a’)</code>。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170449-2d4aa.png" alt="img"></p>
+<p><code>cluster index</code>的历史版本在<code>undo</code>日志中或为<code>delete mark</code>的记录，<code>secondary index</code>的历史版本是<code>delete mark</code>的记录。例如<code>t1</code>有三个版本数据。<br><code>cluster index</code>的历史版本在<code>undo</code>日志中或为<code>delete mark</code>的记录，<code>secondary index</code>的历史版本是<code>delete mark</code>的记录。例如t1有三个版本数据：<br>在<code>cluster index</code>中，最新的版本记录为<code>T3(1,5,roll_ptr,1,&#39;c&#39;)</code>其中5为事务<code>id</code>，数据就在<code>page</code>中；上一个版本为<code>T2(1,3,roll_ptr,1,&#39;b&#39;)</code>, 可通过<code>T3(1,5,roll_ptr,1,&#39;c&#39;)</code>上<code>roll_ptr</code>指向的<code>undo</code>记录构造出来；而最老的版本为<code>T1(1,1,roll_ptr,1,&#39;a&#39;)</code>, 可通过T2(1,3,roll_ptr,1,’b’)上roll_ptr指向的undo记录构造出来。<br>在<code>secondary index</code>中，最新的版本记录为<code>T3(&#39;c&#39;,1)</code>，数据就在当前二级索引<code>page</code>中；上一个版本为<code>T2(&#39;b&#39;,1)</code>，数据也在当前二级索引<code>page</code>中，但打上了<code>delete mark</code>标记；而最老的版本为<code>T1(&#39;a&#39;,1)</code>,数据也在当前二级索引<code>page</code>中，但打上了<code>delete mark</code>标记。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170450-b838b.png" alt="img"></p>
+<h1 id="7-可见性判断"><a href="#7-可见性判断" class="headerlink" title="7. 可见性判断"></a><strong>7. 可见性判断</strong></h1><p>前面介绍了数据的多版本，这节介绍如果获取正确的版本。<code>cluster index</code>和<code>secondary index</code>有不同的获取方式。</p>
+<h2 id="7-1-cluster-index"><a href="#7-1-cluster-index" class="headerlink" title="7.1 cluster index"></a><strong>7.1 cluster index</strong></h2><p>以上节为例，默认隔离级别为<code>RepeatableRead</code>，<code>select * from t1</code>， 查询结果为老版本<code>(1,1,’a)</code>。其对应的<code>ReadView</code>为：</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">ReadView</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">m_ids: (<span class="literal">null</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">m_up_limit_id: <span class="number">2</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">m_low_limit_id: <span class="number">2</span></span></pre></td></tr></table></figure>
+
+<p>首先查询到最新的记录<code>(1,1,’c’)</code>， 其事务<code>id</code>为5， 大于<code>m_low_limit_id（2）</code>所以不可见； 然后通过<code>roll_ptr</code>构建上一个版本<code>(1,1,’b’)</code>, 其事务<code>id</code>为3，大于<code>m_low_limit_id（2）</code>仍然不可见；再通过<code>rool_ptr</code>构建出<code>(1,1,’a’)</code>，其事务<code>id</code>为1， 小于<code>m_up_limit_id（2）</code>，可见；所以最后返回<code>(1,1,’a’)</code>。具体代码参考函数<code>row_sel_build_prev_vers</code>。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170450-1be34.png" alt="img"></p>
+<h2 id="7-2-secondary-index"><a href="#7-2-secondary-index" class="headerlink" title="7.2 secondary index"></a><strong>7.2 secondary index</strong></h2><p>二级索引记录中没<code>trx_id</code>和<code>roll_ptr</code>字段，但二级索引<code>page</code>中记录了当前<code>page</code>所涉及事务最大的<code>trx-&gt;id</code>，参考<code>page_update_max_trx_id</code>。<br>判断二级索引记录可见性时，用此<code>page</code>的事务<code>id</code>比较，如果<code>page</code>事务<code>id</code>小于当前<code>view</code>的<code>m_up_limit_id</code>则认为此记录可见，否则需要从cluster <code>index</code>。读取记录来判断可见性，参考<code>lock_sec_rec_cons_read_sess</code>。<br>例如下图中<code>select * from t1 force index(i_c3) where c3 &gt;= ‘a’</code>，查询结果为<code>（1，1，’a’)</code>。我们强制使用二级索引<code>i_c3</code>，查询会先从二级索引读取符合条件<code>(c3&gt;=’a’)</code>的记录再回<code>cluster index</code>获取完整记录。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170450-68b26.png" alt="img"></p>
+<p>其对应的<code>ReadView</code>为：</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">ReadView</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">m_ids: (<span class="literal">null</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">m_up_limit_id: <span class="number">2</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">m_low_limit_id: <span class="number">2</span></span></pre></td></tr></table></figure>
+
+<p>假设二级索引所在<code>page</code>的最大事务<code>id</code>为5，当前<code>view-&gt;m_up_limit_id</code>为5， 先读取记录<code>(‘a’，1)</code>, 事务<code>id</code>为<code>5（5 = view-&gt;m_up_limit_id)</code>不可见，需要回<code>cluster index</code>查找，根据上节依次回溯到可见版本<code>(1,1,’a)</code>。<br>并且判断二级索引列值和聚集索引列值一致(<code>row_sel_sec_rec_is_for_clust_rec</code>)，因此可以返回记录<code>(1,1,’a’)</code>;</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170451-5f1bd.png" alt="img"></p>
+<p>接着读取记录<code>(‘b’,1)</code>，事务<code>id</code>为5不可见<code>（5 = view-&gt;m_up_limit_id)</code>，需要回<code>cluster index</code>查找，依然回溯到可见版本<code>(1,1,’a’)</code>，但此时二级索引列值和聚集索引列值<code>（’a’!=’b’)</code>不一致, 因此<code>（’b’,1)</code>不符合条件。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170451-dc8e9.png" alt="img"></p>
+<p>再读取记录<code>(‘c’,1)</code>，事务<code>id</code>为5不可见<code>（5 = view-&gt;m_up_limit_id)</code>，需要回<code>cluster index</code>查找，依然回溯到可见版本<code>(1,1,’a’)</code>，但此时二级索引列值和聚集索引列值<code>（’a’!=’c’)</code>也不一致, 因此<code>（’c’,1)</code>也不符合条件。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170451-39efc.png" alt="img"></p>
+<p>因此最终返回符合条件的记录为<code>(1,1,’a’)</code>。<br>我们再看下面这个例子，<code>select * from t1 force index(i_c3) where c3 &gt;= ‘a’</code>，查询结果为<code>（1，1，’c’)</code>。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170451-87f6a.png" alt="img"></p>
+<p>其对应的ReadView为：</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">ReadView</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">m_ids: (<span class="literal">null</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">m_up_limit_id: <span class="number">6</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">m_low_limit_id: <span class="number">6</span></span></pre></td></tr></table></figure>
+
+<p>先读取记录<code>(‘a’，1)</code>, <code>page</code>事务<code>id</code>为5可见， 再判断<code>（‘a’,1)</code>为<code>del mark</code>记录，不符合条件；</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170451-f3042.png" alt="img"></p>
+<p>然后读取记录<code>(‘b’，1)</code>, <code>page</code>事务<code>id</code>为5可见， 再判断<code>（‘b’,1)</code>为<code>del mark</code>记录，不符合条件；</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170451-4a93e.png" alt="img"></p>
+<p>再读取记录<code>(‘c’，1)</code>, <code>page</code>事务<code>id</code>为5可见， 且<code>（’c’,1)</code>为非<code>del mark</code>记录，符合条件。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170452-d137f.png" alt="img"></p>
+<p>因此最终回表返回符合条件的记录为<code>(1,1,’c’)</code>。</p>
+<h1 id="8-ICP与MVCC"><a href="#8-ICP与MVCC" class="headerlink" title="8. ICP与MVCC"></a><strong>8. ICP与MVCC</strong></h1><hr>
+<p>Index Condition Pushdown (ICP) 并不会受到MVCC的影响。在通过<code>cluster index</code>或<code>sendary index</code>查找记录时，会优先判断记录的可见性。如果记录可见，则会进行下一步的ICP优化。<br>例如，从二级索引扫描到记录不可见时，这时候需要回聚集索引判断可见性，在这之前会优先判断条件<code>c3=2</code>是否满足（<code>row_search_idx_cond_check</code>)，<br>如果满足条件才会扫描聚集索引，否则忽略此记录。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">create</span> <span class="keyword">table</span> t1(c1 <span class="built_in">int</span> primary <span class="keyword">key</span>,c2 <span class="built_in">int</span>,c3 <span class="built_in">int</span>, <span class="keyword">index</span> idx(c2,c3));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">select</span> * <span class="keyword">from</span> t1 <span class="keyword">force</span> <span class="keyword">index</span>(idx) <span class="keyword">where</span> c2&gt;<span class="number">1</span> <span class="keyword">and</span> c3=<span class="number">2</span>;</span></pre></td></tr></table></figure>
+
+<h1 id="9-semi-consistent-read"><a href="#9-semi-consistent-read" class="headerlink" title="9. semi-consistent read"></a><strong>9. semi-consistent read</strong></h1><hr>
+<p><code>semi-consistent read</code>是建立在InnoDB多版本基础之上的针对update的优化。<br><code>semi-consistent read</code>是指在<code>ReadCommitted</code>隔离级别或开启<code>innodb_locks_unsafe_for_binlog</code>的情况下，当update语句读取的行正在被其他会话更新时，不直接加锁等待，而是先读取此行最近的一个历史版本，如果此版本符合where条件则重新读取此行并加锁，如果不符合where条件则忽略此行。<code>semi-consistent read</code>避免了一些锁等待。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170452-7a094.png" alt="img"></p>
+<h2 id="9-1-semi-consistent-read-分析"><a href="#9-1-semi-consistent-read-分析" class="headerlink" title="9.1 semi-consistent read 分析"></a><strong>9.1 semi-consistent read 分析</strong></h2><p>在下图中，在<code>Repeatable-Read</code>隔离级别下，不会有<code>semi-consistent read</code>，<code>session2</code>的更新会等待。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170452-aeb5f.png" alt="img"></p>
+<p>而下图中，而在<code>Read-Committied</code>隔离级别下，会走<code>semi-consistent read</code>，<code>session2</code>的更新成功。<code>session2</code>在执行<code>update t2 set c2=3 where c2=2;</code>时，先读取到<code>(1,2)</code>这个记录，发现此记录已被<code>session1</code>持有锁，于是读取最近的一个历史版本<code>（1，1）</code>, 发现此记录不符合where条件，于是忽略此记录，结果更新0行返回。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170452-3233c.png" alt="img"></p>
+<p>如果<code>session2</code>更新条件变化为<code>update t2 set c2=3 where c2=1;</code>那么<code>session2</code>将等待。 <code>session2</code>在执行<code>update t2 set c2=3 where c2=1;</code>时，先读取到<code>(1,2)</code>这个记录，发现此记录已被<code>session1</code>持有锁，于是读取最近的一个历史版本<code>（1，1）</code>, 发现此记录符合where条件，于是重新读此行加锁等待。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170452-2ab7e.png" alt="img"></p>
+<blockquote>
+<p>具体实现可以参考相关函数try_semi_consistent_read/was_semi_consistent_read</p>
+</blockquote>
+<h2 id="9-2-semi-consistent-read存在的问题"><a href="#9-2-semi-consistent-read存在的问题" class="headerlink" title="9.2 semi-consistent read存在的问题"></a><strong>9.2 semi-consistent read存在的问题</strong></h2><p>然而，<code>semi-consistent read</code>也存在问题，某些情况会破坏事务的串行化(serializability)。可串行化是指<code>session1</code>和<code>session2</code>并发执行完成后，理想情况最终结果应该为以下情况中的一种：</p>
+<ul>
+<li><code>session1</code>先执行完成后<code>session2</code>再执行</li>
+<li><code>session2</code>先执行完成后<code>session1</code>再执行</li>
+</ul>
+<p>以下例子<code>semi-consistent read</code>打破了上述规则，<code>session1</code>和<code>session2</code>并发执行完后，结果为</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">select * <span class="keyword">from</span> t2;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">(<span class="number">1</span>,<span class="number">2</span>,), (<span class="number">10</span>,<span class="number">30</span>)</span></pre></td></tr></table></figure>
+
+<p>此结果与后面即将介绍的两种情况的结果都不同。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016170453-7d46d.png" alt="img"></p>
+<p>如果<code>session1</code>先执行完成后<code>session2</code>再执行，结果为：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">select * <span class="keyword">from</span> t2;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">(<span class="number">1</span>,<span class="number">3</span>), (<span class="number">10</span>,<span class="number">30</span>);</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/10/20191016170453-b34ad.png" alt="img"></p>
+<p>而如果<code>session2</code>先执行完成后<code>session1</code>再执行，结果为：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">select * <span class="keyword">from</span> t2;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">(<span class="number">1</span>,<span class="number">2</span>), (<span class="number">10</span>,<span class="number">20</span>);</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/10/20191016170453-45197.png" alt="img"></p>
+<blockquote>
+<p>在<code>Repeatable-Read</code>隔离级别下不存在上述问题，因此在某些事务性要求比较高的场景建议使用<code>Repeatable-Read</code>隔离级别。</p>
+</blockquote>
+<h1 id="10-相关BUG"><a href="#10-相关BUG" class="headerlink" title="10. 相关BUG"></a><strong>10. 相关BUG</strong></h1><hr>
+<p>Bug#84958 （<a href="https://bugs.mysql.com/bug.php?id=84958）中描述了通过二级索引扫描记录时需要从聚集索引判断其可见性的性能问题。" target="_blank" rel="noopener">https://bugs.mysql.com/bug.php?id=84958）中描述了通过二级索引扫描记录时需要从聚集索引判断其可见性的性能问题。</a><br>优化方法是缓存cluster的游标记录，便于下次扫描时符合条件的可以重用，从而避免了cluster index不必要的重复回溯记录。此BUG已在MySQL8.0.13修复，相关代码可见于<a href="https://github.com/[mysql](https://cloud.tencent.com/product/cdb?from=10680)/mysql-server/commit/0ca968fc0d663f1740d5bba3e88f250f536f7677/。" target="_blank" rel="noopener">https://github.com/[mysql](https://cloud.tencent.com/product/cdb?from=10680)/mysql-server/commit/0ca968fc0d663f1740d5bba3e88f250f536f7677/。</a></p>
+<h1 id="11-参考文档"><a href="#11-参考文档" class="headerlink" title="11.参考文档"></a><strong>11.参考文档</strong></h1><hr>
+<p><a href="https://dev.mysql.com/doc/refman/8.0/en/innodb-multi-versioning.html" target="_blank" rel="noopener">https://dev.mysql.com/doc/refman/8.0/en/innodb-multi-versioning.html</a><br><a href="https://dev.mysql.com/doc/refman/8.0/en/innodb-consistent-read.html" target="_blank" rel="noopener">https://dev.mysql.com/doc/refman/8.0/en/innodb-consistent-read.html</a><br><a href="https://dev.mysql.com/doc/refman/8.0/en/glossary.html#glos_semi_consistent_read" target="_blank" rel="noopener">https://dev.mysql.com/doc/refman/8.0/en/glossary.html#glos_semi_consistent_read</a></p>
+<blockquote>
+<p>作者：idba</p>
+<p>来源：<a href="https://cloud.tencent.com/developer/article/1489367" target="_blank" rel="noopener">https://cloud.tencent.com/developer/article/1489367</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/MVCC/" rel="tag"># MVCC</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/28/%E5%88%86%E5%BA%93%E5%88%86%E8%A1%A8%E6%9C%80%E4%BD%B3%E5%AE%9E%E8%B7%B5/" rel="prev" title="分库分表最佳实践">
+      <i class="fa fa-chevron-left"></i> 分库分表最佳实践
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/28/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3Mybatis%E5%8E%9F%E7%90%86%EF%BC%881%EF%BC%89%EF%BC%9A%E5%88%9D%E5%A7%8B%E5%8C%96%E6%9C%BA%E5%88%B6%E8%AF%A6%E8%A7%A3/" rel="next" title="深入理解Mybatis原理（1）：初始化机制详解">
+      深入理解Mybatis原理（1）：初始化机制详解 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#1-概述"><span class="nav-number">1.</span> <span class="nav-text">1. 概述</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#2-InnoDB-行格式"><span class="nav-number">2.</span> <span class="nav-text">2. InnoDB 行格式</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#3-undo"><span class="nav-number">3.</span> <span class="nav-text">3. undo</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#4-ReadView"><span class="nav-number">4.</span> <span class="nav-text">4. ReadView</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#5-Purge"><span class="nav-number">5.</span> <span class="nav-text">5. Purge</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#5-1-undo回收"><span class="nav-number">5.1.</span> <span class="nav-text">5.1 undo回收</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#5-2-删除记录"><span class="nav-number">5.2.</span> <span class="nav-text">5.2 删除记录</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#6-Multi-Version"><span class="nav-number">6.</span> <span class="nav-text">6. Multi-Version</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#7-可见性判断"><span class="nav-number">7.</span> <span class="nav-text">7. 可见性判断</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#7-1-cluster-index"><span class="nav-number">7.1.</span> <span class="nav-text">7.1 cluster index</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#7-2-secondary-index"><span class="nav-number">7.2.</span> <span class="nav-text">7.2 secondary index</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#8-ICP与MVCC"><span class="nav-number">8.</span> <span class="nav-text">8. ICP与MVCC</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#9-semi-consistent-read"><span class="nav-number">9.</span> <span class="nav-text">9. semi-consistent read</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#9-1-semi-consistent-read-分析"><span class="nav-number">9.1.</span> <span class="nav-text">9.1 semi-consistent read 分析</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#9-2-semi-consistent-read存在的问题"><span class="nav-number">9.2.</span> <span class="nav-text">9.2 semi-consistent read存在的问题</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#10-相关BUG"><span class="nav-number">10.</span> <span class="nav-text">10. 相关BUG</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#11-参考文档"><span class="nav-number">11.</span> <span class="nav-text">11.参考文档</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">469</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">82</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">108</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="本篇主要是深入对Java中的Class对象进行分析，这对后续深入理解反射技术非常重要，主要内容如下：  深入理解Class对象RRTI的概念以及Class对象作用Class对象的加载及其获取方式Class对象的加载ClassforName方法Class字面常量理解泛化的Class对象引用关于类型转换的问题instanceof 关键字与isInstance方法理解反射技术Constructor类及其">
+<meta name="keywords" content="反射">
+<meta property="og:type" content="article">
+<meta property="og:title" content="深入理解Java类型信息(Class对象)与反射机制">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2019&#x2F;12&#x2F;28&#x2F;%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3Java%E7%B1%BB%E5%9E%8B%E4%BF%A1%E6%81%AF-Class%E5%AF%B9%E8%B1%A1&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="本篇主要是深入对Java中的Class对象进行分析，这对后续深入理解反射技术非常重要，主要内容如下：  深入理解Class对象RRTI的概念以及Class对象作用Class对象的加载及其获取方式Class对象的加载ClassforName方法Class字面常量理解泛化的Class对象引用关于类型转换的问题instanceof 关键字与isInstance方法理解反射技术Constructor类及其">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190930162451-4bce6.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190930162451-c9654.png">
+<meta property="og:updated_time" content="2019-12-28T07:07:10.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;09&#x2F;20190930162451-4bce6.png">
+
+<link rel="canonical" href="http://congsheng.wang/2019/12/28/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3Java%E7%B1%BB%E5%9E%8B%E4%BF%A1%E6%81%AF-Class%E5%AF%B9%E8%B1%A1/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>深入理解Java类型信息(Class对象)与反射机制 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">108</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">82</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">469</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2019/12/28/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3Java%E7%B1%BB%E5%9E%8B%E4%BF%A1%E6%81%AF-Class%E5%AF%B9%E8%B1%A1/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          深入理解Java类型信息(Class对象)与反射机制
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-28 15:07:10" itemprop="dateCreated datePublished" datetime="2019-12-28T15:07:10+08:00">2019-12-28</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/" itemprop="url" rel="index">
+                    <span itemprop="name">JVM</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/%E7%B1%BB%E5%8A%A0%E8%BD%BD%E6%9C%BA%E5%88%B6/" itemprop="url" rel="index">
+                    <span itemprop="name">类加载机制</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>本篇主要是深入对Java中的<code>Class</code>对象进行分析，这对后续深入理解反射技术非常重要，主要内容如下：</p>
+<blockquote>
+<p>深入理解<code>Class</code>对象<br>RRTI的概念以及<code>Class</code>对象作用<br><code>Class</code>对象的加载及其获取方式<br><code>Class</code>对象的加载<br><code>ClassforName</code>方法<br><code>Class</code>字面常量<br>理解泛化的<code>Class</code>对象引用<br>关于类型转换的问题<br><code>instanceof</code> 关键字与<code>isInstance</code>方法<br>理解反射技术<br><code>Constructor</code>类及其用法<br><code>Field</code>类及其用法<br><code>Method</code>类及其用法<br>反射包中的<code>Array</code>类</p>
+</blockquote>
+<a id="more"></a>
+
+<h1 id="1-深入理解Class对象"><a href="#1-深入理解Class对象" class="headerlink" title="1 深入理解Class对象"></a>1 深入理解Class对象</h1><h2 id="1-1-RRTI的概念以及Class对象作用"><a href="#1-1-RRTI的概念以及Class对象作用" class="headerlink" title="1.1 RRTI的概念以及Class对象作用"></a>1.1 RRTI的概念以及Class对象作用</h2><p>认识<code>Class</code>对象之前，先来了解一个概念，RTTI（Run-Time Type Identification）运行时类型识别，对于这个词一直是 C++ 中的概念，至于Java中出现RRTI的说法则是源于《Thinking in Java》一书，其作用是在运行时识别一个对象的类型和类的信息，这里分两种：传统的”RRTI”,它假定我们在编译期已知道了所有类型(在没有反射机制创建和使用类对象时，一般都是编译期已确定其类型，如<code>new</code>对象时该类必须已定义好)，另外一种是反射机制，它允许我们在运行时发现和使用类型的信息。在Java中用来表示运行时类型信息的对应类就是<code>Class</code>类，<code>Class</code>类也是一个实实在在的类，存在于JDK的<code>java.lang</code>包中，其部分源码如下：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">final</span> <span class="class"><span class="keyword">class</span> <span class="title">Class</span>&lt;<span class="title">T</span>&gt; <span class="keyword">implements</span> <span class="title">java</span>.<span class="title">io</span>.<span class="title">Serializable</span>,<span class="title">GenericDeclaration</span>,<span class="title">Type</span>, <span class="title">AnnotatedElement</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="keyword">int</span> ANNOTATION= <span class="number">0x00002000</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="keyword">int</span> ENUM      = <span class="number">0x00004000</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="keyword">int</span> SYNTHETIC = <span class="number">0x00001000</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">private</span> <span class="keyword">static</span> <span class="keyword">native</span> <span class="keyword">void</span> <span class="title">registerNatives</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">static</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        registerNatives();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * Private constructor. Only the Java Virtual Machine creates Class objects.（私有构造，只能由JVM创建该类）</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * This constructor is not used and prevents the default constructor being</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * generated.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">private</span> <span class="title">Class</span><span class="params">(ClassLoader loader)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// Initialize final field for classLoader.  The initialization value of non-null</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// prevents future JIT optimizations from assuming this final field is null.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        classLoader = loader;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr></table></figure>
+
+<p><code>Class</code>类被创建后的对象就是<code>Class</code>对象，注意，<code>Class</code>对象表示的是自己手动编写类的类型信息，比如创建一个<code>Shapes</code>类，那么，JVM就会创建一个<code>Shapes</code>对应<code>Class</code>类的<code>Class</code>对象，该<code>Class</code>对象保存了<code>Shapes</code>类相关的类型信息。实际上在Java中每个类都有一个<code>Class</code>对象，每当我们编写并且编译一个新创建的类就会产生一个对应<code>Class</code>对象并且这个<code>Class</code>对象会被保存在同名.class文件里(编译后的字节码文件保存的就是<code>Class</code>对象)，那为什么需要这样一个<code>Class</code>对象呢？是这样的，当我们<code>new</code>一个新对象或者引用静态成员变量时，Java虚拟机(JVM)中的类加载器子系统会将对应<code>Class</code>对象加载到JVM中，然后JVM再根据这个类型信息相关的<code>Class</code>对象创建我们需要实例对象或者提供静态变量的引用值。需要特别注意的是，手动编写的每个class类，无论创建多少个实例对象，在JVM中都只有一个<code>Class</code>对象，即在内存中每个类有且只有一个相对应的<code>Class</code>对象，挺拗口，通过下图理解（内存中的简易现象图）：<br><img src="http://image.winrains.cn/2019/09/20190930162451-4bce6.png" alt="img"><br>到这我们也就可以得出以下几点信息：</p>
+<ul>
+<li><code>Class</code>类也是类的一种，与class关键字是不一样的。</li>
+<li>手动编写的类被编译后会产生一个<code>Class</code>对象，其表示的是创建的类的类型信息，而且这个<code>Class</code>对象保存在同名.class的文件中(字节码文件)，比如创建一个<code>Shapes</code>类，编译<code>Shapes</code>类后就会创建其包含<code>Shapes</code>类相关类型信息的<code>Class</code>对象，并保存在<code>Shapes.class</code>字节码文件中。</li>
+<li>每个通过关键字class标识的类，在内存中有且只有一个与之对应的<code>Class</code>对象来描述其类型信息，无论创建多少个实例对象，其依据的都是用一个<code>Class</code>对象。</li>
+<li><code>Class</code>类只存私有构造函数，因此对应<code>Class</code>对象只能有JVM创建和加载</li>
+<li><code>Class</code>类的对象作用是运行时提供或获得某个对象的类型信息，这点对于反射技术很重要(关于反射稍后分析)。</li>
+</ul>
+<h2 id="1-2-Class对象的加载及其获取方式"><a href="#1-2-Class对象的加载及其获取方式" class="headerlink" title="1.2 Class对象的加载及其获取方式"></a>1.2 Class对象的加载及其获取方式</h2><h3 id="1-2-1-Class对象的加载"><a href="#1-2-1-Class对象的加载" class="headerlink" title="1.2.1 Class对象的加载"></a>1.2.1 Class对象的加载</h3><p>前面我们已提到过，<code>Class</code>对象是由JVM加载的，那么其加载时机是？实际上所有的类都是在对其第一次使用时动态加载到JVM中的，当程序创建第一个对类的静态成员引用时，就会加载这个被使用的类(实际上加载的就是这个类的字节码文件)，注意，使用<code>new</code>操作符创建类的新实例对象也会被当作对类的静态成员的引用(构造函数也是类的静态方法)，由此看来Java程序在它们开始运行之前并非被完全加载到内存的，其各个部分是按需加载，所以在使用该类时，类加载器首先会检查这个类的<code>Class</code>对象是否已被加载(类的实例对象创建时依据<code>Class</code>对象中类型信息完成的)，如果还没有加载，默认的类加载器就会先根据类名查找.class文件(编译后<code>Class</code>对象被保存在同名的.class文件中)，在这个类的字节码文件被加载时，它们必须接受相关验证，以确保其没有被破坏并且不包含不良Java代码(这是java的安全机制检测)，完全没有问题后就会被动态加载到内存中，此时相当于<code>Class</code>对象也就被载入内存了(毕竟.class字节码文件保存的就是<code>Class</code>对象)，同时也就可以被用来创建这个类的所有实例对象。下面通过一个简单例子来说明<code>Class</code>对象被加载的时机问题（例子引用自Thinking in Java）：</p>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">package com.zejian;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">Candy</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">static</span> &#123;   System.out.<span class="built_in">println</span>(<span class="string">"Loading Candy"</span>); &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">Gum</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">static</span> &#123;   System.out.<span class="built_in">println</span>(<span class="string">"Loading Gum"</span>); &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">Cookie</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">static</span> &#123;   System.out.<span class="built_in">println</span>(<span class="string">"Loading Cookie"</span>); &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">SweetShop</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">print</span><span class="params">(Object obj)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    System.out.<span class="built_in">println</span>(obj);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">main</span><span class="params">(<span class="keyword">String</span>[] args)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">print</span>(<span class="string">"inside main"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">new</span> Candy();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">print</span>(<span class="string">"After creating Candy"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">      Class.forName(<span class="string">"com.zejian.Gum"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">    &#125; <span class="keyword">catch</span>(ClassNotFoundException e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">      <span class="built_in">print</span>(<span class="string">"Couldn't find Gum"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">print</span>(<span class="string">"After Class.forName(\"com.zejian.Gum\")"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">new</span> Cookie();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">print</span>(<span class="string">"After creating Cookie"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>在上述代码中,每个类<code>Candy</code>、<code>Gum</code>、<code>Cookie</code>都存在一个<code>static</code>语句，这个语句会在类第一次被加载时执行，这个语句的作用就是告诉我们该类在什么时候被加载，执行结果：</p>
+<figure class="highlight awk"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">inside main</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">Loading Candy</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">After creating Candy</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">Loading Gum</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">After Class.forName(<span class="string">"com.zejian.Gum"</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">Loading Cookie</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">After creating Cookie</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">Process finished with <span class="keyword">exit</span> code <span class="number">0</span></span></pre></td></tr></table></figure>
+
+<p>从结果来看，<code>new</code>一个<code>Candy</code>对象和<code>Cookie</code>对象，构造函数将被调用，属于静态方法的引用，<code>Candy</code>类的<code>Class</code>对象和<code>Cookie</code>的<code>Class</code>对象肯定会被加载，毕竟<code>Candy</code>实例对象的创建依据其<code>Class</code>对象。比较有意思的是</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">Class</span>.</span></span>for<span class="constructor">Name(<span class="string">"com.zejian.Gum"</span>)</span>;</span></pre></td></tr></table></figure>
+
+<p>其中<code>forName</code>方法是<code>Class</code>类的一个<code>static</code>成员方法，记住所有的<code>Class</code>对象都源于这个<code>Class</code>类，因此<code>Class</code>类中定义的方法将适应所有<code>Class</code>对象。这里通过<code>forName</code>方法，我们可以获取到<code>Gum</code>类对应的<code>Class</code>对象引用。从打印结果来看，调用<code>forName</code>方法将会导致<code>Gum</code>类被加载(前提是<code>Gum</code>类从来没有被加载过)。</p>
+<h3 id="1-2-2-Class-forName方法"><a href="#1-2-2-Class-forName方法" class="headerlink" title="1.2.2 Class.forName方法"></a>1.2.2 Class.forName方法</h3><p>通过上述的案例，我们也就知道<code>Class.forName()</code>方法的调用将会返回一个对应类的<code>Class</code>对象，因此如果我们想获取一个类的运行时类型信息并加以使用时，可以调用<code>Class.forName()</code>方法获取<code>Class</code>对象的引用，这样做的好处是无需通过持有该类的实例对象引用而去获取<code>Class</code>对象，如下的第2种方式是通过一个实例对象获取一个类的<code>Class</code>对象，其中的<code>getClass()</code>是从顶级类<code>Object</code>继承而来的，它将返回表示该对象的实际类型的<code>Class</code>对象引用。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public static void main(String<span class="literal">[]</span> args) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">      <span class="comment">//通过Class.forName获取Gum类的Class对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">      Class clazz=<span class="module-access"><span class="module"><span class="identifier">Class</span>.</span></span>for<span class="constructor">Name(<span class="string">"com.zejian.Gum"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">      <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"forName=clazz:"</span>+clazz.get<span class="constructor">Name()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    &#125;catch (ClassNotFoundException e)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">      e.print<span class="constructor">StackTrace()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//通过实例对象获取Gum的Class对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    Gum gum = <span class="keyword">new</span> <span class="constructor">Gum()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    Class clazz2=gum.get<span class="constructor">Class()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"new=clazz2:"</span>+clazz2.get<span class="constructor">Name()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr></table></figure>
+
+<p>注意调用<code>forName</code>方法时需要捕获一个名称为<code>ClassNotFoundException</code>的异常，因为<code>forName</code>方法在编译器是无法检测到其传递的字符串对应的类是否存在的，只能在程序运行时进行检查，如果不存在就会抛出<code>ClassNotFoundException</code>异常。</p>
+<h3 id="1-2-3-Class字面常量"><a href="#1-2-3-Class字面常量" class="headerlink" title="1.2.3 Class字面常量"></a>1.2.3 Class字面常量</h3><p>在Java中存在另一种方式来生成<code>Class</code>对象的引用，它就是<code>Class</code>字面常量，如下：</p>
+<figure class="highlight monkey"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">//字面常量的方式获取<span class="class"><span class="keyword">Class</span>对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">Class</span> <span class="title">clazz</span> = <span class="title">Gum</span>.<span class="title">class</span>;</span></span></pre></td></tr></table></figure>
+
+<p>这种方式相对前面两种方法更加简单，更安全。因为它在编译器就会受到编译器的检查同时由于无需调用<code>forName</code>方法效率也会更高，因为通过字面量的方法获取<code>Class</code>对象的引用不会自动初始化该类。更加有趣的是字面常量的获取<code>Class</code>对象引用方式不仅可以应用于普通的类，也可以应用用接口，数组以及基本数据类型，这点在反射技术应用传递参数时很有帮助，关于反射技术稍后会分析，由于基本数据类型还有对应的基本包装类型，其包装类型有一个标准字段<code>TYPE</code>，而这个<code>TYPE</code>就是一个引用，指向基本数据类型的<code>Class</code>对象，其等价转换如下，一般情况下更倾向使用.class的形式，这样可以保持与普通类的形式统一。</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="type">boolean</span>.<span class="keyword">class</span> = <span class="type">Boolean</span>.<span class="keyword">TYPE</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="type">char</span>.<span class="keyword">class</span> = <span class="type">Character</span>.<span class="keyword">TYPE</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">byte.<span class="keyword">class</span> = Byte.<span class="keyword">TYPE</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">short.<span class="keyword">class</span> = Short.<span class="keyword">TYPE</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="type">int</span>.<span class="keyword">class</span> = <span class="type">Integer</span>.<span class="keyword">TYPE</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">long.<span class="keyword">class</span> = Long.<span class="keyword">TYPE</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="type">float</span>.<span class="keyword">class</span> = <span class="type">Float</span>.<span class="keyword">TYPE</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="type">double</span>.<span class="keyword">class</span> = <span class="type">Double</span>.<span class="keyword">TYPE</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="type">void</span>.<span class="keyword">class</span> = <span class="type">Void</span>.<span class="keyword">TYPE</span>;</span></pre></td></tr></table></figure>
+
+<p>前面提到过，使用字面常量的方式获取<code>Class</code>对象的引用不会触发类的初始化，这里我们可能需要简单了解一下类加载的过程，如下：<br><img src="http://image.winrains.cn/2019/09/20190930162451-c9654.png" alt="img"></p>
+<ul>
+<li>加载：类加载过程的一个阶段：通过一个类的完全限定查找此类字节码文件，并利用字节码文件创建一个<code>Class</code>对象</li>
+<li>链接：验证字节码的安全性和完整性，准备阶段正式为静态域分配存储空间，注意此时只是分配静态成员变量的存储空间，不包含实例成员变量，如果必要的话，解析这个类创建的对其他类的所有引用。</li>
+<li>初始化：类加载最后阶段，若该类具有超类，则对其进行初始化，执行静态初始化器和静态初始化成员变量。</li>
+</ul>
+<p>由此可知，我们获取字面常量的<code>Class</code>引用时，触发的应该是加载阶段，因为在这个阶段<code>Class</code>对象已创建完成，获取其引用并不困难，而无需触发类的最后阶段初始化。下面通过小例子来验证这个过程：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">import java.util.*;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> Initable &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">//编译期静态常量</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  static final <span class="built_in">int</span> staticFinal = <span class="number">47</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">//非编期静态常量</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  static final <span class="built_in">int</span> staticFinal2 =</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">ClassInitialization</span>.</span></span>rand.next<span class="constructor">Int(1000)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  static &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"Initializing Initable"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> Initable2 &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">//静态成员变量</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">  static <span class="built_in">int</span> staticNonFinal = <span class="number">147</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">  static &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"Initializing Initable2"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> Initable3 &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">//静态成员变量</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">  static <span class="built_in">int</span> staticNonFinal = <span class="number">74</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">  static &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"Initializing Initable3"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> ClassInitialization &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">  public static Random rand = <span class="keyword">new</span> <span class="constructor">Random(47)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">  public static void main(String<span class="literal">[]</span> args) throws Exception &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//字面常量获取方式获取Class对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">    Class initable = <span class="module-access"><span class="module"><span class="identifier">Initable</span>.</span></span><span class="keyword">class</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"After creating Initable ref"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//不触发类初始化</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="module-access"><span class="module"><span class="identifier">Initable</span>.</span></span>staticFinal);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//会触发类初始化</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="module-access"><span class="module"><span class="identifier">Initable</span>.</span></span>staticFinal2);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//会触发类初始化</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="module-access"><span class="module"><span class="identifier">Initable2</span>.</span></span>staticNonFinal);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//forName方法获取Class对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">    Class initable3 = <span class="module-access"><span class="module"><span class="identifier">Class</span>.</span></span>for<span class="constructor">Name(<span class="string">"Initable3"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"After creating Initable3 ref"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="module-access"><span class="module"><span class="identifier">Initable3</span>.</span></span>staticNonFinal);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>执行结果：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">After creating Initable <span class="built_in">ref</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="number">47</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">Initializing Initable</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="number">258</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">Initializing Initable2</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="number">147</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">Initializing Initable3</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">After creating Initable3 <span class="built_in">ref</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="number">74</span></span></pre></td></tr></table></figure>
+
+<p>从输出结果来看，可以发现，通过字面常量获取方式获取<code>Initable</code>类的<code>Class</code>对象并没有触发<code>Initable</code>类的初始化，这点也验证了前面的分析，同时发现调用<code>Initable.staticFinal</code>变量时也没有触发初始化，这是因为<code>staticFinal</code>属于编译期静态常量，在编译阶段通过常量传播优化的方式将<code>Initable</code>类的常量<code>staticFinal</code>存储到了一个称为<code>NotInitialization</code>类的常量池中，在以后对<code>Initable</code>类常量<code>staticFinal</code>的引用实际都转化为对<code>NotInitialization</code>类对自身常量池的引用，所以在编译期后，对编译期常量的引用都将在<code>NotInitialization</code>类的常量池获取，这也就是引用编译期静态常量不会触发<code>Initable</code>类初始化的重要原因。但在之后调用了<code>Initable.staticFinal2</code>变量后就触发了<code>Initable</code>类的初始化，注意<code>staticFinal2</code>虽然被<code>static</code>和<code>final</code>修饰，但其值在编译期并不能确定，因此<code>staticFinal2</code>并不是编译期常量，使用该变量必须先初始化<code>Initable</code>类。<code>Initable2</code>和<code>Initable3</code>类中都是静态成员变量并非编译期常量，引用都会触发初始化。至于<code>forName</code>方法获取<code>Class</code>对象，肯定会触发初始化，这点在前面已分析过。到这几种获取<code>Class</code>对象的方式也都分析完，ok~,到此这里可以得出小结论：<br>获取<code>Class</code>对象引用的方式3种，通过继承自<code>Object</code>类的<code>getClass</code>方法，<code>Class</code>类的静态方法<code>forName</code>以及字面常量的方式”.class”。</p>
+<ul>
+<li>其中实例类的<code>getClass</code>方法和<code>Class</code>类的静态方法<code>forName</code>都将会触发类的初始化阶段，而字面常量获取<code>Class</code>对象的方式则不会触发初始化。</li>
+<li>初始化是类加载的最后一个阶段，也就是说完成这个阶段后类也就加载到内存中(<code>Class</code>对象在加载阶段已被创建)，此时可以对类进行各种必要的操作了（如<code>new</code>对象，调用静态成员等），注意在这个阶段，才真正开始执行类中定义的Java程序代码或者字节码。</li>
+</ul>
+<p><strong>关于类加载的初始化阶段，在虚拟机规范严格规定了有且只有5种场景必须对类进行初始化：</strong></p>
+<ul>
+<li>使用<code>new</code>关键字实例化对象时、读取或者设置一个类的静态字段(不包含编译期常量)以及调用静态方法的时候，必须触发类加载的初始化过程(类加载过程最终阶段)。</li>
+<li>使用反射包(<code>java.lang.reflect</code>)的方法对类进行反射调用时，如果类还没有被初始化，则需先进行初始化，这点对反射很重要。</li>
+<li>当初始化一个类的时候，如果其父类还没进行初始化则需先触发其父类的初始化。</li>
+<li>当Java虚拟机启动时，用户需要指定一个要执行的主类(包含<code>main</code>方法的类)，虚拟机会先初始化这个主类</li>
+<li>当使用JDK 1.7 的动态语言支持时，如果一个<code>java.lang.invoke.MethodHandle</code> 实例最后解析结果为<code>REF_getStatic</code>、<code>REF_putStatic</code>、<code>REF_invokeStatic</code>的方法句柄，并且这个方法句柄对应类没有初始化时，必须触发其初始化(这点看不懂就算了，这是1.7的新增的动态语言支持，其关键特征是它的类型检查的主体过程是在运行期而不是编译期进行的，这是一个比较大点的话题，这里暂且打住)</li>
+</ul>
+<h3 id="1-2-4-理解泛化的Class对象引用"><a href="#1-2-4-理解泛化的Class对象引用" class="headerlink" title="1.2.4 理解泛化的Class对象引用"></a>1.2.4 理解泛化的Class对象引用</h3><p>由于<code>Class</code>的引用总数指向某个类的<code>Class</code>对象，利用<code>Class</code>对象可以创建实例类，这也就足以说明<code>Class</code>对象的引用指向的对象确切的类型。在Java SE5引入泛型后，使用我们可以利用泛型来表示<code>Class</code>对象更具体的类型，即使在运行期间会被擦除，但编译期足以确保我们使用正确的对象类型。如下：</p>
+<figure class="highlight cs"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Created by zejian on 2017/4/30.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Blog : http://blog.csdn.net/javazejian [原文地址,请尊重原创]</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">class</span> <span class="title">ClazzDemo</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">main</span>(<span class="params">String[] args</span>)</span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//没有泛型</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        Class intClass = <span class="keyword">int</span>.<span class="keyword">class</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//带泛型的Class对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        Class&lt;Integer&gt; integerClass = <span class="keyword">int</span>.<span class="keyword">class</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        integerClass = Integer.<span class="keyword">class</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//没有泛型的约束,可以随意赋值</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        intClass= <span class="keyword">double</span>.<span class="keyword">class</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//编译期错误,无法编译通过</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//integerClass = double.class</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>从代码可以看出，声明普通的<code>Class</code>对象，在编译器并不会检查<code>Class</code>对象的确切类型是否符合要求，如果存在错误只有在运行时才得以暴露出来。但是通过泛型声明指明类型的<code>Class</code>对象，编译器在编译期将对带泛型的类进行额外的类型检查，确保在编译期就能保证类型的正确性，实际上<code>Integer.class</code>就是一个<code>Class</code>类的对象。面对下述语句，确实可能令人困惑，但该语句确实是无法编译通过的。</p>
+<figure class="highlight fortran"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">//编译无法通过</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">Class</span>&lt;<span class="keyword">Number</span>&gt; numberClass=<span class="keyword">Integer</span>.<span class="keyword">class</span>;</span></pre></td></tr></table></figure>
+
+<p>我们或许会想<code>Integer</code>不就是<code>Number</code>的子类吗？然而事实并非这般简单，毕竟<code>Integer</code>的<code>Class</code>对象并非<code>Number</code>的<code>Class</code>对象的子类，前面提到过，所有的<code>Class</code>对象都只来源于<code>Class</code>类，看来事实确实如此。当然我们可以利用通配符“<code>?</code>”来解决问题：</p>
+<figure class="highlight cs"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">Class&lt;?&gt; intClass = <span class="keyword">int</span>.<span class="keyword">class</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">intClass = <span class="keyword">double</span>.<span class="keyword">class</span>;</span></pre></td></tr></table></figure>
+
+<p>这样的语句并没有什么问题，毕竟通配符指明所有类型都适用，那么为什么不直接使用<code>Class</code>还要使用<code>Class</code>呢？这样做的好处是告诉编译器，我们是确实是采用任意类型的泛型，而非忘记使用泛型约束，因此<code>Class</code>总是优于直接使用<code>Class</code>，至少前者在编译器检查时不会产生警告信息。当然我们还可以使用<code>extends</code>关键字告诉编译器接收某个类型的子类，如解决前面<code>Number</code>与<code>Integer</code>的问题：</p>
+<figure class="highlight cs"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//编译通过！</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">Class&lt;? extends Number&gt; clazz = Integer.<span class="keyword">class</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//赋予其他类型</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">clazz = <span class="keyword">double</span>.<span class="keyword">class</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">clazz = Number.<span class="keyword">class</span>;</span></pre></td></tr></table></figure>
+
+<p>上述的代码是行得通的，<code>extends</code>关键字的作用是告诉编译器，只要是<code>Number</code>的子类都可以赋值。这点与前面直接使用<code>Class</code>是不一样的。实际上，应该时刻记住向<code>Class</code>引用添加泛型约束仅仅是为了提供编译期类型的检查从而避免将错误延续到运行时期。</p>
+<h3 id="1-2-5-关于类型转换的问题"><a href="#1-2-5-关于类型转换的问题" class="headerlink" title="1.2.5 关于类型转换的问题"></a>1.2.5 关于类型转换的问题</h3><p>在许多需要强制类型转换的场景，我们更多的做法是直接强制转换类型：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">package com.zejian;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Created by zejian on 2017/4/30.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Blog : http://blog.csdn.net/javazejian [原文地址,请尊重原创]</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">class</span> <span class="symbol">ClassCast</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"> <span class="keyword">public</span> <span class="built_in">void</span> <span class="keyword">cast</span>()&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">     Animal animal= new Dog();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">     <span class="comment">//强制转换</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">     Dog dog = (Dog) animal;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"> &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">interface</span> <span class="symbol">Animal</span>&#123; &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> <span class="symbol">Dog</span> <span class="symbol">implements</span>  <span class="symbol">Animal</span>&#123; &#125;</span></pre></td></tr></table></figure>
+
+<p>之所可以强制转换，这得归功于RRTI，要知道在Java中，所有类型转换都是在运行时进行正确性检查的，利用RRTI进行判断类型是否正确从而确保强制转换的完成，如果类型转换失败，将会抛出类型转换异常。除了强制转换外，在Java SE5中新增一种使用<code>Class</code>对象进行类型转换的方式，如下：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">Animal animal= <span class="keyword">new</span> <span class="constructor">Dog()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//这两句等同于Dog dog = (Dog) animal;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">Class&lt;Dog&gt; dogType = <span class="module-access"><span class="module"><span class="identifier">Dog</span>.</span></span><span class="keyword">class</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">Dog dog = dogType.cast(animal)</span></pre></td></tr></table></figure>
+
+<p>利用<code>Class</code>对象的<code>cast</code>方法，其参数接收一个参数对象并将其转换为<code>Class</code>引用的类型。这种方式似乎比之前的强制转换更麻烦些，确实如此，而且当类型不能正确转换时，仍然会抛出<code>ClassCastException</code>异常。源码如下：</p>
+<figure class="highlight haxe"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> T <span class="keyword">cast</span>(Object obj) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (obj != <span class="literal">null</span> &amp;&amp; !isInstance(obj))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">         <span class="keyword">throw</span> <span class="keyword">new</span> <span class="type">ClassCastException</span>(cannotCastMsg(obj));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">     <span class="keyword">return</span> (T) obj;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr></table></figure>
+
+<h3 id="1-2-6-instanceof-关键字与isInstance方法"><a href="#1-2-6-instanceof-关键字与isInstance方法" class="headerlink" title="1.2.6 instanceof 关键字与isInstance方法"></a>1.2.6 instanceof 关键字与isInstance方法</h3><p>关于<code>instanceof</code> 关键字，它返回一个boolean类型的值，意在告诉我们对象是不是某个特定的类型实例。如下，在强制转换前利用<code>instanceof</code>检测<code>obj</code>是不是<code>Animal</code>类型的实例对象，如果返回true再进行类型转换，这样可以避免抛出类型转换的异常(<code>ClassCastException</code>)</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="function"><span class="keyword">void</span> <span class="title">cast2</span><span class="params">(Object obj)</span></span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span>(obj <span class="keyword">instanceof</span> Animal)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">          Animal animal= (Animal) obj;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">      &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>而<code>isInstance</code>方法则是<code>Class</code>类中的一个<code>Native</code>方法，也是用于判断对象类型的，看个简单例子：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="built_in">void</span> cast2(Object obj)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//instanceof关键字</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span>(obj instanceof Animal)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">            Animal animal= (Animal) obj;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//isInstance方法</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span>(Animal.<span class="keyword">class</span>.<span class="symbol">isInstance</span>(<span class="symbol">obj</span>))&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">            Animal animal= (Animal) obj;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr></table></figure>
+
+<p>事实上<code>instanceOf</code> 与<code>isInstance</code>方法产生的结果是相同的。对于<code>instanceOf</code>是关键字只被用于对象引用变量，检查左边对象是不是右边类或接口的实例化。如果被测对象是null值，则测试结果总是false。一般形式：</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//判断这个对象是不是这种类型</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">obj.<span class="keyword">instanceof</span>(<span class="class"><span class="keyword">class</span>)</span></span></pre></td></tr></table></figure>
+
+<p>而<code>isInstance</code>方法则是<code>Class</code>类的<code>Native</code>方法，其中<code>obj</code>是被测试的对象或者变量，如果<code>obj</code>是调用这个方法的class或接口的实例，则返回true。如果被检测的对象是null或者基本类型，那么返回值是false;一般形式如下：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//判断这个对象能不能被转化为这个类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span>.<span class="symbol">inInstance</span>(<span class="symbol">obj</span>)</span></pre></td></tr></table></figure>
+
+<p>最后这里给出一个简单实例，验证<code>isInstance</code>方法与<code>instanceof</code>等价性：</p>
+<figure class="highlight livescript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">A</span> &#123;&#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">B</span> <span class="keyword">extends</span> <span class="title">A</span> &#123;&#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">public <span class="class"><span class="keyword">class</span> <span class="title">C</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  static <span class="literal">void</span> test(Object x) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">print</span>(<span class="string">"Testing x of type "</span> + x.getClass());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">print</span>(<span class="string">"x instanceof A "</span> + (x <span class="keyword">instanceof</span> A));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">print</span>(<span class="string">"x instanceof B "</span>+ (x <span class="keyword">instanceof</span> B));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">print</span>(<span class="string">"A.isInstance(x) "</span>+ A<span class="class">.<span class="keyword">class</span>.<span class="title">isInstance</span>(<span class="title">x</span>));</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">print</span>(<span class="string">"B.isInstance(x) "</span> +</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">      B<span class="class">.<span class="keyword">class</span>.<span class="title">isInstance</span>(<span class="title">x</span>));</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">print</span>(<span class="string">"x.getClass() == A.class "</span> +</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">      (x.getClass() == A<span class="class">.<span class="keyword">class</span>));</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">print</span>(<span class="string">"x.getClass() == B.class "</span> +</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">      (x.getClass() == B<span class="class">.<span class="keyword">class</span>));</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">print</span>(<span class="string">"x.getClass().equals(A.class)) "</span>+</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">      (x.getClass().equals(A<span class="class">.<span class="keyword">class</span>)));</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">print</span>(<span class="string">"x.getClass().equals(B.class)) "</span> +</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">      (x.getClass().equals(B<span class="class">.<span class="keyword">class</span>)));</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">  public static <span class="literal">void</span> main(String[] args) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">    test(<span class="keyword">new</span> A());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    test(<span class="keyword">new</span> B());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>执行结果：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">Testing x <span class="keyword">of</span> <span class="keyword">type</span> <span class="keyword">class</span> com.zejian.A</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">x instanceof A <span class="literal">true</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">x instanceof B <span class="literal">false</span> <span class="comment">//父类不一定是子类的某个类型</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">A</span>.</span></span>is<span class="constructor">Instance(<span class="params">x</span>)</span> <span class="literal">true</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">B</span>.</span></span>is<span class="constructor">Instance(<span class="params">x</span>)</span> <span class="literal">false</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">x.get<span class="constructor">Class()</span><span class="operator"> == </span><span class="module-access"><span class="module"><span class="identifier">A</span>.</span></span><span class="keyword">class</span> <span class="literal">true</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">x.get<span class="constructor">Class()</span><span class="operator"> == </span><span class="module-access"><span class="module"><span class="identifier">B</span>.</span></span><span class="keyword">class</span> <span class="literal">false</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">x.get<span class="constructor">Class()</span>.equals(<span class="module-access"><span class="module"><span class="identifier">A</span>.</span></span><span class="keyword">class</span>)) <span class="literal">true</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">x.get<span class="constructor">Class()</span>.equals(<span class="module-access"><span class="module"><span class="identifier">B</span>.</span></span><span class="keyword">class</span>)) <span class="literal">false</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">---------------------------------------------</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">Testing x <span class="keyword">of</span> <span class="keyword">type</span> <span class="keyword">class</span> com.zejian.B</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">x instanceof A <span class="literal">true</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">x instanceof B <span class="literal">true</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">A</span>.</span></span>is<span class="constructor">Instance(<span class="params">x</span>)</span> <span class="literal">true</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">B</span>.</span></span>is<span class="constructor">Instance(<span class="params">x</span>)</span> <span class="literal">true</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">x.get<span class="constructor">Class()</span><span class="operator"> == </span><span class="module-access"><span class="module"><span class="identifier">A</span>.</span></span><span class="keyword">class</span> <span class="literal">false</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">x.get<span class="constructor">Class()</span><span class="operator"> == </span><span class="module-access"><span class="module"><span class="identifier">B</span>.</span></span><span class="keyword">class</span> <span class="literal">true</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">x.get<span class="constructor">Class()</span>.equals(<span class="module-access"><span class="module"><span class="identifier">A</span>.</span></span><span class="keyword">class</span>)) <span class="literal">false</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">x.get<span class="constructor">Class()</span>.equals(<span class="module-access"><span class="module"><span class="identifier">B</span>.</span></span><span class="keyword">class</span>)) <span class="literal">true</span></span></pre></td></tr></table></figure>
+
+<p>到此关于<code>Class</code>对象相关的知识点都分析完了，下面将结合<code>Class</code>对象的知识点分析反射技术。</p>
+<h1 id="2-理解反射技术"><a href="#2-理解反射技术" class="headerlink" title="2 理解反射技术"></a>2 理解反射技术</h1><p>反射机制是在运行状态中，对于任意一个类，都能够知道这个类的所有属性和方法；对于任意一个对象，都能够调用它的任意一个方法和属性，这种动态获取的信息以及动态调用对象的方法的功能称为java语言的反射机制。一直以来反射技术都是Java中的闪亮点，这也是目前大部分框架(如Spring/Mybatis等)得以实现的支柱。在Java中，<code>Class</code>类与<code>java.lang.reflect</code>类库一起对反射技术进行了全力的支持。在反射包中，我们常用的类主要有<code>Constructor</code>类表示的是<code>Class</code> 对象所表示的类的构造方法，利用它可以在运行时动态创建对象、<code>Field</code>表示<code>Class</code>对象所表示的类的成员变量，通过它可以在运行时动态修改成员变量的属性值(包含<code>private</code>)、<code>Method</code>表示<code>Class</code>对象所表示的类的成员方法，通过它可以动态调用对象的方法(包含<code>private</code>)，下面将对这几个重要类进行分别说明。</p>
+<h2 id="2-1-Constructor类及其用法"><a href="#2-1-Constructor类及其用法" class="headerlink" title="2.1 Constructor类及其用法"></a>2.1 Constructor类及其用法</h2><p><code>Constructor</code>类存在于反射包(<code>java.lang.reflect</code>)中，反映的是<code>Class</code> 对象所表示的类的构造方法。获取<code>Constructor</code>对象是通过<code>Class</code>类中的方法获取的，<code>Class</code>类与<code>Constructor</code>相关的主要方法如下：</p>
+<table>
+<thead>
+<tr>
+<th align="center">方法返回值</th>
+<th align="center">方法名称</th>
+<th align="center">方法说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="center">static Class&lt;?&gt;</td>
+<td align="center">forName(String className)</td>
+<td align="center">返回与带有给定字符串名的类或接口相关联的 Class 对象。</td>
+</tr>
+<tr>
+<td align="center">Constructor<T></td>
+<td align="center">getConstructor(Class&lt;?&gt;… parameterTypes)</td>
+<td align="center">返回指定参数类型、具有public访问权限的构造函数对象</td>
+</tr>
+<tr>
+<td align="center">Constructor&lt;?&gt;[]</td>
+<td align="center">getConstructors()</td>
+<td align="center">返回所有具有public访问权限的构造函数的Constructor对象数组</td>
+</tr>
+<tr>
+<td align="center">Constructor<T></td>
+<td align="center">getDeclaredConstructor(Class&lt;?&gt;… parameterTypes)</td>
+<td align="center">返回指定参数类型、所有声明的（包括private）构造函数对象</td>
+</tr>
+<tr>
+<td align="center">Constructor&lt;?&gt;[]</td>
+<td align="center">getDeclaredConstructor()</td>
+<td align="center">返回所有声明的（包括private）构造函数对象</td>
+</tr>
+<tr>
+<td align="center">T</td>
+<td align="center">newInstance()</td>
+<td align="center">创建此 Class 对象所表示的类的一个新实例。</td>
+</tr>
+</tbody></table>
+<p>下面看一个简单例子来了解<code>Constructor</code>对象的使用：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">package reflect;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">import java.io.Serializable;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">import java.lang.reflect.Constructor;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Created by zejian on 2017/5/1.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Blog : http://blog.csdn.net/javazejian [原文地址,请尊重原创]</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> ReflectDemo implements Serializable&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    public static void main(String<span class="literal">[]</span> args) throws Exception &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        Class&lt;?&gt; clazz = null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//获取Class对象的引用</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        clazz = <span class="module-access"><span class="module"><span class="identifier">Class</span>.</span></span>for<span class="constructor">Name(<span class="string">"reflect.User"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//第一种方法，实例化默认构造方法，User必须无参构造函数,否则将抛异常</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        User user = (User) clazz.<span class="keyword">new</span><span class="constructor">Instance()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        user.set<span class="constructor">Age(20)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        user.set<span class="constructor">Name(<span class="string">"Rollen"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(user);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"--------------------------------------------"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//获取带String参数的public构造函数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        Constructor cs1 =clazz.get<span class="constructor">Constructor(String.<span class="params">class</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//创建User</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        User user1= (User) cs1.<span class="keyword">new</span><span class="constructor">Instance(<span class="string">"xiaolong"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        user1.set<span class="constructor">Age(22)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"user1:"</span>+user1.<span class="keyword">to</span><span class="constructor">String()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"--------------------------------------------"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//取得指定带int和String参数构造函数,该方法是私有构造private</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">        Constructor cs2=clazz.get<span class="constructor">DeclaredConstructor(<span class="params">int</span>.<span class="params">class</span>,String.<span class="params">class</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//由于是private必须设置可访问</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">        cs2.set<span class="constructor">Accessible(<span class="params">true</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//创建user对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        User user2= (User) cs2.<span class="keyword">new</span><span class="constructor">Instance(25,<span class="string">"lidakang"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"user2:"</span>+user2.<span class="keyword">to</span><span class="constructor">String()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"--------------------------------------------"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//获取所有构造包含private</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">        Constructor&lt;?&gt; cons<span class="literal">[]</span> = clazz.get<span class="constructor">DeclaredConstructors()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 查看每个构造方法需要的参数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">        for (<span class="built_in">int</span> i = <span class="number">0</span>; i &lt; cons.length; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">//获取构造函数参数类型</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">            Class&lt;?&gt; clazzs<span class="literal">[]</span> = cons<span class="literal">[<span class="identifier">i</span>]</span>.get<span class="constructor">ParameterTypes()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"构造函数["</span>+i+<span class="string">"]:"</span>+cons<span class="literal">[<span class="identifier">i</span>]</span>.<span class="keyword">to</span><span class="constructor">String()</span> );</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.print(<span class="string">"参数类型["</span>+i+<span class="string">"]:("</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">            for (<span class="built_in">int</span> j = <span class="number">0</span>; j &lt; clazzs.length; j++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (j<span class="operator"> == </span>clazzs.length - <span class="number">1</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line">                    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.print(clazzs<span class="literal">[<span class="identifier">j</span>]</span>.get<span class="constructor">Name()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">else</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line">                    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.print(clazzs<span class="literal">[<span class="identifier">j</span>]</span>.get<span class="constructor">Name()</span> + <span class="string">","</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">")"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">49</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">50</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">51</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">52</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> User &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">53</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="built_in">int</span> age;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">54</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> String name;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">55</span></pre></td><td class="code"><pre><span class="line">    public <span class="constructor">User()</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">56</span></pre></td><td class="code"><pre><span class="line">        super<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">57</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">58</span></pre></td><td class="code"><pre><span class="line">    public <span class="constructor">User(String <span class="params">name</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">59</span></pre></td><td class="code"><pre><span class="line">        super<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">60</span></pre></td><td class="code"><pre><span class="line">        this.name = name;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">61</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">62</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">63</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 私有构造</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">64</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * @param age</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">65</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * @param name</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">66</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">67</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="constructor">User(<span class="params">int</span> <span class="params">age</span>, String <span class="params">name</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">68</span></pre></td><td class="code"><pre><span class="line">        super<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">69</span></pre></td><td class="code"><pre><span class="line">        this.age = age;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">70</span></pre></td><td class="code"><pre><span class="line">        this.name = name;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">71</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">72</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">//..........省略set 和 get方法</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">73</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>运行结果：</p>
+<figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">User</span> <span class="selector-attr">[age=20, name=Rollen]</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">--------------------------------------------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">user1</span><span class="selector-pseudo">:User</span> <span class="selector-attr">[age=22, name=xiaolong]</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">--------------------------------------------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">user2</span><span class="selector-pseudo">:User</span> <span class="selector-attr">[age=25, name=lidakang]</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">--------------------------------------------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">构造函数<span class="selector-attr">[0]</span><span class="selector-pseudo">:private</span> <span class="selector-tag">reflect</span><span class="selector-class">.User</span>(<span class="selector-tag">int</span>,<span class="selector-tag">java</span><span class="selector-class">.lang</span><span class="selector-class">.String</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">参数类型<span class="selector-attr">[0]</span><span class="selector-pseudo">:(int</span>,<span class="selector-tag">java</span><span class="selector-class">.lang</span><span class="selector-class">.String</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">构造函数<span class="selector-attr">[1]</span><span class="selector-pseudo">:public</span> <span class="selector-tag">reflect</span><span class="selector-class">.User</span>(<span class="selector-tag">java</span><span class="selector-class">.lang</span><span class="selector-class">.String</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">参数类型<span class="selector-attr">[1]</span><span class="selector-pseudo">:(java.lang.String)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">构造函数<span class="selector-attr">[2]</span><span class="selector-pseudo">:public</span> <span class="selector-tag">reflect</span><span class="selector-class">.User</span>()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">参数类型<span class="selector-attr">[2]</span><span class="selector-pseudo">:()</span></span></pre></td></tr></table></figure>
+
+<p>关于<code>Constructor</code>类本身一些常用方法如下(仅部分，其他可查API)，</p>
+<table>
+<thead>
+<tr>
+<th align="center">方法返回值</th>
+<th align="center">方法名称</th>
+<th align="center">方法说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="center">Class<T></td>
+<td align="center">getDeclaringClass()</td>
+<td align="center">返回 Class 对象，该对象表示声明由此 Constructor 对象表示的构造方法的类,其实就是返回真实类型（不包含参数）</td>
+</tr>
+<tr>
+<td align="center">Type[]</td>
+<td align="center">getGenericParameterTypes()</td>
+<td align="center">按照声明顺序返回一组 Type 对象，返回的就是 Constructor对象构造函数的形参类型。</td>
+</tr>
+<tr>
+<td align="center">String</td>
+<td align="center">getName()</td>
+<td align="center">以字符串形式返回此构造方法的名称。</td>
+</tr>
+<tr>
+<td align="center">Class&lt;?&gt;[]</td>
+<td align="center">getParameterTypes()</td>
+<td align="center">按照声明顺序返回一组 Class 对象，即返回Constructor 对象所表示构造方法的形参类型</td>
+</tr>
+<tr>
+<td align="center">T</td>
+<td align="center">newInstance(Object… initargs)</td>
+<td align="center">使用此 Constructor对象表示的构造函数来创建新实例</td>
+</tr>
+<tr>
+<td align="center">String</td>
+<td align="center">toGenericString()</td>
+<td align="center">返回描述此 Constructor 的字符串，其中包括类型参数。</td>
+</tr>
+</tbody></table>
+<p>代码演示如下：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">Constructor cs3=clazz.get<span class="constructor">DeclaredConstructor(<span class="params">int</span>.<span class="params">class</span>,String.<span class="params">class</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"-----getDeclaringClass-----"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">Class uclazz=cs3.get<span class="constructor">DeclaringClass()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//Constructor对象表示的构造方法的类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"构造方法的类:"</span>+uclazz.get<span class="constructor">Name()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"-----getGenericParameterTypes-----"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//对象表示此 Constructor 对象所表示的方法的形参类型</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">Type<span class="literal">[]</span> tps=cs3.get<span class="constructor">GenericParameterTypes()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">for (Type tp:tps) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"参数名称tp:"</span>+tp);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"-----getParameterTypes-----"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//获取构造函数参数类型</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">Class&lt;?&gt; clazzs<span class="literal">[]</span> = cs3.get<span class="constructor">ParameterTypes()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">for (Class claz:clazzs) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"参数名称:"</span>+claz.get<span class="constructor">Name()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"-----getName-----"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//以字符串形式返回此构造方法的名称</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"getName:"</span>+cs3.get<span class="constructor">Name()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"-----getoGenericString-----"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//返回描述此 Constructor 的字符串，其中包括类型参数。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"getoGenericString():"</span>+cs3.<span class="keyword">to</span><span class="constructor">GenericString()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> 输出结果:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> -----getDeclaringClass-----</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> 构造方法的类:reflect.User</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> -----getGenericParameterTypes-----</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> 参数名称tp:int</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> 参数名称tp:class java.lang.String</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> -----getParameterTypes-----</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> 参数名称:int</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> 参数名称:java.lang.String</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> -----getName-----</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> getName:reflect.User</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> -----getoGenericString-----</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> getoGenericString():private reflect.User(int,java.lang.String)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr></table></figure>
+
+<p>其中关于<code>Type</code>类型这里简单说明一下，<code>Type</code> 是 Java 编程语言中所有类型的公共高级接口。它们包括原始类型、参数化类型、数组类型、类型变量和基本类型。<code>getGenericParameterTypes</code> 与 <code>getParameterTypes</code> 都是获取构成函数的参数类型，前者返回的是<code>Type</code>类型，后者返回的是<code>Class</code>类型，由于<code>Type</code>顶级接口，<code>Class</code>也实现了该接口，因此<code>Class</code>类是<code>Type</code>的子类，<code>Type</code> 表示的全部类型而每个<code>Class</code>对象表示一个具体类型的实例，如<code>String.class</code>仅代表String类型。由此看来<code>Type</code>与 <code>Class</code> 表示类型几乎是相同的，只不过 <code>Type</code>表示的范围比<code>Class</code>要广得多而已。当然<code>Type</code>还有其他子类，如：</p>
+<ul>
+<li>TypeVariable：表示类型参数，可以有上界，比如：<code>T extends Number</code></li>
+<li>ParameterizedType：表示参数化的类型，有原始类型和具体的类型参数，比如：<code>List</code></li>
+<li>WildcardType：表示通配符类型，比如：<code>?, ? extends Number, ? super Integer</code></li>
+</ul>
+<p>通过以上的分析，对于<code>Constructor</code>类已有比较清晰的理解，利用好<code>Class</code>类和<code>Constructor</code>类，我们可以在运行时动态创建任意对象，从而突破必须在编译期知道确切类型的障碍。</p>
+<h2 id="2-2-Field类及其用法"><a href="#2-2-Field类及其用法" class="headerlink" title="2.2 Field类及其用法"></a>2.2 Field类及其用法</h2><p><code>Field</code> 提供有关类或接口的单个字段的信息，以及对它的动态访问权限。反射的字段可能是一个类（静态）字段或实例字段。同样的道理，我们可以通过<code>Class</code>类的提供的方法来获取代表字段信息的<code>Field</code>对象，<code>Class</code>类与<code>Field</code>对象相关方法如下：</p>
+<table>
+<thead>
+<tr>
+<th align="center">方法返回值</th>
+<th align="center">方法名称</th>
+<th align="center">方法说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="center">Field</td>
+<td align="center">getDeclaredField(String name)</td>
+<td align="center">获取指定name名称的(包含private修饰的)字段，不包括继承的字段</td>
+</tr>
+<tr>
+<td align="center">Field[]</td>
+<td align="center">getDeclaredField()</td>
+<td align="center">获取Class对象所表示的类或接口的所有(包含private修饰的)字段,不包括继承的字段</td>
+</tr>
+<tr>
+<td align="center">Field</td>
+<td align="center">getField(String name)</td>
+<td align="center">获取指定name名称、具有public修饰的字段，包含继承字段</td>
+</tr>
+<tr>
+<td align="center">Field[]</td>
+<td align="center">getField()</td>
+<td align="center">获取修饰符为public的字段，包含继承字段</td>
+</tr>
+</tbody></table>
+<p>下面的代码演示了上述方法的使用过程</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Created by zejian on 2017/5/1.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Blog : http://blog.csdn.net/javazejian [原文地址,请尊重原创]</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="built_in">public</span> <span class="keyword">class</span> ReflectField &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">public</span> static <span class="type">void</span> main(String[] args) throws ClassNotFoundException, NoSuchFieldException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">Class</span>&lt;?&gt; clazz = <span class="keyword">Class</span>.forName("reflect.Student");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        //获取指定字段名称的Field类,注意字段修饰符必须为<span class="built_in">public</span>而且存在该字段,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        // 否则抛NoSuchFieldException</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        Field field = clazz.getField("age");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">System</span>.<span class="keyword">out</span>.println("field:"+field);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        //获取所有修饰符为<span class="built_in">public</span>的字段,包含父类字段,注意修饰符为<span class="built_in">public</span>才会获取</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        Field fields[] = clazz.getFields();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">for</span> (Field f:fields) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">System</span>.<span class="keyword">out</span>.println("f:"+f.getDeclaringClass());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">System</span>.<span class="keyword">out</span>.println("================getDeclaredFields====================");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        //获取当前类所字段(包含private字段),注意不包含父类的字段</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        Field fields2[] = clazz.getDeclaredFields();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">for</span> (Field f:fields2) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">System</span>.<span class="keyword">out</span>.println("f2:"+f.getDeclaringClass());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        //获取指定字段名称的Field类,可以是任意修饰符的自动,注意不包含父类的字段</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">        Field field2 = clazz.getDeclaredField("desc");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">System</span>.<span class="keyword">out</span>.println("field2:"+field2);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line"><span class="comment">      输出结果:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     field:public int reflect.Person.age</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     f:public java.lang.String reflect.Student.desc</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     f:public int reflect.Person.age</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     f:public java.lang.String reflect.Person.name</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     ================getDeclaredFields====================</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     f2:public java.lang.String reflect.Student.desc</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     f2:private int reflect.Student.score</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     field2:public java.lang.String reflect.Student.desc</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> Person&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">public</span> <span class="type">int</span> age;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">public</span> String <span class="type">name</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">    //省略<span class="keyword">set</span>和<span class="keyword">get</span>方法</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> Student extends Person&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">public</span> String <span class="keyword">desc</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line">    private <span class="type">int</span> score;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line">    //省略<span class="keyword">set</span>和<span class="keyword">get</span>方法</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>上述方法需要注意的是，如果我们不期望获取其父类的字段，则需使用<code>Class</code>类的<code>getDeclaredField/getDeclaredFields</code>方法来获取字段即可，倘若需要连带获取到父类的字段，那么请使用<code>Class</code>类的<code>getField/getFields</code>，但是也只能获取到<code>public</code>修饰的的字段，无法获取父类的私有字段。下面将通过<code>Field</code>类本身的方法对指定类属性赋值，代码演示如下：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//获取Class对象引用</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">Class&lt;?&gt; clazz = <span class="module-access"><span class="module"><span class="identifier">Class</span>.</span></span>for<span class="constructor">Name(<span class="string">"reflect.Student"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">Student st= (Student) clazz.<span class="keyword">new</span><span class="constructor">Instance()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//获取父类public字段并赋值</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">Field ageField = clazz.get<span class="constructor">Field(<span class="string">"age"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">ageField.set(st,<span class="number">18</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">Field nameField = clazz.get<span class="constructor">Field(<span class="string">"name"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">nameField.set(st,<span class="string">"Lily"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//只获取当前类的字段,不获取父类的字段</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">Field descField = clazz.get<span class="constructor">DeclaredField(<span class="string">"desc"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">descField.set(st,<span class="string">"I am student"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">Field scoreField = clazz.get<span class="constructor">DeclaredField(<span class="string">"score"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//设置可访问，score是private的</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">scoreField.set<span class="constructor">Accessible(<span class="params">true</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">scoreField.set(st,<span class="number">88</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(st.<span class="keyword">to</span><span class="constructor">String()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//输出结果：Student&#123;age=18, name='Lily ,desc='I am student', score=88&#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//获取字段值</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(scoreField.get(st));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 88</span></span></pre></td></tr></table></figure>
+
+<p>其中的<code>set(Object obj, Object value)</code>方法是<code>Field</code>类本身的方法，用于设置字段的值，而<code>get(Object obj)</code>则是获取字段的值，当然关于<code>Field</code>类还有其他常用的方法如下：</p>
+<table>
+<thead>
+<tr>
+<th align="center">方法返回值</th>
+<th align="center">方法名称</th>
+<th align="center">方法说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="center">void</td>
+<td align="center">set(Object obj, Object value)</td>
+<td align="center">将指定对象变量上此 Field 对象表示的字段设置为指定的新值。</td>
+</tr>
+<tr>
+<td align="center">Object</td>
+<td align="center">get(Object obj)</td>
+<td align="center">返回指定对象上此 Field 表示的字段的值</td>
+</tr>
+<tr>
+<td align="center">Class&lt;?&gt;</td>
+<td align="center">getType()</td>
+<td align="center">返回一个 Class 对象，它标识了此Field 对象所表示字段的声明类型。</td>
+</tr>
+<tr>
+<td align="center">boolean</td>
+<td align="center">isEnumConstant()</td>
+<td align="center">如果此字段表示枚举类型的元素则返回 true；否则返回 false</td>
+</tr>
+<tr>
+<td align="center">String</td>
+<td align="center">toGenericString()</td>
+<td align="center">返回一个描述此 Field（包括其一般类型）的字符串</td>
+</tr>
+<tr>
+<td align="center">String</td>
+<td align="center">getName()</td>
+<td align="center">返回此 Field 对象表示的字段的名称</td>
+</tr>
+<tr>
+<td align="center">Class&lt;?&gt;</td>
+<td align="center">getDeclaringClass()</td>
+<td align="center">返回表示类或接口的 Class 对象，该类或接口声明由此 Field 对象表示的字段</td>
+</tr>
+<tr>
+<td align="center">void</td>
+<td align="center">setAccessible(boolean flag)</td>
+<td align="center">将此对象的 accessible 标志设置为指示的布尔值,即设置其可访问性</td>
+</tr>
+</tbody></table>
+<p>上述方法可能是较为常用的，事实上在设置值的方法上，<code>Field</code>类还提供了专门针对基本数据类型的方法，如<code>setInt()/getInt()</code>、<code>setBoolean()/getBoolean</code>、<code>setChar()/getChar()</code>等等方法，这里就不全部列出了，需要时查API文档即可。需要特别注意的是被<code>final</code>关键字修饰的<code>Field</code>字段是安全的，在运行时可以接收任何修改，但最终其实际值是不会发生改变的。</p>
+<h2 id="2-3-Method类及其用法"><a href="#2-3-Method类及其用法" class="headerlink" title="2.3 Method类及其用法"></a>2.3 Method类及其用法</h2><p><code>Method</code> 提供关于类或接口上单独某个方法（以及如何访问该方法）的信息，所反映的方法可能是类方法或实例方法（包括抽象方法）。下面是<code>Class</code>类获取<code>Method</code>对象相关的方法：</p>
+<table>
+<thead>
+<tr>
+<th align="center">方法返回值</th>
+<th align="center">方法名称</th>
+<th align="center">方法说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="center">Method</td>
+<td align="center">getDeclaredMethod(String name, Class&lt;?&gt;… parameterTypes)</td>
+<td align="center">返回一个指定参数的Method对象，该对象反映此 Class 对象所表示的类或接口的指定已声明方法。</td>
+</tr>
+<tr>
+<td align="center">Method[]</td>
+<td align="center">getDeclaredMethod()</td>
+<td align="center">返回 Method 对象的一个数组，这些对象反映此 Class 对象表示的类或接口声明的所有方法，包括公共、保护、默认（包）访问和私有方法，但不包括继承的方法。</td>
+</tr>
+<tr>
+<td align="center">Method</td>
+<td align="center">getMethod(String name, Class&lt;?&gt;… parameterTypes)</td>
+<td align="center">返回一个 Method 对象，它反映此 Class 对象所表示的类或接口的指定公共成员方法。</td>
+</tr>
+<tr>
+<td align="center">Method[]</td>
+<td align="center">getMethods()</td>
+<td align="center">返回一个包含某些 Method 对象的数组，这些对象反映此 Class 对象所表示的类或接口（包括那些由该类或接口声明的以及从超类和超接口继承的那些的类或接口）的公共 member 方法。</td>
+</tr>
+</tbody></table>
+<p>同样通过案例演示上述方法：</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> java.lang.reflect.<span class="keyword">Method</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Created by zejian on 2017/5/1.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Blog : http://blog.csdn.net/javazejian [原文地址,请尊重原创]</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="built_in">public</span> <span class="keyword">class</span> ReflectMethod  &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">public</span> static <span class="type">void</span> main(String[] args) throws ClassNotFoundException, NoSuchMethodException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">Class</span> clazz = <span class="keyword">Class</span>.forName("reflect.Circle");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        //根据参数获取<span class="built_in">public</span>的<span class="keyword">Method</span>,包含继承自父类的方法</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">Method</span> <span class="keyword">method</span> = clazz.getMethod("draw",<span class="type">int</span>.<span class="keyword">class</span>,String.<span class="keyword">class</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">System</span>.<span class="keyword">out</span>.println("method:"+<span class="keyword">method</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        //获取所有<span class="built_in">public</span>的方法:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">Method</span>[] methods =clazz.getMethods();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">for</span> (<span class="keyword">Method</span> m:methods)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">System</span>.<span class="keyword">out</span>.println("m::"+m);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">System</span>.<span class="keyword">out</span>.println("=========================================");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        //获取当前类的方法包含private,该方法无法获取继承自父类的<span class="keyword">method</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">Method</span> method1 = clazz.getDeclaredMethod("drawCircle");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">System</span>.<span class="keyword">out</span>.println("method1::"+method1);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        //获取当前类的所有方法包含private,该方法无法获取继承自父类的<span class="keyword">method</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">Method</span>[] methods1=clazz.getDeclaredMethods();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">for</span> (<span class="keyword">Method</span> m:methods1)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">System</span>.<span class="keyword">out</span>.println("m1::"+m);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     输出结果:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     method:public void reflect.Shape.draw(int,java.lang.String)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     m::public int reflect.Circle.getAllCount()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     m::public void reflect.Shape.draw()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     m::public void reflect.Shape.draw(int,java.lang.String)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     m::public final void java.lang.Object.wait(long,int) throws java.lang.InterruptedException</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     m::public final native void java.lang.Object.wait(long) throws java.lang.InterruptedException</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     m::public final void java.lang.Object.wait() throws java.lang.InterruptedException</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     m::public boolean java.lang.Object.equals(java.lang.Object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     m::public java.lang.String java.lang.Object.toString()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     m::public native int java.lang.Object.hashCode()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     m::public final native java.lang.Class java.lang.Object.getClass()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     m::public final native void java.lang.Object.notify()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     m::public final native void java.lang.Object.notifyAll()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     =========================================</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     method1::private void reflect.Circle.drawCircle()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     m1::public int reflect.Circle.getAllCount()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     m1::private void reflect.Circle.drawCircle()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> Shape &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">49</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">public</span> <span class="type">void</span> draw()&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">50</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">System</span>.<span class="keyword">out</span>.println("draw");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">51</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">52</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">public</span> <span class="type">void</span> draw(<span class="type">int</span> count , String <span class="type">name</span>)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">53</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">System</span>.<span class="keyword">out</span>.println("draw "+ <span class="type">name</span> +",count="+count);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">54</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">55</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">56</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> <span class="type">Circle</span> extends Shape&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">57</span></pre></td><td class="code"><pre><span class="line">    private <span class="type">void</span> drawCircle()&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">58</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">System</span>.<span class="keyword">out</span>.println("drawCircle");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">59</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">60</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">public</span> <span class="type">int</span> getAllCount()&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">61</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> <span class="number">100</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">62</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">63</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>在通过<code>getMethods</code>方法获取<code>Method</code>对象时，会把父类的方法也获取到，如上的输出结果，把<code>Object</code>类的方法都打印出来了。而<code>getDeclaredMethod/getDeclaredMethods</code>方法都只能获取当前类的方法。我们在使用时根据情况选择即可。下面将演示通过<code>Method</code>对象调用指定类的方法：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">Class clazz = <span class="module-access"><span class="module"><span class="identifier">Class</span>.</span></span>for<span class="constructor">Name(<span class="string">"reflect.Circle"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//创建对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">Circle circle = (Circle) clazz.<span class="keyword">new</span><span class="constructor">Instance()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//获取指定参数的方法对象Method</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">Method <span class="keyword">method</span> = clazz.get<span class="constructor">Method(<span class="string">"draw"</span>,<span class="params">int</span>.<span class="params">class</span>,String.<span class="params">class</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//通过Method对象的invoke(Object obj,Object... args)方法调用</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">method</span>.invoke(circle,<span class="number">15</span>,<span class="string">"圈圈"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//对私有无参方法的操作</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">Method method1 = clazz.get<span class="constructor">DeclaredMethod(<span class="string">"drawCircle"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//修改私有方法的访问标识</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">method1.set<span class="constructor">Accessible(<span class="params">true</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">method1.invoke(circle);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//对有返回值得方法操作</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">Method method2 =clazz.get<span class="constructor">DeclaredMethod(<span class="string">"getAllCount"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">Integer count = (Integer) method2.invoke(circle);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"count:"</span>+count);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="comment">    输出结果:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="comment">    draw 圈圈,count=15</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="comment">    drawCircle</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="comment">    count:100</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line"><span class="comment">*/</span></span></pre></td></tr></table></figure>
+
+<p>在上述代码中调用方法，使用了<code>Method</code>类的<code>invoke(Object obj,Object... args)</code>第一个参数代表调用的对象，第二个参数传递的调用方法的参数。这样就完成了类方法的动态调用。</p>
+<table>
+<thead>
+<tr>
+<th align="center">方法返回值</th>
+<th align="center">方法名称</th>
+<th align="center">方法说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="center">Object</td>
+<td align="center">invoke(Object obj, Object… args)</td>
+<td align="center">对带有指定参数的指定对象调用由此 Method 对象表示的底层方法。</td>
+</tr>
+<tr>
+<td align="center">Class&lt;?&gt;</td>
+<td align="center">getReturnType()</td>
+<td align="center">返回一个 Class 对象，该对象描述了此 Method 对象所表示的方法的正式返回类型,即方法的返回类型</td>
+</tr>
+<tr>
+<td align="center">Type</td>
+<td align="center">getGenericReturnType()</td>
+<td align="center">返回表示由此 Method 对象所表示方法的正式返回类型的 Type 对象，也是方法的返回类型。</td>
+</tr>
+<tr>
+<td align="center">Class&lt;?&gt;[]</td>
+<td align="center">getParameterTypes()</td>
+<td align="center">按照声明顺序返回 Class 对象的数组，这些对象描述了此 Method 对象所表示的方法的形参类型。即返回方法的参数类型组成的数组</td>
+</tr>
+<tr>
+<td align="center">Type[]</td>
+<td align="center">getGenericParameterTypes()</td>
+<td align="center">按照声明顺序返回 Type 对象的数组，这些对象描述了此 Method 对象所表示的方法的形参类型的，也是返回方法的参数类型</td>
+</tr>
+<tr>
+<td align="center">String</td>
+<td align="center">getName()</td>
+<td align="center">以 String 形式返回此 Method 对象表示的方法名称，即返回方法的名称</td>
+</tr>
+<tr>
+<td align="center">boolean</td>
+<td align="center">isVarArgs()</td>
+<td align="center">判断方法是否带可变参数，如果将此方法声明为带有可变数量的参数，则返回 true；否则，返回 false。</td>
+</tr>
+<tr>
+<td align="center">String</td>
+<td align="center">toGenericString()</td>
+<td align="center">返回描述此 Method 的字符串，包括类型参数。</td>
+</tr>
+</tbody></table>
+<p><code>getReturnType</code>方法/<code>getGenericReturnType</code>方法都是获取<code>Method</code>对象表示的方法的返回类型，只不过前者返回的<code>Class</code>类型后者返回的<code>Type</code>(前面已分析过)，<code>Type</code>就是一个接口而已，在Java8中新增一个默认的方法实现，返回的就参数类型信息</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">interface</span> <span class="title">Type</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//1.8新增</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">default</span> <span class="function">String <span class="title">getTypeName</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="function"><span class="keyword">return</span> <span class="title">toString</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>而<code>getParameterTypes</code>/<code>getGenericParameterTypes</code>也是同样的道理，都是获取<code>Method</code>对象所表示的方法的参数类型，其他方法与前面的<code>Field</code>和<code>Constructor</code>是类似的。</p>
+<h2 id="2-4-反射包中的Array类"><a href="#2-4-反射包中的Array类" class="headerlink" title="2.4 反射包中的Array类"></a>2.4 反射包中的Array类</h2><p>在Java的<code>java.lang.reflect</code>包中存在着一个可以动态操作数组的类，<code>Array</code>，它提供了动态创建和访问 Java 数组的方法。<code>Array</code> 允许在执行 <code>get</code> 或 <code>set</code> 操作进行取值和赋值。在<code>Class</code>类中与数组关联的方法是：</p>
+<table>
+<thead>
+<tr>
+<th align="center">方法返回值</th>
+<th align="center">方法名称</th>
+<th align="center">方法说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="center">Class&lt;?&gt;</td>
+<td align="center">getComponentType()</td>
+<td align="center">返回表示数组元素类型的 Class，即数组的类型</td>
+</tr>
+<tr>
+<td align="center">boolean</td>
+<td align="center">isArray()</td>
+<td align="center">判定此 Class 对象是否表示一个数组类。</td>
+</tr>
+</tbody></table>
+<p><code>java.lang.reflect.Array</code>中的常用静态方法如下：</p>
+<table>
+<thead>
+<tr>
+<th align="center">方法返回值</th>
+<th align="center">方法名称</th>
+<th align="center">方法说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="center">static Object</td>
+<td align="center">set(Object array, int index)</td>
+<td align="center">返回指定数组对象中索引组件的值。</td>
+</tr>
+<tr>
+<td align="center">static int</td>
+<td align="center">getLength(Object array)</td>
+<td align="center">以 int 形式返回指定数组对象的长度</td>
+</tr>
+<tr>
+<td align="center">static object</td>
+<td align="center">newInstance(Class&lt;?&gt; componentType, int… dimensions)</td>
+<td align="center">创建一个具有指定类型和维度的新数组。</td>
+</tr>
+<tr>
+<td align="center">static Object</td>
+<td align="center">newInstance(Class&lt;?&gt; componentType, int length)</td>
+<td align="center">创建一个具有指定的组件类型和长度的新数组。</td>
+</tr>
+<tr>
+<td align="center">static void</td>
+<td align="center">set(Object array, int index, Object value)</td>
+<td align="center">将指定数组对象中索引组件的值设置为指定的新值。</td>
+</tr>
+</tbody></table>
+<p>下面通过一个简单例子来演示这些方法</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">package reflect;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">import java.lang.reflect.Array;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Created by zejian on 2017/5/1.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Blog : http://blog.csdn.net/javazejian [原文地址,请尊重原创]</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> ReflectArray &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    public static void main(String<span class="literal">[]</span> args) throws ClassNotFoundException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">int</span><span class="literal">[]</span> <span class="built_in">array</span> = &#123; <span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">4</span>, <span class="number">5</span>, <span class="number">6</span>, <span class="number">7</span>, <span class="number">8</span>, <span class="number">9</span> &#125;;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//获取数组类型的Class 即int.class</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        Class&lt;?&gt; clazz = <span class="built_in">array</span>.get<span class="constructor">Class()</span>.get<span class="constructor">ComponentType()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//创建一个具有指定的组件类型和长度的新数组。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//第一个参数:数组的类型,第二个参数:数组的长度</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        Object newArr = <span class="module-access"><span class="module"><span class="identifier">Array</span>.</span></span><span class="keyword">new</span><span class="constructor">Instance(<span class="params">clazz</span>, 15)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//获取原数组的长度</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">int</span> co = <span class="module-access"><span class="module"><span class="identifier">Array</span>.</span></span>get<span class="constructor">Length(<span class="params">array</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//赋值原数组到新数组</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>arraycopy(<span class="built_in">array</span>, <span class="number">0</span>, newArr, <span class="number">0</span>, co);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        for (<span class="built_in">int</span> i:(<span class="built_in">int</span><span class="literal">[]</span>) newArr) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.print(i+<span class="string">","</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//创建了一个长度为10 的字符串数组，</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//接着把索引位置为6 的元素设为"hello world!"，然后再读取索引位置为6 的元素的值</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">        Class clazz2 = <span class="module-access"><span class="module"><span class="identifier">Class</span>.</span></span>for<span class="constructor">Name(<span class="string">"java.lang.String"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//创建一个长度为10的字符串数组，在Java中数组也可以作为Object对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">        Object array2 = <span class="module-access"><span class="module"><span class="identifier">Array</span>.</span></span><span class="keyword">new</span><span class="constructor">Instance(<span class="params">clazz2</span>, 10)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//把字符串数组对象的索引位置为6的元素设置为"hello"</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">Array</span>.</span></span>set(array2, <span class="number">6</span>, <span class="string">"hello world!"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//获得字符串数组对象的索引位置为5的元素的值</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">        String str = (String)<span class="module-access"><span class="module"><span class="identifier">Array</span>.</span></span>get(array2, <span class="number">6</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(str);<span class="comment">//hello</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     输出结果:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     1,2,3,4,5,6,7,8,9,0,0,0,0,0,0,</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     hello world!</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>通过上述代码演示，确实可以利用<code>Array</code>类和反射相结合动态创建数组，也可以在运行时动态获取和设置数组中元素的值，其实除了上的<code>set/get</code>外<code>Array</code>还专门为8种基本数据类型提供特有的方法，如<code>setInt/getInt</code>、<code>setBoolean/getBoolean</code>，其他依次类推，需要使用是可以查看API文档即可。除了上述动态修改数组长度或者动态创建数组或动态获取值或设置值外，可以利用泛型动态创建泛型数组如下：</p>
+<figure class="highlight processing"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment">  * 接收一个泛型数组，然后创建一个长度与接收的数组长度一样的泛型数组，</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment">  * 并把接收的数组的元素复制到新创建的数组中，</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment">  * 最后找出新数组中的最小元素，并打印出来</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment">  * @param a</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="comment">  * @param &lt;T&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="comment">  */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"> <span class="keyword">public</span>  &lt;T extends Comparable&lt;T&gt;&gt; <span class="keyword">void</span> <span class="built_in">min</span>(T[] a) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">     <span class="comment">//通过反射创建相同类型的数组</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">     T[] b = (T[]) <span class="keyword">Array</span>.newInstance(a.getClass().getComponentType(), a.length);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">     <span class="keyword">for</span> (<span class="built_in">int</span> i = <span class="number">0</span>; i &lt; a.length; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">         b[i] = a[i];</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">     &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">     T <span class="built_in">min</span> = <span class="keyword">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">     <span class="built_in">boolean</span> flag = <span class="keyword">true</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">     <span class="keyword">for</span> (<span class="built_in">int</span> i = <span class="number">0</span>; i &lt; b.length; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">         <span class="keyword">if</span> (flag) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">             <span class="built_in">min</span> = b[i];</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">             flag = <span class="keyword">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">         &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">         <span class="keyword">if</span> (b[i].compareTo(<span class="built_in">min</span>) &lt; <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">             <span class="built_in">min</span> = b[i];</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">         &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">     &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">     System.out.<span class="built_in">println</span>(<span class="built_in">min</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line"> &#125;</span></pre></td></tr></table></figure>
+
+<p>毕竟我们无法直接创建泛型数组，有了<code>Array</code>的动态创建数组的方式这个问题也就迎刃而解了。</p>
+<figure class="highlight haxe"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//无效语句，编译不通</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">T[] a = <span class="keyword">new</span> <span class="type">T</span>[];</span></pre></td></tr></table></figure>
+
+<p>ok~，到这反射中几个重要并且常用的类我们都基本介绍完了，但更重要是，我们应该认识到反射机制并没有什么神奇之处。当通过反射与一个未知类型的对象打交道时，JVM只会简单地检查这个对象，判断该对象属于那种类型，同时也应该知道，在使用反射机制创建对象前，必须确保已加载了这个类的Class对象，当然这点完全不必由我们操作，毕竟只能JVM加载，但必须确保该类的”.class”文件已存在并且JVM能够正确找到。关于<code>Class</code>类的方法在前面我们只是分析了主要的一些方法，其实<code>Class</code>类的API方法挺多的，建议查看一下API文档，浏览一遍，有个印象也是不错的选择，这里仅列出前面没有介绍过又可能用到的API：</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"> <span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment">  *    修饰符、父类、实现的接口、注解相关</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment">  */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//获取修饰符，返回值可通过Modifier类进行解读</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">native</span> <span class="function"><span class="keyword">int</span> <span class="title">getModifiers</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//获取父类，如果为Object，父类为null</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">native</span> Class&lt;? <span class="keyword">super</span> T&gt; getSuperclass();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//对于类，为自己声明实现的所有接口，对于接口，为直接扩展的接口，不包括通过父类间接继承来的</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">native</span> Class&lt;?&gt;[] getInterfaces();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//自己声明的注解</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> Annotation[] getDeclaredAnnotations();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//所有的注解，包括继承得到的</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> Annotation[] getAnnotations();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//获取或检查指定类型的注解，包括继承得到的</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> &lt;A <span class="keyword">extends</span> Annotation&gt; <span class="function">A <span class="title">getAnnotation</span><span class="params">(Class&lt;A&gt; annotationClass)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="function"><span class="keyword">boolean</span> <span class="title">isAnnotationPresent</span><span class="params">(Class&lt;? <span class="keyword">extends</span> Annotation&gt; annotationClass)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="comment">  *   内部类相关</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="comment">  */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//获取所有的public的内部类和接口，包括从父类继承得到的</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> Class&lt;?&gt;[] getClasses();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//获取自己声明的所有的内部类和接口</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> Class&lt;?&gt;[] getDeclaredClasses();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//如果当前Class为内部类，获取声明该类的最外部的Class对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> Class&lt;?&gt; getDeclaringClass();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//如果当前Class为内部类，获取直接包含该类的类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> Class&lt;?&gt; getEnclosingClass();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//如果当前Class为本地类或匿名内部类，返回包含它的方法</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="function">Method <span class="title">getEnclosingMethod</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line"><span class="comment">  *    Class对象类型判断相关</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line"><span class="comment">  */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//是否是数组</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">native</span> <span class="function"><span class="keyword">boolean</span> <span class="title">isArray</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//是否是基本类型</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">native</span> <span class="function"><span class="keyword">boolean</span> <span class="title">isPrimitive</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//是否是接口</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">native</span> <span class="function"><span class="keyword">boolean</span> <span class="title">isInterface</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//是否是枚举</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="function"><span class="keyword">boolean</span> <span class="title">isEnum</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//是否是注解</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="function"><span class="keyword">boolean</span> <span class="title">isAnnotation</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//是否是匿名内部类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="function"><span class="keyword">boolean</span> <span class="title">isAnonymousClass</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//是否是成员类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="function"><span class="keyword">boolean</span> <span class="title">isMemberClass</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//是否是本地类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="function"><span class="keyword">boolean</span> <span class="title">isLocalClass</span><span class="params">()</span></span>;</span></pre></td></tr></table></figure>
+
+<p>ok~，本篇到此完结。</p>
+<blockquote>
+<p>作者：zejian_</p>
+<p>来源：<a href="https://blog.csdn.net/javazejian/article/details/70768369" target="_blank" rel="noopener">https://blog.csdn.net/javazejian/article/details/70768369</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E5%8F%8D%E5%B0%84/" rel="tag"># 反射</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/28/Java-%E5%B9%B6%E5%8F%91%E5%9F%BA%E7%A1%80%E4%B9%8B%E5%86%85%E5%AD%98%E6%A8%A1%E5%9E%8B/" rel="prev" title="Java 并发基础之内存模型">
+      <i class="fa fa-chevron-left"></i> Java 并发基础之内存模型
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/28/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3Java%E7%B1%BB%E5%8A%A0%E8%BD%BD%E5%99%A8/" rel="next" title="深入理解Java类加载器">
+      深入理解Java类加载器 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#1-深入理解Class对象"><span class="nav-number">1.</span> <span class="nav-text">1 深入理解Class对象</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#1-1-RRTI的概念以及Class对象作用"><span class="nav-number">1.1.</span> <span class="nav-text">1.1 RRTI的概念以及Class对象作用</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#1-2-Class对象的加载及其获取方式"><span class="nav-number">1.2.</span> <span class="nav-text">1.2 Class对象的加载及其获取方式</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1-2-1-Class对象的加载"><span class="nav-number">1.2.1.</span> <span class="nav-text">1.2.1 Class对象的加载</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#1-2-2-Class-forName方法"><span class="nav-number">1.2.2.</span> <span class="nav-text">1.2.2 Class.forName方法</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#1-2-3-Class字面常量"><span class="nav-number">1.2.3.</span> <span class="nav-text">1.2.3 Class字面常量</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#1-2-4-理解泛化的Class对象引用"><span class="nav-number">1.2.4.</span> <span class="nav-text">1.2.4 理解泛化的Class对象引用</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#1-2-5-关于类型转换的问题"><span class="nav-number">1.2.5.</span> <span class="nav-text">1.2.5 关于类型转换的问题</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#1-2-6-instanceof-关键字与isInstance方法"><span class="nav-number">1.2.6.</span> <span class="nav-text">1.2.6 instanceof 关键字与isInstance方法</span></a></li></ol></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#2-理解反射技术"><span class="nav-number">2.</span> <span class="nav-text">2 理解反射技术</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#2-1-Constructor类及其用法"><span class="nav-number">2.1.</span> <span class="nav-text">2.1 Constructor类及其用法</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-2-Field类及其用法"><span class="nav-number">2.2.</span> <span class="nav-text">2.2 Field类及其用法</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-3-Method类及其用法"><span class="nav-number">2.3.</span> <span class="nav-text">2.3 Method类及其用法</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-4-反射包中的Array类"><span class="nav-number">2.4.</span> <span class="nav-text">2.4 反射包中的Array类</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">469</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">82</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">108</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="概述分布式数据库已经流行好多年，产品非常众多，其中分布式数据库中间件使用场景最广。本文主要是总结如何基于分布式数据库中间件做数据库架构设计，以充分发挥它的分布式能力。各个中间件产品功能核心原理相同，细节上有些区别。这里仅以阿里云的DRDS为例分析，在产品架构、功能、成熟度和市场占有率上，它都比同行产品有优势。首先为了避免被误解为：「手里有把锤子，看什么都是钉子！」，说明一下不是什么业务都适合分布式">
+<meta name="keywords" content="分表,分库">
+<meta property="og:type" content="article">
+<meta property="og:title" content="分库分表最佳实践">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2019&#x2F;12&#x2F;28&#x2F;%E5%88%86%E5%BA%93%E5%88%86%E8%A1%A8%E6%9C%80%E4%BD%B3%E5%AE%9E%E8%B7%B5&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="概述分布式数据库已经流行好多年，产品非常众多，其中分布式数据库中间件使用场景最广。本文主要是总结如何基于分布式数据库中间件做数据库架构设计，以充分发挥它的分布式能力。各个中间件产品功能核心原理相同，细节上有些区别。这里仅以阿里云的DRDS为例分析，在产品架构、功能、成熟度和市场占有率上，它都比同行产品有优势。首先为了避免被误解为：「手里有把锤子，看什么都是钉子！」，说明一下不是什么业务都适合分布式">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016165621-74f89.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016165622-c7243.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016165622-69673.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016165623-ab9e9.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016165623-e41c4.jpeg">
+<meta property="og:updated_time" content="2019-12-28T12:10:11.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016165621-74f89.jpeg">
+
+<link rel="canonical" href="http://congsheng.wang/2019/12/28/%E5%88%86%E5%BA%93%E5%88%86%E8%A1%A8%E6%9C%80%E4%BD%B3%E5%AE%9E%E8%B7%B5/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>分库分表最佳实践 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">108</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">82</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">469</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2019/12/28/%E5%88%86%E5%BA%93%E5%88%86%E8%A1%A8%E6%9C%80%E4%BD%B3%E5%AE%9E%E8%B7%B5/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          分库分表最佳实践
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-28 20:10:11" itemprop="dateCreated datePublished" datetime="2019-12-28T20:10:11+08:00">2019-12-28</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="概述"><a href="#概述" class="headerlink" title="概述"></a><strong>概述</strong></h1><p>分布式数据库已经流行好多年，产品非常众多，其中分布式数据库中间件使用场景最广。本文主要是总结如何基于分布式数据库中间件做数据库架构设计，以充分发挥它的分布式能力。各个中间件产品功能核心原理相同，细节上有些区别。这里仅以阿里云的<code>DRDS</code>为例分析，在产品架构、功能、成熟度和市场占有率上，它都比同行产品有优势。<br>首先为了避免被误解为：「手里有把锤子，看什么都是钉子！」，说明一下不是什么业务都适合分布式数据库，更不是用了分布式数据库性能就一定能得到扩展。这个我在另外一篇文章《<a href="http://mp.weixin.qq.com/s?__biz=MzU3OTc2MDQxNg==&mid=2247483654&idx=1&sn=7558adcdab3262f0e22542865602f111&chksm=fd607949ca17f05f718cff4d1a137afcb96067c1ffc09d7d629e494ec3987baec5db239b2fc6&scene=21#wechat_redirect" target="_blank" rel="noopener">分布式数据库的拆分设计实践</a>》已经有过分析。这里以<code>DRDS</code>的使用为例更深阐述这个观点。<br>本文有关「线性扩展」的分析是来自于<code>DRDS</code>产品团队<code>梦实</code>的分享。有关如何发挥分布式资源能力是个人观点，仅供参考。<code>DRDS</code>的功能相对很完备，如全局<code>Sequence</code>、异构索引表、分库分表策略、<code>分布式Join</code>、小表广播、分布式事务（柔性事务和强一致事务）、读写分离和只读实例、<code>HTAP查询</code>等。这些在官网上都有详尽的介绍。这里总结的是官网上没有明示的或者重点突出的业务数据库架构设计经验。<br><strong>好的数据库性能首先是应用设计出来的</strong>（还会有其他方面因素），如果你不认同这个观点，那本文并不适合你。</p>
+<a id="more"></a>
+
+<h2 id="分布式数据库（中间件）架构"><a href="#分布式数据库（中间件）架构" class="headerlink" title="分布式数据库（中间件）架构"></a><strong>分布式数据库（中间件）架构</strong></h2><p>文章《<a href="http://mp.weixin.qq.com/s?__biz=MzU3OTc2MDQxNg==&mid=2247483676&idx=1&sn=e5eb267be429800911df66ca1cac3682&chksm=fd607953ca17f0453c1fc09a6c006b71489660d48822dd3919083a67c3876151ce794000b52c&scene=21#wechat_redirect" target="_blank" rel="noopener">一些关系数据库的架构总结</a>》列举过很多分布式数据库的架构图，它们都有一个共同的特点就是主体功能都是在<code>MySQL</code>数据库前面部署了一个中间件。这个中间件接管并响应应用的<code>SQL</code>请求。所以它的基础必备能力就是解析<code>SQL</code>，做分库分表路由，到底层<code>MySQL</code>数据库里取数据并可能做一些计算（排序聚合等）然后返回给应用。这个中间件对应用屏蔽了表被拆分的细节。</p>
+<h3 id="运维视角下的DRDS"><a href="#运维视角下的DRDS" class="headerlink" title="运维视角下的DRDS"></a><strong>运维视角下的<code>DRDS</code></strong></h3><p><img src="http://image.winrains.cn/2019/10/20191016165621-74f89.jpeg" alt="img"></p>
+<p>如上是运维视角下的<code>DRDS</code>的架构图。（注：这里划分和后面各个概念都是个人理解。运维人员是能看到<code>DRDS</code>的各个组成模块。）<br><code>DRDS</code>数据库整体上是分为两层。一个是中间件层，或者也叫服务层（也叫<code>DRDS Server</code>），负责响应SQL请求，承担部分计算（<code>SQL</code>）功能。<code>Server</code>由多个特定相同资源规格（<code>CPU</code>和内存）的进程组成，运算数据会在内存里，但不持久化，所以<code>Server</code>层简单理解没有存储功能。也可以理解为<code>Server层</code>是无状态的（内存数据可以丢失）。 数据是存储在下面的数据库层（或者叫存储层）。这个数据库通常就是一组<code>MySQL</code>实例（在云上是<code>RDS MySQL</code>实例）。数据库层除了存储数据也承担了部分<code>SQL</code>计算功能，不过这里的<code>SQL</code> 通常不会太复杂。所以也有一个不完全正确的观点：在分布式<code>MySQL</code>数据库集群里，都是把<code>MySQL</code>当存储用的。<br>有几个简单概念突出一下：</p>
+<ul>
+<li><strong><code>Server</code>层</strong>：由一组<code>DRDS Server</code>(后简称<code>Server</code>）组成，<code>Server</code>节点是部署在<code>ECS</code>上的一个<code>Java</code>进程，<code>ECS</code>的资源规格（<code>CPU</code>和内存）就是<code>Server</code>节点的主要能力。用户购买的<code>DRDS</code>实例实际上就是购买一组<code>Server</code>节点。每个<code>DRDS</code>实例至少会包含2个<code>Server</code>节点（因为要高可用，其次是<a href="https://cloud.tencent.com/product/clb?from=10680" target="_blank" rel="noopener">负载均衡</a>），规格很大的实例，会有4或8个<code>Server</code>节点组成（负载均衡是主要目的）。<strong><code>DRDS</code>实例的规格决定了它的主要计算能力。</strong></li>
+<li><strong>物理实例</strong>：由一组<code>MySQL</code>实例组成，不同的实例其包含的数据都是全部数据的子集（广播表的数据会在多个实例内部冗余这个例外）。每个实例有自己的<code>Slave</code>实例，不是重点后面都忽略它。<strong>每个实例代表了一定的资源能力（<code>CPU</code>、内存和空间）。</strong></li>
+<li><strong>物理分库</strong>：在<code>MySQL</code>里就是数据库，分库说的是这个数据库是总体数据的子集，一个<code>MySQL</code>实例会包含多个分库，在RDS里默认是8个（外部实例默认不让改，这个设定导致了<code>DRDS</code>的拆分设计思路在内部业务和外部业务上呈现不同的特点，其中有一个比较难理解）。</li>
+<li><strong>物理分表：</strong>在<code>MySQL</code>每个数据库下的普通表（非分区表），分表说的是它的数据是总数据的子集，并且在所有实例里有很多结构相同的表（只是可能表名后面的编号不同）。每个物理分库下可以有1个或多个分表，不同产品特点不一。</li>
+<li><strong>物理<code>QPS</code></strong>：所有<code>MySQL</code>实例的<code>QPS</code>总和，衡量数据库层压力的一个指标。<code>TPS</code>同理。</li>
+<li><strong>逻辑<code>QPS</code></strong>：所有<code>Server</code>节点的<code>QPS</code>总和，衡量<code>DRDS</code>实例压力的一个指标。<code>TPS</code>同理。</li>
+</ul>
+<p><code>DRDS</code>在内部叫<code>TDDL</code>，没有<code>Server层</code>，而是跟应用代码部署在一起（应用引用<code>TDDL</code>的一个<code>Jar包</code>）。拆分规则、数据库拓扑和连接信息等配置会由其他模块（集中式部署）推送（<code>PUSH</code>）到各个应用客户端（可能客户端也有自己<code>PULL</code>逻辑）。</p>
+<h3 id="业务视角下的DRDS"><a href="#业务视角下的DRDS" class="headerlink" title="业务视角下的DRDS"></a><strong>业务视角下的<code>DRDS</code></strong></h3><p><img src="http://image.winrains.cn/2019/10/20191016165622-c7243.jpeg" alt="img"></p>
+<p>如上是业务视角下的<code>DRDS</code>架构图。对业务而言看到的就是一个数据库实例，实例下有库有表。这几个概念很简单：</p>
+<ul>
+<li><strong>逻辑实例</strong>：就是<code>DRDS</code>实例，会有个链接地址，通常是域名或者某个负载均衡产品上的<code>VIP</code>。</li>
+<li><strong>逻辑库</strong>：就是<code>DRDS</code>实例下的数据库，后端是由一组物理分库组成。</li>
+<li><strong>逻辑表</strong>：就是业务表，后端是由一组物理分表组成。逻辑表理论上跟传统数据库一样，不同分布式数据库产品支持的类型可能有细微差别。如某些分布式数据库产品可能不支持某些特殊类型的列，或者不支持外键，或者不支持全局索引等。不能简单的按传统数据库的用法去用。</li>
+</ul>
+<p>理论上业务只要申请到<code>DRDS</code>实例然后建库建表即可。稍有不同的时候需要设计物理分库的数量和物理分表的数量。后面重点首先是介绍这个分库分表的设计，然后是业务<code>SQL</code>如何写最佳。</p>
+<h2 id="分库分表设计"><a href="#分库分表设计" class="headerlink" title="分库分表设计"></a><strong>分库分表设计</strong></h2><p>分库分表设计首先要根据业务选择合适的拆分维度以及拆分策略。这个在前文《<a href="http://mp.weixin.qq.com/s?__biz=MzU3OTc2MDQxNg==&mid=2247483654&idx=1&sn=7558adcdab3262f0e22542865602f111&chksm=fd607949ca17f05f718cff4d1a137afcb96067c1ffc09d7d629e494ec3987baec5db239b2fc6&scene=21#wechat_redirect" target="_blank" rel="noopener">分布式数据库的拆分设计实践</a>》已经有过分析。这里重点说的分多少个库和分多少个表的选择考虑。</p>
+<h3 id="为什么要拆分？"><a href="#为什么要拆分？" class="headerlink" title="为什么要拆分？"></a><strong>为什么要拆分？</strong></h3><p>技术上<code>DRDS</code>也支持不做分库分表拆分这种用法，不过这个中间层就显得多余了。当业务要做水平拆分决定的时候，通常是因为业务碰到下面几个难题：</p>
+<ul>
+<li><strong>集中式数据库的连接数瓶颈</strong> ：应用是无状态的，可以水平扩容，但数据库是集中的。数据库的实际连接数越来越高，逐步消耗数据库性能以及达到连接数设置上限。</li>
+<li><strong>存储容量瓶颈</strong>：业务数据量越来越大，单机硬盘扩容达到上限，或者存储扩容成本越来越高。</li>
+<li><strong>QPS瓶颈</strong>：集中式数据库的业务QPS上不去，数据库主机资源利用率到达瓶颈（<code>CPU</code>瓶颈或者<code>IO</code>瓶颈等）。</li>
+</ul>
+<p>具体是哪个瓶颈会影响分库分表数量的选择。</p>
+<h3 id="分多少个表合适？"><a href="#分多少个表合适？" class="headerlink" title="分多少个表合适？"></a><strong>分多少个表合适？</strong></h3><p>首先常见的一类问题是“表数据量到多少就要拆分？或者表大小到多少就要拆分？”。 业务方总希望能用一个万能的公式就直接给出答案。如果产品给出了一个公式，那多半是被逼的；如果业务方简单去套用公式，那多半就是不清楚数据库细节懒于分析。<br>换个问题“拆分为多少个分表比较合适？”。总分表数也是数据的分片数。 总数据分表数目一旦确定后，后期调整数量就非常不方便（那意味着全量数据重分布）。这个就是选择这个分表数的第一个考虑点。<br>分表是存在于分库中，分库在分实例里，多个实例组成了全部的业务数据。关于分表数这里倒是有个简单万能的公式：<br>总分表数（<code>N</code>） = 总物理实例数（<code>X</code>）＊ 每个实例下的分库数（<code>Y</code>）＊ 每个分库下的分表数（<code>Z</code>)<br>所以，当你定一个总的分表数<code>N</code>时，这个<code>N</code>要能够拆分为三个数（<code>X</code>、<code>Y</code>和<code>Z</code>）的乘积。这个是选择分表数的第二个考虑点。而这个<code>X</code>和<code>Y</code>的选择都有讲究。<br>最后分表数目也不能太大，否则元数据管理成本会比较高，对稳定性和性能都有影响。这点不同产品能力不一样。<code>DRDS</code>的内部案例里分表数最多到<code>4096</code>。<br>所以分多少个表此时还没有结论。先往后看。</p>
+<h3 id="分多少个实例合适？"><a href="#分多少个实例合适？" class="headerlink" title="分多少个实例合适？"></a><strong>分多少个实例合适？</strong></h3><p>每个物理实例占用了一定的主机资源（<code>CPU</code>、内存和空间），提供一定的计算和存储能力，重点是计算能力，具体指标就是<code>QPS</code>（也包括<code>TPS</code>）。<br>我们先假设每个物理实例都独占一台主机资源，那么一个物理实例的能力上限就是那个主机的能力上限。如果一个<code>DRDS</code>实例后端包括一个物理实例（默认<code>Slave</code>实例不提供服务，这里不考虑读写分离场景），那理论上它数据层最大的能力就是一台主机的能力；如果后端包括两个物理实例，那理论上它数据层最大的能力就是两台主机的能力。<br>所以，一个<code>DRDS</code>实例的计算能力有个简单公式就是：<br><code>DRDS</code>实例数据层计算能力（物理<code>QPS</code>） = ∑ 物理实例<code>i</code>的<code>QPS</code> ， <code>i</code> ∊ (1, <code>X</code>)<br>所以，如果当初主要是解决集中式数据库的计算能力瓶颈的时候，拆分为多少个实例就决定了<code>DRDS</code>实例的理论上的上限。大规模业务分布式数据库集群能力评估的时候，这个公式是主要考量点。评估的结果如果少了一个数量级，则很可能导致业务有性能风险。<br>还有个别业务一个是基于存储能力考虑的，这个同理。<br><strong>注意：</strong></p>
+<ul>
+<li>这里的计算能力是理论上的，实际能不能发挥还取决于<code>SQL</code>写法。</li>
+<li>理论上总物理实例数这个是可以很方便调整的，就像细胞分裂和合并一样。1个实例可以分裂（扩容）为2个实例，8个实例也可以合并（缩容）为4个或2个实例。所以，总实例数建议是2的幂，方便扩容和缩容。但这要求不是必须的，不同产品实现方式不一样。</li>
+<li>实际情况一个物理实例不一定是独占一台主机资源的。在阿里云上，<code>RDS MySQL</code>实例都是有具体的规格的（如多少<code>CPU</code>多少内存多少空间等），资源之间有一定的资源隔离策略。所以存在拆分为2个物理实例，但是这2个实例依然在一台主机上。由于<code>MySQL</code>的功能特点，2个小实例的计算能力很可能也高于合并为1个大实例后的计算能力。具体以业务实际运行结果为准。</li>
+<li>同样，总实例数最大值不同产品能力不一样，<code>DRDS</code>内部最多<code>128</code>个实例。</li>
+</ul>
+<p>1个实例是否能方便扩容为2个实例，取决于这个实例里有多少个分库。</p>
+<h3 id="分多少个分库合适？"><a href="#分多少个分库合适？" class="headerlink" title="分多少个分库合适？"></a><strong>分多少个分库合适？</strong></h3><p>如果1个实例的分库数是2或2的倍数，那拆分为两个实例还是比较方便的，简单说把分库对半分。具体就是搭建一个<code>Slave</code>实例，数据同步追上后断开同步，分别去掉一半分库。 如果1个实例只有1个分库，那这个方法就行不通。还要继续看有多少个分表，然后对分表集合进行对半分。但总体操作上没有对分库集合对半分要方便。<br>这种对半拆的方案是最简单的，但并不是唯一的选择。<code>DRDS</code>有能力通过精卫对数据全量进行重分布，从而突破<code>不可继续对半分</code>的限制，只是要消耗更多资源和更多时间。通常运维会选择对半拆。所以分库数量决定了实例可以分拆（扩容）的次数。<br><strong>注意：</strong></p>
+<ul>
+<li>在阿里云RDS里，每个实例默认8个分库是固定的。所以总分库数 = 总实例数 * 8. 这个也决定了，通过对半拆分库的方式最多能扩容3次。</li>
+<li>在电商内部业务里，每个实例下分库数可以是（4,8,16,32,64,128)等，不同业务要求不一样。</li>
+<li>每个分库名在全局范围内不重名（尾部编号不一样）</li>
+</ul>
+<h3 id="再看分表数"><a href="#再看分表数" class="headerlink" title="再看分表数"></a><strong>再看分表数</strong></h3><p>由上面分析知，分多少个实例（<code>X</code>）主要决定了整个<code>DRDS</code>实例后端计算能力的上限（部分业务还要考虑存储能力因素，但越是规模大的业务，对计算能力要求弹性远高于存储能力）。每个实例下多少个分库（<code>Y</code>）决定了未来的弹性扩容的能力（倍数）。<br>所以也可以粗略的说<code>X</code>与<code>Y</code>的乘积决定了这个<code>DRDS</code>实例后端未来最大的计算能力。 在业务初步上线的时候，可以<code>X</code>很小，<code>Y</code>稍微大一些；在业务规模上去后，再调大<code>X</code>调小<code>Y</code>。这就是分布式数据库容量评估的艺术。可以说考虑未来若干年内的需求时，这个<code>X</code>和<code>Y</code>的乘积基本确定了，然后总的分表数（<code>N</code>）就看每个分库下的分表数（<code>Z</code>）了。<br>关于这个<code>Z</code>的指定，<code>DRDS</code>在内外业务上的处理方法稍有不同。 <code>DRDS</code>建表语句支持指定分表数，指定的就是这个<code>Z</code>的值（并不是指定总的分表数）。<code>DRDS</code>对这个<code>Z</code>值并没有建议要求。可以是奇数、质数、合数都没关系。每个分表名只是在分库内部不重名，不同分库的分表名是一样的。<br>总分表数会通过公式 <code>N</code>=<code>X*Y*Z</code>来计算。这个计算结果值不宜超过目前实践最大值（<code>4096</code>）。<br>在内部业务设计里，分表总数是在建表的时候指定，一般是2的幂，16起步，最大4096.然后你才会看到每个分库下有多少个分表。每个分表的命名在全局不重名（尾部编号不同）。<br>这是两种设计习惯，当先熟悉了一种后再用另外一种会有一点不适应，至少我是这么感觉的。<br>分表数的选择有可能要考虑业务数据分布特点。当有很多热点数据的时候，选择分区策略后要尽可能让每个分表数据尽可能分布均衡，并且访问量也尽可能的均衡。但是绝对均衡也很难，只是说如果业务上访问有热点数据，总分表数尽量大一些，以便热点数据能够分散的开一些。这只是个建议，对于特别热点的访问（比如说秒杀<code>IPhoneX</code>)这个效果也不明显(还需要其他手段并用，热点行应对策略以后有时间再分享）。</p>
+<h2 id="线性扩展能力"><a href="#线性扩展能力" class="headerlink" title="线性扩展能力"></a><strong>线性扩展能力</strong></h2><p>前面分库分表的设计是把分布式数据库集群的最大能力尽可能的提升，但并不意味着业务<code>SQL</code>就一定能发挥出数据库的分布式能力。所以<code>DRDS</code>提出一个线性扩展的概念。<br>这里<code>线性扩展</code>是<code>DRDS</code>用来描述<code>SQL</code>的一种能力的。我不确认在分布式领域或者其他什么领域是否也有这个概念。如果有先忽略它在别的地方的含义。<br><code>线性扩展</code>指的是随着业务规模成倍的增长，对分布式数据库后端实例进行弹性扩容（增加实例数）后，业务<code>SQL</code>的响应时间(<code>RT</code>)能维持不变或者小范围的变慢，以及吞吐量能相应倍数的增长。<br>线性扩展能力是衡量单个<code>SQL</code>的扩展性能力，跟<code>SQL</code>写法有关。不同的<code>SQL</code>表现可能不一致，我们只考虑核心业务<code>SQL</code>或者对性能影响很大的<code>SQL</code>。</p>
+<h3 id="拆分键的影响"><a href="#拆分键的影响" class="headerlink" title="拆分键的影响"></a><strong>拆分键的影响</strong></h3><p>当业务表拆分为<code>N</code>个分表后，分布在<code>X</code>个实例里。<code>DRDS</code>建议业务<code>SQL</code>尽可能的带上具体的拆分条件。这样<code>Server</code>节点可以直接将<code>SQL</code>路由到后端具体的<code>MySQL</code>实例中。 每个请求落在具体的实例节点上，不同请求可能落在不同的实例节点上，所有实例同时提供服务，<code>DRDS</code>实例整体吞吐量最大。如下图，当<code>SQL</code>都带拆分键（等值条件）后，1个逻辑<code>QPS</code>就对应1个物理<code>QPS</code>。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016165622-69673.jpeg" alt="img"></p>
+<p>此时如果后端数据层扩容增加了1个<code>MySQL</code>实例，则物理<code>QPS</code>提升<code>50%</code>，逻辑<code>QPS</code>也提升<code>50%</code>。当然这里前提是<code>Server</code>节点层不是瓶颈（<code>Server</code>节点的<code>QPS</code>能力高于<code>MySQL</code>的<code>QPS</code>能力。这类<code>SQL</code>的线性扩展能力就很好。<br>如果<code>SQL</code>没有带上拆分键，则<code>Server</code>节点会将<code>SQL</code>请求路由到所有<code>MySQL</code>实例。1个逻辑<code>QPS</code>就对应3个物理<code>QPS</code>。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016165623-ab9e9.jpeg" alt="img"></p>
+<p>此时如果后端数据层扩容了，虽然物理<code>QPS</code>提升了<code>50%</code>时，但是<code>Server</code>节点的能力并没有增加。这类<code>SQL</code>的线性扩展能力就不好。<br>这个对比很好理解。</p>
+<h3 id="拆分键IN查询业务的线性扩展能力分析"><a href="#拆分键IN查询业务的线性扩展能力分析" class="headerlink" title="拆分键IN查询业务的线性扩展能力分析"></a><strong>拆分键<code>IN</code>查询业务的线性扩展能力分析</strong></h3><p>上面说的<code>SQL</code>带了拆分键并且是等值条件。也有一类<code>SQL</code>带了拆分键，但是是拆分键<code>IN</code>查询。 <code>Server</code>节点在处理这个<code>SQL</code>时，会将<code>IN</code>后的<code>LIST</code>值一个个判断在后端哪个<code>MySQL</code>实例里。如果都是属于同一个<code>MySQL</code>实例，那效果跟上面那种带了拆分键等值条件一样。这是最好的情形，取决于业务数据。如果<code>LIST</code>里的值都是分属于不同的<code>MySQL</code>实例，则近似于上面不带拆分键查询情形。<br>如下面是买家订单查询业务举例。拆分键是订单ID，16个分实例。每个订单<code>IN</code>查询里的列表长度平均为2.假设分布均匀，每个逻辑<code>QPS</code>就对应2个物理<code>QPS</code>。如果单个实例的<code>QPS</code>能力是1000，则<code>DRDS</code>的逻辑<code>QPS</code>能力就是8000。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016165623-e41c4.jpeg" alt="img"></p>
+<p>但是如果后期业务规模增长，平均一个买家订单数量扩了100倍（<code>IN</code>后面列表长度200），实例扩容了4倍。此时整个<code>DRDS</code>的逻辑<code>QPS</code>能力是1000。相比之前的业务能力，这个是下降了。 大家很容易看到导致业务能力下降的关键是新业务下<code>SQL</code>的<code>IN</code>列表长度比实例数要多很多。这是一类业务特点。<br>还有一类业务即使业务规模增长，其<code>IN</code>后的列表长度不会大变。比如说人口业务。根据子女<code>ID</code> 查询相关信息。虽然总人口增长了很多，单每个家庭子女数量平均在1-2个左右。这个场景下如果实例扩容了，业务是能收获相应倍数的<code>QPS</code>提升。</p>
+<h3 id="分布式Join"><a href="#分布式Join" class="headerlink" title="分布式Join"></a><strong>分布式<code>Join</code></strong></h3><p>上面描述的拆分键<code>IN</code> 查询还是很直观的，容易理解。稍微复杂一点的业务<code>SQL</code>会使用表连接。这个又分多种情形。 一是做根据参加表连接的表类型。分为非拆分表和拆分表的连接、拆分表和拆分表的连接。后者还分拆分维度是否一致。 二是根据连接条件是否是拆分键。有些连接条件是一方的拆分键是另外一方的非拆分键。<br>分析分布式<code>Join</code>的线性扩展能力关键首先了解连接的算法。通常是嵌套循环（<code>Nested-Loop Join</code>）。然后判断在应用目标表连接条件时该条件是否是拆分键。再参照前面拆分键<code>IN</code>查询的表现综合分析。<br>本节只是个引子，具体分析可以参考梦实的分享。</p>
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a><strong>总结</strong></h2><p>分布式数据库（中间件）的特点就是分库分表，这个比较灵活和容易理解，使用场景最广。具体分多少个实例多少个库会影响分布式数据库性能理论上限。此外，<code>SQL</code>能否将该分布式数据库的性能能力都发挥出来，取决于<code>SQL</code>的写法，一般跟拆分键的行为有关。不同分布式数据库产品的功能有细节上的差别，但是分库分表的逻辑基本相同，所以上面的分析同样适用于其他分布式数据库（中间件）产品。<br>OceanBase里的租户的能力取决于资源单元（<code>Unit</code>）的数量，OceanBase里的分区表设计思路等同于分库分表思路。所以上面的思路也可以在OceanBase的业务数据库设计里参考。<br>个人总结，如有表达不当之处欢迎指正。公众号文章还没有留言功能，可以给公众号留言。</p>
+<h2 id="参考"><a href="#参考" class="headerlink" title="参考"></a><strong>参考</strong></h2><ul>
+<li>阿里云, 分布式数据库DRDS 最佳实践，<a href="https://help.aliyun.com/document_detail/51308.html" target="_blank" rel="noopener">https://help.aliyun.com/document_detail/51308.html</a></li>
+<li>梦实, 分布式数据库——从线性扩展谈分布式JOIN，<a href="https://yq.aliyun.com/articles/156276" target="_blank" rel="noopener">https://yq.aliyun.com/articles/156276</a></li>
+</ul>
+<h2 id="推荐阅读"><a href="#推荐阅读" class="headerlink" title="推荐阅读"></a><strong>推荐阅读</strong></h2><ul>
+<li><a href="http://mp.weixin.qq.com/s?__biz=MzU3OTc2MDQxNg==&mid=2247483767&idx=1&sn=cf134eb63cf3c1dae418aa3d23c22be2&chksm=fd607938ca17f02ed4d589d5f383b99b62e358b9fcf9f8af4a4e2e15089f27fcd9f9ecb17898&scene=21#wechat_redirect" target="_blank" rel="noopener">MySQL数据库乱码问题分析</a></li>
+<li><a href="http://mp.weixin.qq.com/s?__biz=MzU3OTc2MDQxNg==&mid=2247483654&idx=1&sn=7558adcdab3262f0e22542865602f111&chksm=fd607949ca17f05f718cff4d1a137afcb96067c1ffc09d7d629e494ec3987baec5db239b2fc6&scene=21#wechat_redirect" target="_blank" rel="noopener">分布式数据库的拆分设计实践</a></li>
+<li><a href="http://mp.weixin.qq.com/s?__biz=MzU3OTc2MDQxNg==&mid=2247483676&idx=1&sn=e5eb267be429800911df66ca1cac3682&chksm=fd607953ca17f0453c1fc09a6c006b71489660d48822dd3919083a67c3876151ce794000b52c&scene=21#wechat_redirect" target="_blank" rel="noopener">一些关系数据库的架构总结</a></li>
+<li><a href="http://mp.weixin.qq.com/s?__biz=MzU3OTc2MDQxNg==&mid=2247483758&idx=1&sn=56de42ab64d3b48fe5c9eab5ac18225a&chksm=fd607921ca17f03794b5f78e2f887a74a135bbe7517aa3bbf2bcf80306a53e94ab96a794277b&scene=21#wechat_redirect" target="_blank" rel="noopener">说说数据库事务和开发（下）—— 分布式事务</a></li>
+<li><a href="http://mp.weixin.qq.com/s?__biz=MzU3OTc2MDQxNg==&mid=2247483687&idx=1&sn=94c2296cbe5b1854d140768e7aa4cec5&chksm=fd607968ca17f07efb01a991c207b87702c153af1c257cbd29c1e900a548a2d149a963c70f74&scene=21#wechat_redirect" target="_blank" rel="noopener">如何基于OceanBase构建应用和数据库的异地多活</a></li>
+</ul>
+<blockquote>
+<p>作者：idba</p>
+<p>来源：<a href="https://cloud.tencent.com/developer/article/1448626" target="_blank" rel="noopener">https://cloud.tencent.com/developer/article/1448626</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E5%88%86%E8%A1%A8/" rel="tag"># 分表</a>
+              <a href="/tags/%E5%88%86%E5%BA%93/" rel="tag"># 分库</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/28/%E5%88%86%E5%BA%93%E5%88%86%E8%A1%A8%E6%96%B9%E6%A1%88/" rel="prev" title="分库分表方案">
+      <i class="fa fa-chevron-left"></i> 分库分表方案
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/28/InnoDB-MVCC-%E8%AF%A6%E8%A7%A3/" rel="next" title="InnoDB MVCC 详解">
+      InnoDB MVCC 详解 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#概述"><span class="nav-number">1.</span> <span class="nav-text">概述</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#分布式数据库（中间件）架构"><span class="nav-number">1.1.</span> <span class="nav-text">分布式数据库（中间件）架构</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#运维视角下的DRDS"><span class="nav-number">1.1.1.</span> <span class="nav-text">运维视角下的DRDS</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#业务视角下的DRDS"><span class="nav-number">1.1.2.</span> <span class="nav-text">业务视角下的DRDS</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#分库分表设计"><span class="nav-number">1.2.</span> <span class="nav-text">分库分表设计</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#为什么要拆分？"><span class="nav-number">1.2.1.</span> <span class="nav-text">为什么要拆分？</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#分多少个表合适？"><span class="nav-number">1.2.2.</span> <span class="nav-text">分多少个表合适？</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#分多少个实例合适？"><span class="nav-number">1.2.3.</span> <span class="nav-text">分多少个实例合适？</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#分多少个分库合适？"><span class="nav-number">1.2.4.</span> <span class="nav-text">分多少个分库合适？</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#再看分表数"><span class="nav-number">1.2.5.</span> <span class="nav-text">再看分表数</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#线性扩展能力"><span class="nav-number">1.3.</span> <span class="nav-text">线性扩展能力</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#拆分键的影响"><span class="nav-number">1.3.1.</span> <span class="nav-text">拆分键的影响</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#拆分键IN查询业务的线性扩展能力分析"><span class="nav-number">1.3.2.</span> <span class="nav-text">拆分键IN查询业务的线性扩展能力分析</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#分布式Join"><span class="nav-number">1.3.3.</span> <span class="nav-text">分布式Join</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#总结"><span class="nav-number">1.4.</span> <span class="nav-text">总结</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#参考"><span class="nav-number">1.5.</span> <span class="nav-text">参考</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#推荐阅读"><span class="nav-number">1.6.</span> <span class="nav-text">推荐阅读</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">469</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">82</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">108</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

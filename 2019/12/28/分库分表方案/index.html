@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="一、数据库瓶颈不管是IO瓶颈，还是CPU瓶颈，最终都会导致数据库的活跃连接数增加，进而逼近甚至达到数据库可承载活跃连接数的阈值。在业务Service来看就是，可用数据库连接少甚至无连接可用。接下来就可以想象了吧（并发量、吞吐量、崩溃）。">
+<meta name="keywords" content="分表,分库">
+<meta property="og:type" content="article">
+<meta property="og:title" content="分库分表方案">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2019&#x2F;12&#x2F;28&#x2F;%E5%88%86%E5%BA%93%E5%88%86%E8%A1%A8%E6%96%B9%E6%A1%88&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="一、数据库瓶颈不管是IO瓶颈，还是CPU瓶颈，最终都会导致数据库的活跃连接数增加，进而逼近甚至达到数据库可承载活跃连接数的阈值。在业务Service来看就是，可用数据库连接少甚至无连接可用。接下来就可以想象了吧（并发量、吞吐量、崩溃）。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016164646-d3c9b.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016164647-e627b.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016164647-a304e.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016164647-d9e01.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016164648-a4a86.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016164648-1dd5b.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016164648-5e18c.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016164649-45b7d.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016164649-859e7.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016164649-a08a7.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016164650-77e65.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016164650-79861.png">
+<meta property="og:updated_time" content="2019-12-28T12:09:18.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191016164646-d3c9b.png">
+
+<link rel="canonical" href="http://congsheng.wang/2019/12/28/%E5%88%86%E5%BA%93%E5%88%86%E8%A1%A8%E6%96%B9%E6%A1%88/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>分库分表方案 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">108</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">82</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">469</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2019/12/28/%E5%88%86%E5%BA%93%E5%88%86%E8%A1%A8%E6%96%B9%E6%A1%88/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          分库分表方案
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-28 20:09:18" itemprop="dateCreated datePublished" datetime="2019-12-28T20:09:18+08:00">2019-12-28</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h3 id="一、数据库瓶颈"><a href="#一、数据库瓶颈" class="headerlink" title="一、数据库瓶颈"></a><strong>一、数据库瓶颈</strong></h3><p>不管是IO瓶颈，还是CPU瓶颈，最终都会导致数据库的活跃连接数增加，进而逼近甚至达到数据库可承载活跃连接数的阈值。<br>在业务Service来看就是，可用数据库连接少甚至无连接可用。接下来就可以想象了吧（并发量、吞吐量、崩溃）。</p>
+<a id="more"></a>
+
+<h4 id="1、IO瓶颈"><a href="#1、IO瓶颈" class="headerlink" title="1、IO瓶颈"></a><strong>1、IO瓶颈</strong></h4><p>第一种：磁盘读IO瓶颈，热点数据太多，数据库缓存放不下，每次查询时会产生大量的IO，降低查询速度 -&gt; <strong>分库和垂直分表</strong>。<br>第二种：网络IO瓶颈，请求的数据太多，网络带宽不够 -&gt; <strong>分库</strong>。</p>
+<h4 id="2、CPU瓶颈"><a href="#2、CPU瓶颈" class="headerlink" title="2、CPU瓶颈"></a><strong>2、CPU瓶颈</strong></h4><p>第一种：SQL问题，如SQL中包含join，group by，order by，非索引字段条件查询等，增加CPU运算的操作 -&gt; SQL优化，建立合适的索引，在业务Service层进行业务计算。<br>第二种：单表数据量太大，查询时扫描的行太多，SQL效率低，CPU率先出现瓶颈 -&gt; <strong>水平分表</strong>。</p>
+<h3 id="二、分库分表"><a href="#二、分库分表" class="headerlink" title="二、分库分表"></a><strong>二、分库分表</strong></h3><h4 id="1、水平分库"><a href="#1、水平分库" class="headerlink" title="1、水平分库"></a><strong>1、水平分库</strong></h4><p><img src="http://image.winrains.cn/2019/10/20191016164646-d3c9b.png" alt="img"></p>
+<p>1.概念：以<strong>字段</strong>为依据，按照一定策略（hash、range等），将一个<strong>库</strong>中的数据拆分到多个<strong>库</strong>中。<br>2.结果：</p>
+<ul>
+<li>每个<strong>库</strong>的<strong>结构</strong>都一样;</li>
+<li>每个<strong>库</strong>的<strong>数据</strong>都不一样，没有交集;</li>
+<li>所有<strong>库</strong>的<strong>并集</strong>是全量数据;</li>
+</ul>
+<p>3.场景：系统绝对并发量上来了，分表难以根本上解决问题，并且还没有明显的业务归属来垂直分库。<br>4.分析：库多了，io和cpu的压力自然可以成倍缓解。</p>
+<h4 id="2、水平分表"><a href="#2、水平分表" class="headerlink" title="2、水平分表"></a><strong>2、水平分表</strong></h4><p><img src="http://image.winrains.cn/2019/10/20191016164647-e627b.png" alt="img"></p>
+<p>1.概念：以<strong>字段</strong>为依据，按照一定策略（hash、range等），将一个<strong>表</strong>中的数据拆分到多个<strong>表</strong>中。<br>2.结果：</p>
+<ul>
+<li>每个<strong>表</strong>的<strong>结构</strong>都一样</li>
+<li>每个<strong>表</strong>的<strong>数据</strong>都不一样，没有交集;</li>
+<li>所有<strong>表</strong>的<strong>并集</strong>是全量数据;</li>
+</ul>
+<p>3.场景：系统绝对并发量并没有上来，只是单表的数据量太多，影响了SQL效率，加重了CPU负担，以至于成为瓶颈。推荐阅读：<a href="http://mp.weixin.qq.com/s?__biz=MzI3ODcxMzQzMw==&mid=2247489868&idx=2&sn=964b1250ad4eba7191d6317d0cd5aed1&chksm=eb539c7adc24156c07911ec06ad8bcfe04b29741c54491a921c0227c0697f2fe6abec3e8d104&scene=21#wechat_redirect" target="_blank" rel="noopener">MySQL全面优化，速度飞起来</a>。<br>4.分析：表的数据量少了，单次SQL执行效率高，自然减轻了CPU的负担。</p>
+<h4 id="3、垂直分库"><a href="#3、垂直分库" class="headerlink" title="3、垂直分库"></a><strong>3、垂直分库</strong></h4><p><img src="http://image.winrains.cn/2019/10/20191016164647-a304e.png" alt="img"></p>
+<p>1.概念：以<strong>表</strong>为依据，按照业务归属不同，将不同的<strong>表</strong>拆分到不同的<strong>库</strong>中。<br>2.结果：</p>
+<ul>
+<li>每个<strong>库</strong>的<strong>结构</strong>都不一样；</li>
+<li>每个<strong>库</strong>的<strong>数据</strong>也不一样，没有交集；</li>
+<li>所有<strong>库</strong>的<strong>并集</strong>是全量数据；</li>
+</ul>
+<p>3.场景：系统绝对并发量上来了，并且可以抽象出单独的业务模块。4.分析：到这一步，基本上就可以服务化了。<br>例如，随着业务的发展一些公用的配置表、字典表等越来越多，这时可以将这些表拆到单独的库中，甚至可以服务化。再有，随着业务的发展孵化出了一套业务模式，这时可以将相关的表拆到单独的库中，甚至可以服务化。</p>
+<h4 id="4、垂直分表"><a href="#4、垂直分表" class="headerlink" title="4、垂直分表"></a><strong>4、垂直分表</strong></h4><p><img src="http://image.winrains.cn/2019/10/20191016164647-d9e01.png" alt="img"></p>
+<p>1.概念：以<strong>字段</strong>为依据，按照字段的活跃性，将<strong>表</strong>中字段拆到不同的<strong>表</strong>（主表和扩展表）中。<br>2.结果：</p>
+<ul>
+<li>每个<strong>表</strong>的<strong>结构</strong>都不一样；</li>
+<li>每个<strong>表</strong>的<strong>数据</strong>也不一样，一般来说，每个表的<strong>字段</strong>至少有一列交集，一般是主键，用于关联数据；</li>
+<li>所有<strong>表</strong>的<strong>并集</strong>是全量数据；</li>
+</ul>
+<p>3.场景：系统绝对并发量并没有上来，表的记录并不多，但是字段多，并且热点数据和非热点数据在一起，单行数据所需的存储空间较大。以至于数据库缓存的数据行减少，查询时会去读磁盘数据产生大量的随机读IO，产生IO瓶颈。<br>4.分析：可以用列表页和详情页来帮助理解。垂直分表的拆分原则是将热点数据（可能会冗余经常一起查询的数据）放在一起作为主表，非热点数据放在一起作为扩展表。<br>这样更多的热点数据就能被缓存下来，进而减少了随机读IO。拆了之后，要想获得全部数据就需要关联两个表来取数据。但记住，千万别用join，因为join不仅会增加CPU负担并且会讲两个表耦合在一起（必须在一个数据库实例上）。关联数据，应该在业务Service层做文章，分别获取主表和扩展表数据然后用关联字段关联得到全部数据。</p>
+<h3 id="三、分库分表工具"><a href="#三、分库分表工具" class="headerlink" title="三、分库分表工具"></a><strong>三、分库分表工具</strong></h3><ol>
+<li>sharding-sphere：jar，前身是sharding-jdbc；</li>
+<li>TDDL：jar，Taobao Distribute Data Layer；</li>
+<li>Mycat：中间件。</li>
+</ol>
+<p>注：工具的利弊，请自行调研，官网和社区优先。</p>
+<h3 id="四、分库分表步骤"><a href="#四、分库分表步骤" class="headerlink" title="四、分库分表步骤"></a><strong>四、分库分表步骤</strong></h3><p>根据容量（当前容量和增长量）评估分库或分表个数 -&gt; 选key（均匀）-&gt; 分表规则（hash或range等）-&gt; 执行（一般双写）-&gt; 扩容问题（尽量减少数据的移动）。</p>
+<h3 id="五、分库分表问题"><a href="#五、分库分表问题" class="headerlink" title="五、分库分表问题"></a><strong>五、分库分表问题</strong></h3><h4 id="1、非partition-key的查询问题（水平分库分表，拆分策略为常用的hash法）"><a href="#1、非partition-key的查询问题（水平分库分表，拆分策略为常用的hash法）" class="headerlink" title="1、非partition key的查询问题（水平分库分表，拆分策略为常用的hash法）"></a>1、非partition key的查询问题（水平分库分表，拆分策略为常用的hash法）</h4><ol>
+<li><strong>端上</strong>除了<code>partition key</code>只有一个非<code>partition key</code>作为条件查询</li>
+</ol>
+<ul>
+<li><strong>映射法</strong></li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/10/20191016164648-a4a86.png" alt="img"></p>
+<ul>
+<li><strong>基因法</strong></li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/10/20191016164648-1dd5b.png" alt="img"></p>
+<p>注：写入时，基因法生成<code>userid</code>，如图。关于<code>xbit</code>基因，例如要分8张表，23=8，故<code>x</code>取3，即3bit基因。根据<code>userid</code>查询时可直接取模路由到对应的分库或分表。<a href="http://mp.weixin.qq.com/s?__biz=MzI3ODcxMzQzMw==&mid=2247489346&idx=2&sn=f4da29f53207a442079a6ef692382211&chksm=eb539274dc241b627d12284a5e3cc53622b0a3bbc9d543460b8b91c904ef1f9561dded6a7b2e&scene=21#wechat_redirect" target="_blank" rel="noopener">数据库怎么分库分表，垂直？水平？</a>这篇也可以看下。<br>根据<code>username</code>查询时，先通过<code>usernamecode</code>生成函数生成<code>username_code</code>再对其取模路由到对应的分库或分表。<code>id</code>生成常用<strong>snowflake算法</strong>。</p>
+<ol>
+<li><strong>端上</strong>除了<code>partition key</code>不止一个非<code>partition key</code>作为条件查询</li>
+</ol>
+<ul>
+<li><strong>映射法</strong></li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/10/20191016164648-5e18c.png" alt="img"></p>
+<ul>
+<li><strong>冗余法</strong></li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/10/20191016164649-45b7d.jpeg" alt="img"></p>
+<p>注：按照<code>orderid</code>或<code>buyerid</code>查询时路由到<code>dbobuyer</code>库中，按照sellerid查询时路由到dbo_seller库中。感觉有点本末倒置！有其他好的办法吗？改变技术栈呢？</p>
+<ol>
+<li><strong>后台</strong>除了<code>partition key</code>还有各种非<code>partition key</code>组合条件查询</li>
+</ol>
+<ul>
+<li>NoSQL法</li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/10/20191016164649-859e7.png" alt="img"></p>
+<ul>
+<li>冗余法</li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/10/20191016164649-a08a7.png" alt="img"></p>
+<h4 id="2、非partition-key跨库跨表分页查询问题（水平分库分表，拆分策略为常用的hash法）"><a href="#2、非partition-key跨库跨表分页查询问题（水平分库分表，拆分策略为常用的hash法）" class="headerlink" title="2、非partition key跨库跨表分页查询问题（水平分库分表，拆分策略为常用的hash法）"></a>2、非partition key跨库跨表分页查询问题（水平分库分表，拆分策略为常用的hash法）</h4><p>注：用<strong>NoSQL法</strong>解决（ES等）。</p>
+<h4 id="3、扩容问题（水平分库分表，拆分策略为常用的hash法）"><a href="#3、扩容问题（水平分库分表，拆分策略为常用的hash法）" class="headerlink" title="3、扩容问题（水平分库分表，拆分策略为常用的hash法）"></a>3、扩容问题（水平分库分表，拆分策略为常用的hash法）</h4><p>1.水平扩容库（升级从库法）</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016164650-77e65.jpeg" alt="img"></p>
+<p>注：扩容是成倍的。<br>2.水平扩容表（双写迁移法）</p>
+<p><img src="http://image.winrains.cn/2019/10/20191016164650-79861.png" alt="img"></p>
+<p>第一步：（同步双写）应用配置双写，部署；第二步：（同步双写）将老库中的老数据复制到新库中；第三步：（同步双写）以老库为准校对新库中的老数据；第四步：（同步双写）应用去掉双写，部署；<br>注：<strong>双写</strong>是通用方案。</p>
+<h3 id="六、分库分表总结"><a href="#六、分库分表总结" class="headerlink" title="六、分库分表总结"></a><strong>六、分库分表总结</strong></h3><ol>
+<li>分库分表，首先得知道瓶颈在哪里，然后才能合理地拆分（分库还是分表？水平还是垂直？分几个？）。且不可为了分库分表而拆分。</li>
+<li>选<code>key</code>很重要，既要考虑到拆分均匀，也要考虑到非<code>partition key</code>的查询。</li>
+<li>只要能满足需求，拆分规则越简单越好。</li>
+</ol>
+<h3 id="七、分库分表示例"><a href="#七、分库分表示例" class="headerlink" title="七、分库分表示例"></a><strong>七、分库分表示例</strong></h3><p>示例GitHub址:<br><a href="https://github.com/LiHaodong888/SpringBootLear" target="_blank" rel="noopener">https://github.com/LiHaodong888/SpringBootLear</a></p>
+<blockquote>
+<p>作者：Java技术栈</p>
+<p>来源：<a href="https://cloud.tencent.com/developer/article/1498150" target="_blank" rel="noopener">https://cloud.tencent.com/developer/article/1498150</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E5%88%86%E8%A1%A8/" rel="tag"># 分表</a>
+              <a href="/tags/%E5%88%86%E5%BA%93/" rel="tag"># 分库</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/28/Spring-IoC%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%E4%B9%8BBean%E7%9A%84%E5%8A%A0%E8%BD%BD%EF%BC%888%EF%BC%89%EF%BC%9A%E5%88%9D%E5%A7%8B%E5%8C%96/" rel="prev" title="Spring IoC源码分析之Bean的加载（8）：初始化">
+      <i class="fa fa-chevron-left"></i> Spring IoC源码分析之Bean的加载（8）：初始化
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/28/%E5%88%86%E5%BA%93%E5%88%86%E8%A1%A8%E6%9C%80%E4%BD%B3%E5%AE%9E%E8%B7%B5/" rel="next" title="分库分表最佳实践">
+      分库分表最佳实践 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-3"><a class="nav-link" href="#一、数据库瓶颈"><span class="nav-number">1.</span> <span class="nav-text">一、数据库瓶颈</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#1、IO瓶颈"><span class="nav-number">1.1.</span> <span class="nav-text">1、IO瓶颈</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#2、CPU瓶颈"><span class="nav-number">1.2.</span> <span class="nav-text">2、CPU瓶颈</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#二、分库分表"><span class="nav-number">2.</span> <span class="nav-text">二、分库分表</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#1、水平分库"><span class="nav-number">2.1.</span> <span class="nav-text">1、水平分库</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#2、水平分表"><span class="nav-number">2.2.</span> <span class="nav-text">2、水平分表</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#3、垂直分库"><span class="nav-number">2.3.</span> <span class="nav-text">3、垂直分库</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#4、垂直分表"><span class="nav-number">2.4.</span> <span class="nav-text">4、垂直分表</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#三、分库分表工具"><span class="nav-number">3.</span> <span class="nav-text">三、分库分表工具</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#四、分库分表步骤"><span class="nav-number">4.</span> <span class="nav-text">四、分库分表步骤</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#五、分库分表问题"><span class="nav-number">5.</span> <span class="nav-text">五、分库分表问题</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#1、非partition-key的查询问题（水平分库分表，拆分策略为常用的hash法）"><span class="nav-number">5.1.</span> <span class="nav-text">1、非partition key的查询问题（水平分库分表，拆分策略为常用的hash法）</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#2、非partition-key跨库跨表分页查询问题（水平分库分表，拆分策略为常用的hash法）"><span class="nav-number">5.2.</span> <span class="nav-text">2、非partition key跨库跨表分页查询问题（水平分库分表，拆分策略为常用的hash法）</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#3、扩容问题（水平分库分表，拆分策略为常用的hash法）"><span class="nav-number">5.3.</span> <span class="nav-text">3、扩容问题（水平分库分表，拆分策略为常用的hash法）</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#六、分库分表总结"><span class="nav-number">6.</span> <span class="nav-text">六、分库分表总结</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#七、分库分表示例"><span class="nav-number">7.</span> <span class="nav-text">七、分库分表示例</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">469</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">82</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">108</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="关于 Java 并发也算是写了好几篇文章了，本文将介绍一些比较基础的内容，注意，阅读本文需要一定的并发基础。本文的主要目的是让大家对于并发程序中的重排序、内存可见性以及原子性有一定的了解，同时要能准确理解 synchronized、volatile、final 几个关键字的作用。另外，本文还对双重检查形式的单例模式为什么需要使用 volatile 做了深入的解释。">
+<meta name="keywords" content="并发">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Java 并发基础之内存模型">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2019&#x2F;12&#x2F;28&#x2F;Java-%E5%B9%B6%E5%8F%91%E5%9F%BA%E7%A1%80%E4%B9%8B%E5%86%85%E5%AD%98%E6%A8%A1%E5%9E%8B&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="关于 Java 并发也算是写了好几篇文章了，本文将介绍一些比较基础的内容，注意，阅读本文需要一定的并发基础。本文的主要目的是让大家对于并发程序中的重排序、内存可见性以及原子性有一定的了解，同时要能准确理解 synchronized、volatile、final 几个关键字的作用。另外，本文还对双重检查形式的单例模式为什么需要使用 volatile 做了深入的解释。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:updated_time" content="2019-12-28T07:05:01.000Z">
+<meta name="twitter:card" content="summary">
+
+<link rel="canonical" href="http://congsheng.wang/2019/12/28/Java-%E5%B9%B6%E5%8F%91%E5%9F%BA%E7%A1%80%E4%B9%8B%E5%86%85%E5%AD%98%E6%A8%A1%E5%9E%8B/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Java 并发基础之内存模型 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">108</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">82</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">469</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2019/12/28/Java-%E5%B9%B6%E5%8F%91%E5%9F%BA%E7%A1%80%E4%B9%8B%E5%86%85%E5%AD%98%E6%A8%A1%E5%9E%8B/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Java 并发基础之内存模型
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-28 15:05:01" itemprop="dateCreated datePublished" datetime="2019-12-28T15:05:01+08:00">2019-12-28</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/" itemprop="url" rel="index">
+                    <span itemprop="name">JVM</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/%E5%86%85%E5%AD%98%E6%A8%A1%E5%9E%8B/" itemprop="url" rel="index">
+                    <span itemprop="name">内存模型</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>关于 Java 并发也算是写了好几篇文章了，本文将介绍一些比较基础的内容，注意，阅读本文需要一定的并发基础。<br>本文的主要目的是让大家对于并发程序中的重排序、内存可见性以及原子性有一定的了解，同时要能准确理解 <code>synchronized</code>、<code>volatile</code>、<code>final</code> 几个关键字的作用。<br>另外，本文还对<strong>双重检查形式的单例模式为什么需要使用 <code>volatile</code></strong> 做了深入的解释。</p>
+<a id="more"></a>
+
+<h2 id="并发三问题"><a href="#并发三问题" class="headerlink" title="并发三问题"></a>并发三问题</h2><p>这节将介绍重排序、内存可见性以及原子性相关的知识，这些也是并发程序为什么难写的原因。</p>
+<h3 id="1-重排序"><a href="#1-重排序" class="headerlink" title="1. 重排序"></a>1. 重排序</h3><p>请读者先在自己的电脑上运行一下以下程序：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">class</span> <span class="symbol">Test</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> static <span class="built_in">int</span> x = <span class="number">0</span>, y = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> static <span class="built_in">int</span> a = <span class="number">0</span>, b =<span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> static <span class="built_in">void</span> main(String[] args) throws InterruptedException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">int</span> i = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">for</span>(;;) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            i++;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">            x = <span class="number">0</span>; y = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">            a = <span class="number">0</span>; b = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            CountDownLatch latch = new CountDownLatch(<span class="number">1</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">            Thread one = new Thread(() -&gt; &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">                    latch.await();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">                &#125; <span class="keyword">catch</span> (InterruptedException e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">                a = <span class="number">1</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">                x = b;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">            &#125;);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">            Thread other = new Thread(() -&gt; &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">                    latch.await();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">                &#125; <span class="keyword">catch</span> (InterruptedException e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">                b = <span class="number">1</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">                y = a;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">            &#125;);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">            one.start();other.start();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">            latch.countDown();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">            one.join();other.join();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">            String result = <span class="string">"第"</span> + i + <span class="string">"次 ("</span> + x + <span class="string">","</span> + y + <span class="string">"）"</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span>(x == <span class="number">0</span> &amp;&amp; y == <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">                System.err.println(result);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">break</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">            &#125; <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">                System.<span class="keyword">out</span>.println(result);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>几秒后，我们就可以得到<code>x == 0 &amp;&amp; y == 0</code> 这个结果，仔细看看代码就会知道，如果不发生重排序的话，这个结果是不可能出现的。<br><strong>重排序由以下几种机制引起：</strong></p>
+<ol>
+<li><p>编译器优化：对于没有数据依赖关系的操作，编译器在编译的过程中会进行一定程度的重排。</p>
+<blockquote>
+<p>大家仔细看看线程 1 中的代码，编译器是可以将 <code>a = 1</code> 和<code>x = b</code> 换一下顺序的，因为它们之间没有数据依赖关系，同理，线程 2 也一样，那就不难得到<code>x == y == 0</code> 这种结果了。</p>
+</blockquote>
+</li>
+<li><p>指令重排序：CPU 优化行为，也是会对不存在数据依赖关系的指令进行一定程度的重排。</p>
+<blockquote>
+<p>这个和编译器优化差不多，就算编译器不发生重排，CPU 也可以对指令进行重排，这个就不用多说了。</p>
+</blockquote>
+</li>
+<li><p>内存系统重排序：内存系统没有重排序，但是由于有缓存的存在，使得程序整体上会表现出乱序的行为。</p>
+<blockquote>
+<p>假设不发生编译器重排和指令重排，线程 1 修改了 a 的值，但是修改以后，a 的值可能还没有写回到主存中，那么线程 2 得到 <code>a == 0</code> 就是很自然的事了。同理，线程 2 对于 b 的赋值操作也可能没有及时刷新到主存中。</p>
+</blockquote>
+</li>
+</ol>
+<h3 id="2-内存可见性"><a href="#2-内存可见性" class="headerlink" title="2. 内存可见性"></a>2. 内存可见性</h3><p>前面在说重排序的时候，也说到了内存可见性的问题，这里再啰嗦一下。<br>线程间的对于共享变量的可见性问题不是直接由多核引起的，而是由多缓存引起的。如果每个核心共享同一个缓存，那么也就不存在内存可见性问题了。<br>现代多核 CPU 中每个核心拥有自己的一级缓存或一级缓存加上二级缓存等，问题就发生在每个核心的独占缓存上。每个核心都会将自己需要的数据读到独占缓存中，数据修改后也是写入到缓存中，然后等待刷入到主存中。所以会导致有些核心读取的值是一个<strong>过期</strong>的值。<br>Java 作为高级语言，屏蔽了这些底层细节，用 JMM 定义了一套读写内存数据的规范，虽然我们不再需要关心一级缓存和二级缓存的问题，但是，JMM 抽象了主内存和本地内存的概念。<br>所有的共享变量存在于主内存中，<strong>每个线程有自己的本地内存</strong>，线程读写共享数据也是通过本地内存交换的，所以可见性问题依然是存在的。这里说的本地内存并不是真的是一块给每个线程分配的内存，而是 JMM 的一个抽象，是对于寄存器、一级缓存、二级缓存等的抽象。</p>
+<h3 id="3-原子性"><a href="#3-原子性" class="headerlink" title="3. 原子性"></a>3. 原子性</h3><p>在本文中，原子性不是重点，它将作为并发编程中需要考虑的一部分进行介绍。<br>说到原子性的时候，大家应该都能想到 long 和 double，它们的值需要占用 64 位的内存空间，Java 编程语言规范中提到，对于 64 位的值的写入，可以分为两个 32 位的操作进行写入。本来一个整体的赋值操作，被拆分为低 32 位赋值和高 32 位赋值两个操作，中间如果发生了其他线程对于这个值的读操作，必然就会读到一个奇怪的值。<br>这个时候我们要使用 volatile 关键字进行控制了，JMM 规定了对于 <code>volatile long</code> 和 <code>volatile double</code>，JVM 需要保证写入操作的原子性。<br>另外，对于引用的读写操作始终是原子的，不管是 32 位的机器还是 64 位的机器。<br>Java 编程语言规范同样提到，鼓励 JVM 的开发者能保证 64 位值操作的原子性，也鼓励使用者尽量使用 volatile 或使用正确的同步方式。关键词是”鼓励“。</p>
+<blockquote>
+<p>在 64 位的 JVM 中，不加 volatile 也是可以的，同样能保证对于 long 和 double 写操作的原子性。关于这一点，我没有找到官方的材料描述它，如果读者有相关的信息，希望可以给我反馈一下。</p>
+</blockquote>
+<h2 id="Java-对于并发的规范约束"><a href="#Java-对于并发的规范约束" class="headerlink" title="Java 对于并发的规范约束"></a>Java 对于并发的规范约束</h2><p>并发问题使得我们的代码有可能会产生各种各样的执行结果，显然这是我们不能接受的，所以 Java 编程语言规范需要规定一些基本规则，JVM 实现者会在这些规则的约束下来实现 JVM，然后开发者也要按照规则来写代码，这样写出来的并发代码我们才能准确预测执行结果。下面进行一些简单的介绍。</p>
+<h3 id="Synchronization-Order"><a href="#Synchronization-Order" class="headerlink" title="Synchronization Order"></a>Synchronization Order</h3><p>Java 语言规范对于同步定义了一系列的规则：<a href="https://docs.oracle.com/javase/specs/jls/se8/html/jls-17.html#jls-17.4.4" target="_blank" rel="noopener">17.4.4. Synchronization Order</a>，包括了如下同步关系：</p>
+<ul>
+<li>对于监视器 <code>m</code> 的解锁与所有后续操作对于 <code>m</code> 的加锁同步</li>
+<li>对 <code>volatile</code> 变量 <code>v</code> 的写入，与所有其他线程后续对 <code>v</code> 的读同步</li>
+<li>启动线程的操作与线程中的第一个操作同步。</li>
+<li>对于每个属性写入默认值（0， false，null）与每个线程对其进行的操作同步。尽管在创建对象完成之前对对象属性写入默认值有点奇怪，但从概念上来说，每个对象都是在程序启动时用默认值初始化来创建的。</li>
+<li>线程 <code>T1</code> 的最后操作与线程 <code>T2</code> 发现线程 <code>T1</code> 已经结束同步。线程 <code>T2</code> 可以通过 <code>T1.isAlive()</code> 或 <code>T1.join()</code> 方法来判断 <code>T1</code> 是否已经终结。</li>
+<li>如果线程 <code>T1</code> 中断了 <code>T2</code>，那么线程 <code>T1</code> 的中断操作与其他所有线程发现 <code>T2</code> 被中断了同步（通过抛出 <code>InterruptedException</code> 异常，或者调用 <code>Thread.interrupted</code> 或<code>Thread.isInterrupted</code> ）</li>
+</ul>
+<h3 id="Happens-before-Order"><a href="#Happens-before-Order" class="headerlink" title="Happens-before Order"></a>Happens-before Order</h3><p>两个操作可以用 happens-before 来确定它们的执行顺序，如果一个操作 happens-before 于另一个操作，那么我们说第一个操作对于第二个操作是可见的。<br>如果我们分别有操作 x 和操作 y，我们写成 <strong>hb(x, y)</strong> 来表示 <strong>x happens-before y</strong>。以下几个规则也是来自于 Java 8 语言规范 <a href="https://docs.oracle.com/javase/specs/jls/se8/html/jls-17.html#jls-17.4.5" target="_blank" rel="noopener">Happens-before Order</a>：</p>
+<ul>
+<li>如果操作 <code>x</code> 和操作<code>y</code> 是同一个线程的两个操作，并且在代码上操作 <code>x</code> 先于操作 <code>y</code> 出现，那么有 <code>hb(x, y)</code></li>
+<li>对象构造方法的最后一行指令 happens-before 于 <code>finalize()</code> 方法的第一行指令。</li>
+<li>如果操作 <code>x</code> 与随后的操作 <code>y</code> 构成同步，那么<code>hb(x, y)</code>。这条说的是前面一小节的内容。</li>
+<li><code>hb(x, y)</code> 和 <code>hb(y, z)</code>，那么可以推断出<code>hb(x, z)</code></li>
+</ul>
+<p>这里再提一点，x happens-before y，并不是说 <code>x</code> 操作一定要在 <code>y</code> 操作之前被执行，而是说 <code>x</code> 的执行结果对于<code>y</code> 是可见的，只要满足可见性，发生了重排序也是可以的。</p>
+<h2 id="synchronized-关键字"><a href="#synchronized-关键字" class="headerlink" title="synchronized 关键字"></a>synchronized 关键字</h2><blockquote>
+<p><code>monitor</code>，这里翻译成监视器锁，为了大家理解方便。</p>
+</blockquote>
+<p><code>synchronized</code> 这个关键字大家都用得很多了，这里不会教你怎么使用它，我们来看看它对于内存可见性的影响。<br>一个线程在获取到监视器锁以后才能进入 <code>synchronized</code> 控制的代码块，一旦进入代码块，首先，该线程对于共享变量的缓存就会失效，因此 <code>synchronized</code> 代码块中对于共享变量的读取需要从主内存中重新获取，也就能获取到最新的值。<br>退出代码块的时候的，会将该线程写缓冲区中的数据刷到主内存中，所以在 <code>synchronized</code> 代码块之前或 <code>synchronized</code> 代码块中对于共享变量的操作随着该线程退出 <code>synchronized</code> 块，会立即对其他线程可见（这句话的前提是其他读取共享变量的线程会从主内存读取最新值）。<br>因此，我们可以总结一下：线程 <code>a</code> 对于进入 <code>synchronized</code> 块之前或在 <code>synchronized</code> 中对于共享变量的操作，对于后续的持有同一个监视器锁的线程<code>b</code> 可见。虽然是挺简单的一句话，请读者好好体会。<br>注意一点，在进入 <code>synchronized</code> 的时候，并不会保证之前的写操作刷入到主内存中，<code>synchronized</code> 主要是保证退出的时候能将本地内存的数据刷入到主内存。</p>
+<h2 id="单例模式中的双重检查"><a href="#单例模式中的双重检查" class="headerlink" title="单例模式中的双重检查"></a>单例模式中的双重检查</h2><p>我们趁热打铁，为大家解决下单例模式中的双重检查问题。关于这个问题，大神们发过<a href="http://www.cs.umd.edu/~pugh/java/memoryModel/DoubleCheckedLocking.html" target="_blank" rel="noopener">文章</a>对此进行阐述了，这里搬运一下。</p>
+<blockquote>
+<p>来膜拜下文章署名中的大神们：<a href="http://www.research.ibm.com/people/d/dfb" target="_blank" rel="noopener">David Bacon</a> (IBM Research) Joshua Bloch (Javasoft), <a href="http://www.cs.ucsb.edu/~bogda/" target="_blank" rel="noopener">Jeff Bogda</a>, Cliff Click (Hotspot JVM project), <a href="http://www.webcom.com/~haahr/" target="_blank" rel="noopener">Paul Haahr</a>, <a href="http://www.cs.oswego.edu/~dl" target="_blank" rel="noopener">Doug Lea</a>, <a href="mailto:tom@go2net.com" target="_blank" rel="noopener">Tom May</a>, <a href="http://www.csg.lcs.mit.edu/~earwig/" target="_blank" rel="noopener">Jan-Willem Maessen</a>, <a href="http://www.cs.umd.edu/~jmanson" target="_blank" rel="noopener">Jeremy Manson</a>, <a href="http://www.jguru.com/johnm" target="_blank" rel="noopener">John D. Mitchell (jGuru)</a> Kelvin Nilsen, <a href="http://www.cs.umd.edu/~pugh" target="_blank" rel="noopener">Bill Pugh</a>, <a href="http://www.cs.washington.edu/homes/egs/" target="_blank" rel="noopener">Emin Gun Sirer</a>，至少 Joshua Bloch 和 Doug Lea 大家都不陌生吧。</p>
+</blockquote>
+<p>废话少说，看以下单例模式的写法：</p>
+<figure class="highlight smali"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public class Singleton &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">   <span class="keyword"> private</span><span class="keyword"> static</span> Singleton<span class="built_in"> instance </span>= null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">   <span class="keyword"> private</span><span class="built_in"> int </span>v;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">   <span class="keyword"> private</span> Singleton() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        this.v = 3;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">   <span class="keyword"> public</span><span class="keyword"> static</span> Singleton getInstance() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">       <span class="built_in"> if </span>(instance == null) &#123; // 1. 第一次检查</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">            synchronized (Singleton.class) &#123; // 2</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">               <span class="built_in"> if </span>(instance == null) &#123; // 3. 第二次检查</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">                   <span class="built_in"> instance </span>=<span class="built_in"> new </span>Singleton(); // 4</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">       <span class="built_in"> return </span>instance;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>很多人都知道上述的写法是不对的，但是可能会说不清楚到底为什么不对。<br>我们假设有两个线程 <code>a</code> 和 <code>b</code> 调用 <code>getInstance()</code> 方法，假设 <code>a</code> 先走，一路走到 4 这一步，执行 <code>instance = new Singleton()</code> 这句代码。<br><code>instance = new Singleton()</code> 这句代码首先会申请一段空间，然后将各个属性初始化为零值(0/null)，执行构造方法中的属性赋值[1]，将这个对象的引用赋值给 <code>instance[2]</code>。在这个过程中，[1] 和 [2] 可能会发生重排序。<br>此时，线程 <code>b</code> 刚刚进来执行到 1（看上面的代码块），就有可能会看到 <code>instance</code> 不为 null，然后线程 <code>b</code> 也就不会等待监视器锁，而是直接返回 <code>instance</code>。问题是这个 <code>instance</code> 可能还没执行完构造方法（线程 <code>a</code> 此时还在 4 这一步），所以线程 <code>b</code> 拿到的 <code>instance</code> 是<strong>不完整的</strong>，它里面的属性值可能是初始化的零值(0/false/null)，而不是线程 <code>a</code> 在构造方法中指定的值。</p>
+<blockquote>
+<p>回顾下前面的知识，分析下这里为什么会有这个问题。<br>1、编译器可以将构造方法内联过来，之后再发生重排序就很容易理解了。<br>2、即使不发生代码重排序，线程 <code>a</code> 对于属性的赋值写入到了线程 <code>a</code> 的本地内存中，此时对于线程 <code>b</code> 不可见。</p>
+</blockquote>
+<p>最后提一点，如果线程 <code>a</code> 从 <code>synchronized</code> 块出来了，那么 <code>instance</code> 一定是正确构造的<strong>完整</strong>实例，这是我们前面说过的 <code>synchronized</code> 的内存可见性保证。<br>—————分割线—————<br>对于大部分读者来说，这一小节其实可以结束了，很多读者都知道，解决方案是使用 <code>volatile</code> 关键字，这个我们在介绍 <code>volatile</code> 的时候再说。当然，如果你还有耐心，也可以继续看看本小节。<br>我们看下下面这段代码，看看它能不能解决我们之前碰到的问题。</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">static</span> Singleton <span class="title">getInstance</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (instance == <span class="keyword">null</span>) &#123; <span class="comment">//</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        Singleton temp;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">synchronized</span> (Singleton<span class="class">.<span class="keyword">class</span>) </span>&#123; <span class="comment">//</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">            temp = instance;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (temp == <span class="keyword">null</span>) &#123; <span class="comment">//</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">synchronized</span> (Singleton<span class="class">.<span class="keyword">class</span>) </span>&#123; <span class="comment">// 内嵌一个 synchronized 块</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">                    temp = <span class="keyword">new</span> Singleton();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">                instance = temp; <span class="comment">//</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> instance;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>上面这个代码很有趣，想利用 <code>synchronized</code> 的内存可见性语义，不过这个解决方案还是失败了，我们分析下。<br>前面我们也说了，<strong><code>synchronized</code> 在退出的时候，能保证 <code>synchronized</code> 块中对于共享变量的写入一定会刷入到主内存中</strong>。也就是说，上述代码中，内嵌的 <code>synchronized</code> 结束的时候，<code>temp</code>一定是完整构造出来的，然后再赋给 <code>instance</code> 的值一定是好的。<br>可是，<code>synchronized</code> 保证了释放监视器锁之前的代码一定会在释放锁之前被执行（如 <code>temp</code> 的初始化一定会在释放锁之前执行完 ），但是没有任何规则规定了，释放锁之后的代码不可以在释放锁之前先执行。<br>也就是说，代码中释放锁之后的行为 <code>instance = temp</code> 完全可以被提前到前面的 <code>synchronized</code> 代码块中执行，那么前面说的重排序问题就又出现了。<br>最后扯一点，如果所有的属性都是使用 <code>final</code> 修饰的，其实之前介绍的双重检查是可行的，不需要加 <code>volatile</code>，这个等到 <code>final</code> 那节再介绍。</p>
+<h2 id="volatile-关键字"><a href="#volatile-关键字" class="headerlink" title="volatile 关键字"></a>volatile 关键字</h2><p>大部分开发者应该都知道怎么使用这个关键字，只是可能不太了解个中缘由。<br><strong>如果你下次面试的时候有人问你 <code>volatile</code> 的作用，记住两点：内存可见性和禁止指令重排序。</strong></p>
+<h3 id="volatile-的内存可见性"><a href="#volatile-的内存可见性" class="headerlink" title="volatile 的内存可见性"></a><code>volatile</code> 的内存可见性</h3><p>我们还是用 JMM 的<strong>主内存</strong>和<strong>本地内存</strong>抽象来描述，这样比较准确。还有，并不是只有 Java 语言才有 <code>volatile</code> 关键字，所以后面的描述一定要建立在 Java 跨平台以后抽象出了内存模型的这个大环境下。<br>还记得 <code>synchronized</code> 的语义吗？进入 <code>synchronized</code> 时，使得本地缓存失效，<code>synchronized</code> 块中对共享变量的读取必须从主内存读取；退出 <code>synchronized</code> 时，会将进入 <code>synchronized</code> 块之前和 <code>synchronized</code> 块中的写操作刷入到主存中。<br><code>volatile</code> 有类似的语义，读一个 <code>volatile</code> 变量之前，需要先使相应的本地缓存失效，这样就必须到主内存读取最新值，写一个 <code>volatile</code> 属性会立即刷入到主内存。所以，<code>volatile</code> 读和 <code>monitorenter</code> 有相同的语义，<code>volatile</code> 写和 <code>monitorexit</code> 有相同的语义。</p>
+<h3 id="volatile-的禁止重排序"><a href="#volatile-的禁止重排序" class="headerlink" title="volatile 的禁止重排序"></a>volatile 的禁止重排序</h3><p>大家还记得之前的双重检查的单例模式吧，前面提到，加个 <code>volatile</code> 能解决问题。其实就是利用了 <code>volatile</code> 的禁止重排序功能。<br><code>volatile</code> 的禁止重排序并不局限于两个 <code>volatile</code> 的属性操作不能重排序，而且是 <code>volatile</code> 属性操作和它周围的普通属性的操作也不能重排序。<br>之前<code>instance = new Singleton()</code> 中，如果 <code>instance</code> 是 <code>volatile</code> 的，那么对于 <code>instance</code> 的赋值操作（赋一个引用给 <code>instance</code> 变量）就不会和构造函数中的属性赋值发生重排序，能保证构造方法结束后，才将此对象引用赋值给 <code>instance</code>。<br>根据 <code>volatile</code> 的内存可见性和禁止重排序，那么我们不难得出一个推论：线程 <code>a</code> 如果写入一个 <code>volatile</code> 变量，此时线程 <code>b</code> 再读取这个变量，那么此时对于线程 <code>a</code> 可见的所有属性对于线程 <code>b</code> 都是可见的。</p>
+<h3 id="volatile-小结"><a href="#volatile-小结" class="headerlink" title="volatile 小结"></a>volatile 小结</h3><ol>
+<li><code>volatile</code> 修饰符适用于以下场景：某个属性被多个线程共享，其中有一个线程修改了此属性，其他线程可以立即得到修改后的值。在并发包的源码中，它使用得非常多。</li>
+<li><code>volatile</code> 属性的读写操作都是无锁的，它不能替代 <code>synchronized</code>，因为<strong>它没有提供原子性和互斥性</strong>。因为无锁，不需要花费时间在获取锁和释放锁上，所以说它是低成本的。</li>
+<li><code>volatile</code> 只能作用于属性，我们用 <code>volatile</code> 修饰属性，这样 compilers 就不会对这个属性做指令重排序。</li>
+<li><code>volatile</code> 提供了可见性，任何一个线程对其的修改将立马对其他线程可见。<code>volatile</code> 属性不会被线程缓存，始终从主存中读取。</li>
+<li><code>volatile</code> 提供了 happens-before 保证，对 <code>volatile</code> 变量 <code>v</code> 的写入 happens-before 所有其他线程后续对 <code>v</code> 的读操作。</li>
+<li><code>volatile</code> 可以使得 long 和 double 的赋值是原子的，前面在说原子性的时候提到过。</li>
+</ol>
+<h2 id="final-关键字"><a href="#final-关键字" class="headerlink" title="final 关键字"></a>final 关键字</h2><p>用 <code>final</code> 修饰的类不可以被继承，用 <code>final</code> 修饰的方法不可以被覆写，用 final 修饰的属性一旦初始化以后不可以被修改。当然，我们不关心这些段子，这节，我们来看看 <code>final</code> 带来的内存可见性影响。<br>之前在说双重检查的单例模式的时候，提过了一句，如果所有的属性都使用了 <code>final</code> 修饰，那么 <code>volatile</code> 也是可以不要的，这就是 <code>final</code> 带来的可见性影响。<br>在对象的构造方法中设置 <code>final</code> 属性，<strong>同时在对象初始化完成前，不要将此对象的引用写入到其他线程可以访问到的地方</strong>（不要让引用在构造函数中逸出）。如果这个条件满足，当其他线程看到这个对象的时候，那个线程始终可以看到正确初始化后的对象的 <code>final</code> 属性。<br>上面说得很明白了，<code>final</code> 属性的写操作不会和此引用的赋值操作发生重排序，如：</p>
+<figure class="highlight ini"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="attr">x.finalField</span> = v<span class="comment">; ...; sharedRef = x;</span></span></pre></td></tr></table></figure>
+
+<p>如果你还想查看更多的关于 <code>final</code> 的介绍，可以移步到我之前翻译的 Java 语言规范的 [final属性的语义](<a href="https://www.javadoop.com/post/Threads-And-Locks-md#17.5" target="_blank" rel="noopener">https://www.javadoop.com/post/Threads-And-Locks-md#17.5</a>. final 属性的语义（final Field Semantics）) 部分。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2><p>之前翻译过 Java8 语言规范《<a href="https://javadoop.com/post/Threads-And-Locks-md" target="_blank" rel="noopener">深入分析 java 8 编程语言规范：Threads and Locks</a>》，本文中的很多知识是和它相关的，不过那篇直译的文章的可读性差了些，希望本文能给读者带来更多的收获。<br>描述该类知识需要非常严谨的语言描述，虽然我仔细检查了好几篇，但还是担心有些地方会说错，一来这些内容的正误非常受我自身的知识积累影响，二来也和我在行文中使用的话语有很大的关系。希望读者能帮助指正我表述错误的地方。</p>
+<h2 id="参考资料"><a href="#参考资料" class="headerlink" title="参考资料"></a><strong>参考资料</strong></h2><p>JSR 133：<a href="https://jcp.org/en/jsr/detail?id=133" target="_blank" rel="noopener">https://jcp.org/en/jsr/detail?id=133</a><br>The “Double-Checked Locking is Broken” Declaration：<a href="http://www.cs.umd.edu/~pugh/java/memoryModel/DoubleCheckedLocking.html" target="_blank" rel="noopener">http://www.cs.umd.edu/~pugh/java/memoryModel/DoubleCheckedLocking.html</a><br>美团点评技术团队：<a href="https://tech.meituan.com/java-memory-reordering.html" target="_blank" rel="noopener">https://tech.meituan.com/java-memory-reordering.html</a><br>（全文完）</p>
+<blockquote>
+<p>update：2018-03-22 留个小问题给读者<br><strong>我们不难得出一个推论：线程 <code>a</code> 如果写入一个 <code>volatile</code> 变量，此时线程 <code>b</code> 再读取这个变量，那么此时对于线程 <code>a</code> 可见的所有属性对于线程 <code>b</code> 都是可见的。</strong><br>文中我写了上面这么一句，读者可以考虑下这个结论是怎么推出来的。</p>
+</blockquote>
+<blockquote>
+<p>作者：javadoop</p>
+<p>来源：<a href="https://javadoop.com/post/java-memory-model" target="_blank" rel="noopener">https://javadoop.com/post/java-memory-model</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E5%B9%B6%E5%8F%91/" rel="tag"># 并发</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/28/%E6%B7%B1%E5%85%A5%E5%88%86%E6%9E%90-java-8-%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80%E8%A7%84%E8%8C%83%EF%BC%9AThreads-and-Locks/" rel="prev" title="深入分析 java 8 编程语言规范：Threads and Locks">
+      <i class="fa fa-chevron-left"></i> 深入分析 java 8 编程语言规范：Threads and Locks
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/28/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3Java%E7%B1%BB%E5%9E%8B%E4%BF%A1%E6%81%AF-Class%E5%AF%B9%E8%B1%A1/" rel="next" title="深入理解Java类型信息(Class对象)与反射机制">
+      深入理解Java类型信息(Class对象)与反射机制 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#并发三问题"><span class="nav-number">1.</span> <span class="nav-text">并发三问题</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1-重排序"><span class="nav-number">1.1.</span> <span class="nav-text">1. 重排序</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-内存可见性"><span class="nav-number">1.2.</span> <span class="nav-text">2. 内存可见性</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#3-原子性"><span class="nav-number">1.3.</span> <span class="nav-text">3. 原子性</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Java-对于并发的规范约束"><span class="nav-number">2.</span> <span class="nav-text">Java 对于并发的规范约束</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#Synchronization-Order"><span class="nav-number">2.1.</span> <span class="nav-text">Synchronization Order</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Happens-before-Order"><span class="nav-number">2.2.</span> <span class="nav-text">Happens-before Order</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#synchronized-关键字"><span class="nav-number">3.</span> <span class="nav-text">synchronized 关键字</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#单例模式中的双重检查"><span class="nav-number">4.</span> <span class="nav-text">单例模式中的双重检查</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#volatile-关键字"><span class="nav-number">5.</span> <span class="nav-text">volatile 关键字</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#volatile-的内存可见性"><span class="nav-number">5.1.</span> <span class="nav-text">volatile 的内存可见性</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#volatile-的禁止重排序"><span class="nav-number">5.2.</span> <span class="nav-text">volatile 的禁止重排序</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#volatile-小结"><span class="nav-number">5.3.</span> <span class="nav-text">volatile 小结</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#final-关键字"><span class="nav-number">6.</span> <span class="nav-text">final 关键字</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#小结"><span class="nav-number">7.</span> <span class="nav-text">小结</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#参考资料"><span class="nav-number">8.</span> <span class="nav-text">参考资料</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">469</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">82</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">108</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

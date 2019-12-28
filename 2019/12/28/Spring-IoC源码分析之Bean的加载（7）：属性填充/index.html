@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="在上篇文章中，我们详细分析了doCreateBean()中的4步：单例模式的循环依赖处理，本文接着分析doCreateBean()的第5步“属性填充”,也就是populateBean()方法。  首先回顾下CreateBean的主流程：  如果是单例模式，从factoryBeanInstanceCache 缓存中获取BeanWrapper 实例对象并删除缓存 调用 createBeanInsta">
+<meta name="keywords" content="源码,Ioc">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Spring IoC源码分析之Bean的加载（7）：属性填充">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2019&#x2F;12&#x2F;28&#x2F;Spring-IoC%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%E4%B9%8BBean%E7%9A%84%E5%8A%A0%E8%BD%BD%EF%BC%887%EF%BC%89%EF%BC%9A%E5%B1%9E%E6%80%A7%E5%A1%AB%E5%85%85&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="在上篇文章中，我们详细分析了doCreateBean()中的4步：单例模式的循环依赖处理，本文接着分析doCreateBean()的第5步“属性填充”,也就是populateBean()方法。  首先回顾下CreateBean的主流程：  如果是单例模式，从factoryBeanInstanceCache 缓存中获取BeanWrapper 实例对象并删除缓存 调用 createBeanInsta">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191015175049-36ff2.png">
+<meta property="og:updated_time" content="2019-12-28T11:16:09.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191015175049-36ff2.png">
+
+<link rel="canonical" href="http://congsheng.wang/2019/12/28/Spring-IoC%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%E4%B9%8BBean%E7%9A%84%E5%8A%A0%E8%BD%BD%EF%BC%887%EF%BC%89%EF%BC%9A%E5%B1%9E%E6%80%A7%E5%A1%AB%E5%85%85/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Spring IoC源码分析之Bean的加载（7）：属性填充 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">108</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">82</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">469</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2019/12/28/Spring-IoC%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%E4%B9%8BBean%E7%9A%84%E5%8A%A0%E8%BD%BD%EF%BC%887%EF%BC%89%EF%BC%9A%E5%B1%9E%E6%80%A7%E5%A1%AB%E5%85%85/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Spring IoC源码分析之Bean的加载（7）：属性填充
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-28 19:16:09" itemprop="dateCreated datePublished" datetime="2019-12-28T19:16:09+08:00">2019-12-28</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Spring%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Spring技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Spring%E6%8A%80%E6%9C%AF/Spring/" itemprop="url" rel="index">
+                    <span itemprop="name">Spring</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <blockquote>
+<p>在上篇文章中，我们详细分析了<code>doCreateBean()</code>中的4步：单例模式的循环依赖处理，本文接着分析<code>doCreateBean()</code>的第5步“<strong>属性填充</strong>”,也就是<code>populateBean()</code>方法。</p>
+</blockquote>
+<p>首先回顾下<code>CreateBean</code>的主流程：</p>
+<ol>
+<li>如果是单例模式，从factoryBeanInstanceCache 缓存中获取BeanWrapper 实例对象并删除缓存</li>
+<li>调用 <code>createBeanInstance()</code> 实例化 bean</li>
+<li>后置处理</li>
+<li>单例模式的循环依赖处理</li>
+<li>属性填充</li>
+<li>初始化 bean 实例对象</li>
+<li>依赖检查</li>
+<li>注册bean的销毁方法</li>
+</ol>
+<p>本章我们主要分析第5步：<br>在Spring中属性注入有三种方式：</p>
+<ul>
+<li>xml配置</li>
+<li>注解方式</li>
+<li>手动get\set方法</li>
+</ul>
+<p>xml方式如<code>节点中的default-autowire属性</code>；<br>注解方式如：@Value()、@Resource、@Autowire、@Qualifier<br>本文我们主要分析 <strong>注解方式</strong> 的属性注入</p>
+<a id="more"></a>
+
+<h2 id="一、populateBean-beanName-mbd-instanceWrapper"><a href="#一、populateBean-beanName-mbd-instanceWrapper" class="headerlink" title="一、populateBean(beanName, mbd, instanceWrapper)"></a>一、populateBean(beanName, mbd, instanceWrapper)</h2><figure class="highlight groovy"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">//AbstractAutowireCapableBeanFactory.java</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">protected</span> <span class="keyword">void</span> populateBean(String beanName, RootBeanDefinition mbd, <span class="meta">@Nullable</span> BeanWrapper bw) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//校验实例</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (bw == <span class="literal">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (mbd.hasPropertyValues()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">throw</span> <span class="keyword">new</span> BeanCreationException(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">                    mbd.getResourceDescription(), beanName, <span class="string">"Cannot apply property values to null instance"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// Skip property population phase for null instance.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">return</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// Give any InstantiationAwareBeanPostProcessors the opportunity to modify the</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// state of the bean before properties are set. This can be used, for example,</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// to support styles of field injection.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 在设置属性之前给 InstantiationAwareBeanPostProcessors 最后一次改变 bean 的机会。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 关于这段后置引用，官方的解释是：让用户可以自定义属性注入。比如用户实现一</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 个 InstantiationAwareBeanPostProcessor 类型的后置处理器，并通过</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * postProcessAfterInstantiation 方法向 bean 的成员变量注入自定义的信息。当然，如果无</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 特殊需求，直接使用配置中的信息注入即可。另外，Spring 并不建议大家直接实现</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * InstantiationAwareBeanPostProcessor 接口，如果想实现这种类型的后置处理器，更建议</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 通过继承 InstantiationAwareBeanPostProcessorAdapter 抽象类实现自定义后置处理器。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">boolean</span> continueWithPropertyPopulation = <span class="literal">true</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// bean 不是"合成"的，即未由应用程序本身定义 &amp;&amp; 持有 InstantiationAwareBeanPostProcessor</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">&lt;<span class="number">1</span>&gt; <span class="keyword">if</span> (!mbd.isSynthetic() &amp;&amp; hasInstantiationAwareBeanPostProcessors()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 遍历所有的 BeanPostProcessors</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">for</span> (BeanPostProcessor <span class="string">bp :</span> getBeanPostProcessors()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (bp <span class="keyword">instanceof</span> InstantiationAwareBeanPostProcessor) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">                InstantiationAwareBeanPostProcessor ibp = (InstantiationAwareBeanPostProcessor) bp;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// 返回值为是否继续填充 bean</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// postProcessAfterInstantiation：如果应该在 bean上面设置属性则返回 true，否则返回 false</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// 一般情况下，应该是返回true 。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// 返回 false 的话，将会阻止在此 Bean 实例上调用任何后续的 InstantiationAwareBeanPostProcessor 实例。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (!ibp.postProcessAfterInstantiation(bw.getWrappedInstance(), beanName)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">                    continueWithPropertyPopulation = <span class="literal">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">break</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 如果后置处理器发出停止填充命令，则终止后续操作</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (!continueWithPropertyPopulation) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//获取Bean的属性值</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">49</span></pre></td><td class="code"><pre><span class="line">    PropertyValues pvs = (mbd.hasPropertyValues() ? mbd.getPropertyValues() : <span class="literal">null</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">50</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//处理依赖注入</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">51</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//xml方式    即xml中&lt;beans&gt;节点中的default-autowire属性</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">52</span></pre></td><td class="code"><pre><span class="line">&lt;<span class="number">2</span>&gt; <span class="keyword">if</span> (mbd.getResolvedAutowireMode() == RootBeanDefinition.AUTOWIRE_BY_NAME ||</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">53</span></pre></td><td class="code"><pre><span class="line">            mbd.getResolvedAutowireMode() == RootBeanDefinition.AUTOWIRE_BY_TYPE) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">54</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 将 PropertyValues 封装成 MutablePropertyValues 对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">55</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// MutablePropertyValues 允许对属性进行简单的操作，并提供构造函数以支持Map的深度复制和构造。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">56</span></pre></td><td class="code"><pre><span class="line">        MutablePropertyValues newPvs = <span class="keyword">new</span> MutablePropertyValues(pvs);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">57</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// Add property values based on autowire by name if applicable.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">58</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//根据Bean名称进行autowiring自动装配处理</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">59</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (mbd.getResolvedAutowireMode() == RootBeanDefinition.AUTOWIRE_BY_NAME) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">60</span></pre></td><td class="code"><pre><span class="line">            autowireByName(beanName, mbd, bw, newPvs);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">61</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">62</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// Add property values based on autowire by type if applicable.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">63</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//根据Bean类型进行autowiring自动装配处理</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">64</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (mbd.getResolvedAutowireMode() == RootBeanDefinition.AUTOWIRE_BY_TYPE) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">65</span></pre></td><td class="code"><pre><span class="line">            autowireByType(beanName, mbd, bw, newPvs);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">66</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">67</span></pre></td><td class="code"><pre><span class="line">        pvs = newPvs;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">68</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">69</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 是否已经注册了 InstantiationAwareBeanPostProcessors</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">70</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">boolean</span> hasInstAwareBpps = hasInstantiationAwareBeanPostProcessors();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">71</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//是否需要依赖检查（xml）</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">72</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">boolean</span> needsDepCheck = (mbd.getDependencyCheck() != RootBeanDefinition.DEPENDENCY_CHECK_NONE);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">73</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//属性注入（注解方式）</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">74</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//已经注册IABP &amp;&amp; 需要依赖检查</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">75</span></pre></td><td class="code"><pre><span class="line">&lt;<span class="number">3</span>&gt; <span class="keyword">if</span> (hasInstAwareBpps || needsDepCheck) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">76</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (pvs == <span class="literal">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">77</span></pre></td><td class="code"><pre><span class="line">            pvs = mbd.getPropertyValues();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">78</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">79</span></pre></td><td class="code"><pre><span class="line">        PropertyDescriptor[] filteredPds = filterPropertyDescriptorsForDependencyCheck(bw, mbd.allowCaching);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">80</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (hasInstAwareBpps) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">81</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">for</span> (BeanPostProcessor <span class="string">bp :</span> getBeanPostProcessors()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">82</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (bp <span class="keyword">instanceof</span> InstantiationAwareBeanPostProcessor) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">83</span></pre></td><td class="code"><pre><span class="line">                    InstantiationAwareBeanPostProcessor ibp = (InstantiationAwareBeanPostProcessor) bp;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">84</span></pre></td><td class="code"><pre><span class="line">                    <span class="comment">// 具体处理属性注入（注解方式）！！！ 如@Value()、@Resource、@Autowire</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">85</span></pre></td><td class="code"><pre><span class="line">                    pvs = ibp.postProcessPropertyValues(pvs, filteredPds, bw.getWrappedInstance(), beanName);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">86</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">if</span> (pvs == <span class="literal">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">87</span></pre></td><td class="code"><pre><span class="line">                        <span class="keyword">return</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">88</span></pre></td><td class="code"><pre><span class="line">                    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">89</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">90</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">91</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">92</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//依赖检查 (xml)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">93</span></pre></td><td class="code"><pre><span class="line">&lt;<span class="number">4</span>&gt;     <span class="keyword">if</span> (needsDepCheck) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">94</span></pre></td><td class="code"><pre><span class="line">            checkDependencies(beanName, mbd, filteredPds, pvs);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">95</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">96</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">97</span></pre></td><td class="code"><pre><span class="line">&lt;<span class="number">5</span>&gt; <span class="keyword">if</span> (pvs != <span class="literal">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">98</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//对属性进行注入 (xml)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">99</span></pre></td><td class="code"><pre><span class="line">        applyPropertyValues(beanName, mbd, bw, pvs);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">100</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">101</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>主要分为以下几个步骤：</p>
+<ul>
+<li>判断是否有自定义属性注入</li>
+<li>属性注入(xml方式)</li>
+<li>属性注入(注解方式)</li>
+<li>依赖检查(xml方式)</li>
+<li>注入属性(xml方式)</li>
+</ul>
+<h3 id="1-1、判断是否有自定义属性注入"><a href="#1-1、判断是否有自定义属性注入" class="headerlink" title="1.1、判断是否有自定义属性注入"></a>1.1、判断是否有自定义属性注入</h3><p>在上述代码&lt;1&gt;处：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * 在设置属性之前给 InstantiationAwareBeanPostProcessors 最后一次改变 bean 的机会。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * 关于这段后置引用，官方的解释是：让用户可以自定义属性注入。比如用户实现一</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * 个 InstantiationAwareBeanPostProcessor 类型的后置处理器，并通过</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * postProcessAfterInstantiation 方法向 bean 的成员变量注入自定义的信息。当然，如果无</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * 特殊需求，直接使用配置中的信息注入即可。另外，Spring 并不建议大家直接实现</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * InstantiationAwareBeanPostProcessor 接口，如果想实现这种类型的后置处理器，更建议</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * 通过继承 InstantiationAwareBeanPostProcessorAdapter 抽象类实现自定义后置处理器。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"> boolean continueWithPropertyPopulation = <span class="literal">true</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// bean 不是"合成"的，即未由应用程序本身定义 &amp;&amp; 持有 InstantiationAwareBeanPostProcessor</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (!mbd.is<span class="constructor">Synthetic()</span><span class="operator"> &amp;&amp; </span>has<span class="constructor">InstantiationAwareBeanPostProcessors()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 遍历所有的 BeanPostProcessors</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    for (BeanPostProcessor bp : get<span class="constructor">BeanPostProcessors()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (bp instanceof InstantiationAwareBeanPostProcessor) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            InstantiationAwareBeanPostProcessor ibp = (InstantiationAwareBeanPostProcessor) bp;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// 返回值为是否继续填充 bean</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// postProcessAfterInstantiation：如果应该在 bean上面设置属性则返回 true，否则返回 false</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// 一般情况下，应该是返回true 。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// 返回 false 的话，将会阻止在此 Bean 实例上调用任何后续的 InstantiationAwareBeanPostProcessor 实例。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (!ibp.post<span class="constructor">ProcessAfterInstantiation(<span class="params">bw</span>.<span class="params">getWrappedInstance</span>()</span>, beanName)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">                continueWithPropertyPopulation = <span class="literal">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">                break;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 如果后置处理器发出停止填充命令，则终止后续操作</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (!continueWithPropertyPopulation) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">    return;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>这部分逻辑注释上已经写的很清楚了。</p>
+<h3 id="1-2、属性注入-xml方式"><a href="#1-2、属性注入-xml方式" class="headerlink" title="1.2、属性注入(xml方式)"></a>1.2、属性注入(xml方式)</h3><figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//xml方式    即xml中&lt;beans&gt;节点中的default-autowire属性</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (mbd.get<span class="constructor">ResolvedAutowireMode()</span><span class="operator"> == </span>RootBeanDefinition.AUTOWIRE_BY_NAME <span class="pattern-match"><span class="operator">||</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">        mbd.get<span class="constructor">ResolvedAutowireMode()</span> <span class="operator">==</span> <span class="constructor">RootBeanDefinition</span>.<span class="constructor">AUTOWIRE_BY_TYPE</span>) &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    <span class="operator">/</span><span class="operator">/</span> 将 <span class="constructor">PropertyValues</span> 封装成 <span class="constructor">MutablePropertyValues</span> 对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    <span class="operator">/</span><span class="operator">/</span> <span class="constructor">MutablePropertyValues</span> 允许对属性进行简单的操作，并提供构造函数以支持<span class="constructor">Map</span>的深度复制和构造。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    <span class="constructor">MutablePropertyValues</span> <span class="keyword">new</span><span class="constructor">Pvs</span> = <span class="keyword">new</span> <span class="constructor">MutablePropertyValues(<span class="params">pvs</span>)</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    <span class="operator">/</span><span class="operator">/</span> <span class="constructor">Add</span> property values based on autowire by name <span class="keyword">if</span> applicable.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    <span class="operator">/</span><span class="operator">/</span>根据<span class="constructor">Bean</span>名称进行autowiring自动装配处理</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    <span class="keyword">if</span> (mbd.get<span class="constructor">ResolvedAutowireMode()</span> <span class="operator">==</span> <span class="constructor">RootBeanDefinition</span>.<span class="constructor">AUTOWIRE_BY_NAME</span>) &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">        autowire<span class="constructor">ByName(<span class="params">beanName</span>, <span class="params">mbd</span>, <span class="params">bw</span>, <span class="params">newPvs</span>)</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    &#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    <span class="operator">/</span><span class="operator">/</span> <span class="constructor">Add</span> property values based on autowire by <span class="keyword">type</span> <span class="keyword">if</span> applicable.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    <span class="operator">/</span><span class="operator">/</span>根据<span class="constructor">Bean</span>类型进行autowiring自动装配处理</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    <span class="keyword">if</span> (mbd.get<span class="constructor">ResolvedAutowireMode()</span> <span class="operator">==</span> <span class="constructor">RootBeanDefinition</span>.<span class="constructor">AUTOWIRE_BY_TYPE</span>) &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">        autowire<span class="constructor">ByType(<span class="params">beanName</span>, <span class="params">mbd</span>, <span class="params">bw</span>, <span class="params">newPvs</span>)</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    &#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    pvs = <span class="keyword">new</span><span class="constructor">Pvs</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">&#125;</span></span></pre></td></tr></table></figure>
+
+<p>这部分代码主要是来处理XML方式的属性注入，例如<code>xml中节点中的default-autowire属性</code>，因为本次Spring系列主要是分析注解方式的，这里就不详细分析了。感性趣的朋友可以自己趣了解下～</p>
+<h4 id="1-2、属性注入-注解方式"><a href="#1-2、属性注入-注解方式" class="headerlink" title="1.2、属性注入(注解方式)"></a>1.2、属性注入(注解方式)</h4><figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">PropertyDescriptor<span class="literal">[]</span> filteredPds = filter<span class="constructor">PropertyDescriptorsForDependencyCheck(<span class="params">bw</span>, <span class="params">mbd</span>.<span class="params">allowCaching</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (hasInstAwareBpps) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    for (BeanPostProcessor bp : get<span class="constructor">BeanPostProcessors()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (bp instanceof InstantiationAwareBeanPostProcessor) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">            InstantiationAwareBeanPostProcessor ibp = (InstantiationAwareBeanPostProcessor) bp;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// 处理依赖注入（注解方式） 如@Value()、@Resource、@Autowire</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            pvs = ibp.post<span class="constructor">ProcessPropertyValues(<span class="params">pvs</span>, <span class="params">filteredPds</span>, <span class="params">bw</span>.<span class="params">getWrappedInstance</span>()</span>, beanName);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (pvs<span class="operator"> == </span>null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">                return;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>这段代码就是我们要分析的核心。<br>首先是判断是否已经注册了<code>InstantiationAwareBeanPostProcessor</code>（实例化Bean的后置处理器），如果注册了，就遍历所有的后置处理器。 我们先来了解下<code>InstantiationAwareBeanPostProcessor</code>的类图结构：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191015175049-36ff2.png" alt="img"></p>
+<p><code>InstantiationAwareBeanPostProcessor</code>是一个关于对象实例化前后以及实例化后设置propertyValues的回调处理器。 它有三个方法：</p>
+<figure class="highlight processing"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//这个方法用来在对象实例化前直接返回一个对象（如代理对象）来代替通过内置的实例化流程创建对象；</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">@Nullable</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">default</span> <span class="keyword">Object</span> postProcessBeforeInstantiation(Class&lt;?&gt; beanClass, <span class="keyword">String</span> beanName) <span class="keyword">throws</span> BeansException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> <span class="keyword">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//在对象实例化完毕执行populateBean之前 如果返回false则spring不再对对应的bean实例进行自动依赖注入。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">default</span> <span class="built_in">boolean</span> postProcessAfterInstantiation(<span class="keyword">Object</span> bean, <span class="keyword">String</span> beanName) <span class="keyword">throws</span> BeansException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> <span class="keyword">true</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"> <span class="comment">//这里是在spring处理完默认的成员属性，应用到指定的bean之前进行回调，可以用来检查和修改属性，最终返回的PropertyValues会应用到bean中</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//@Autowired、@Resource、@Value等就是根据这个方法来实现最终注入依赖的属性的。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">@Nullable</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">default</span> PropertyValues postProcessPropertyValues(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        PropertyValues pvs, PropertyDescriptor[] pds, <span class="keyword">Object</span> bean, <span class="keyword">String</span> beanName) <span class="keyword">throws</span> BeansException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> pvs;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>我们主要看第三个方法<code>postProcessPropertyValues()</code>，这个方法就是通过注解进行属性注入的具体实现。<br>该方法主要有3个实现，分别对应了不同的注解。</p>
+<ul>
+<li>AutowiredAnnotationBeanPostProcessor<br>可以处理@Autowire、@Value</li>
+<li>CommonAnnotationBeanPostProcessor<br>可以处理@Resource</li>
+<li>RequiredAnnotationBeanPostProcessor<br>可以处理@Required</li>
+</ul>
+<h4 id="1-2-1、AutowiredAnnotationBeanPostProcessor"><a href="#1-2-1、AutowiredAnnotationBeanPostProcessor" class="headerlink" title="1.2.1、AutowiredAnnotationBeanPostProcessor"></a>1.2.1、AutowiredAnnotationBeanPostProcessor</h4><p>是Spring容器专门处理配置了自动依赖注入装配相关注解(@Autowire、@Value以及其他JSR-330注解)的Bean后置处理器。详细说明见<a href="https://juejin.im/post/5d9edf18f265da5b7a7543e9" target="_blank" rel="noopener">Spring注解@Autowired源码分析</a></p>
+<h4 id="1-2-2、CommonAnnotationBeanPostProcessor"><a href="#1-2-2、CommonAnnotationBeanPostProcessor" class="headerlink" title="1.2.2、CommonAnnotationBeanPostProcessor"></a>1.2.2、CommonAnnotationBeanPostProcessor</h4><p>CommonAnnotationBeanPostProcessor是Spring中用于处理JavaEE5中常用注解(主要是EJB相关的注解)和Java6中关于JAX-WS相关的注解，可以处理@PostConstruct、@PreDestroy等Bean生命周期相关事件的注解，该后置处理最核心的是处理<code>@Resource</code>注解，同时还可以处理JAX-WS相关的注解。详细说明见<a href="https://juejin.im/post/5d9f33a0518825486c66e8ae" target="_blank" rel="noopener">Spring注解@Resource源码分析</a></p>
+<blockquote>
+<p>总结</p>
+</blockquote>
+<p>到这里就已经完成了注解方式所有属性的注入了。</p>
+<blockquote>
+<p>作者：大王叫下</p>
+<p>来源：<a href="https://juejin.im/post/5d7ef148f265da03c428c09e" target="_blank" rel="noopener">https://juejin.im/post/5d7ef148f265da03c428c09e</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E6%BA%90%E7%A0%81/" rel="tag"># 源码</a>
+              <a href="/tags/Ioc/" rel="tag"># Ioc</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/28/Spring-IoC%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%E4%B9%8BBean%E7%9A%84%E5%8A%A0%E8%BD%BD%EF%BC%886%EF%BC%89%EF%BC%9A%E5%BE%AA%E7%8E%AF%E4%BE%9D%E8%B5%96%E5%A4%84%E7%90%86/" rel="prev" title="Spring IoC源码分析之Bean的加载（6）：循环依赖处理">
+      <i class="fa fa-chevron-left"></i> Spring IoC源码分析之Bean的加载（6）：循环依赖处理
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/28/Spring-IoC%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%E4%B9%8BBean%E7%9A%84%E5%8A%A0%E8%BD%BD%EF%BC%888%EF%BC%89%EF%BC%9A%E5%88%9D%E5%A7%8B%E5%8C%96/" rel="next" title="Spring IoC源码分析之Bean的加载（8）：初始化">
+      Spring IoC源码分析之Bean的加载（8）：初始化 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#一、populateBean-beanName-mbd-instanceWrapper"><span class="nav-number">1.</span> <span class="nav-text">一、populateBean(beanName, mbd, instanceWrapper)</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1-1、判断是否有自定义属性注入"><span class="nav-number">1.1.</span> <span class="nav-text">1.1、判断是否有自定义属性注入</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#1-2、属性注入-xml方式"><span class="nav-number">1.2.</span> <span class="nav-text">1.2、属性注入(xml方式)</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#1-2、属性注入-注解方式"><span class="nav-number">1.2.1.</span> <span class="nav-text">1.2、属性注入(注解方式)</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#1-2-1、AutowiredAnnotationBeanPostProcessor"><span class="nav-number">1.2.2.</span> <span class="nav-text">1.2.1、AutowiredAnnotationBeanPostProcessor</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#1-2-2、CommonAnnotationBeanPostProcessor"><span class="nav-number">1.2.3.</span> <span class="nav-text">1.2.2、CommonAnnotationBeanPostProcessor</span></a></li></ol></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">469</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">82</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">108</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

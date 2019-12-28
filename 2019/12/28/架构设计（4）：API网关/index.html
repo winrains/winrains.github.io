@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="1、前言所在公司目前接入层是阿里云的SLB，然后经过Nginx+Lua转发到后端服务（Lua主要是限流）。 随着业务的发展，发现nginx配置越来越复杂，但又没有统一的管理，于是把Nginx这层改造成基于 OpenResty的Nginx 应用的API Gateway。于是上网总结和梳理网关相关知识。问题:由于我们使用的服务系统架构，所以没办法像传统单体应用一样依靠数据库的 join 查询来得到最终">
+<meta property="og:type" content="article">
+<meta property="og:title" content="架构设计（4）：API网关">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2019&#x2F;12&#x2F;28&#x2F;%E6%9E%B6%E6%9E%84%E8%AE%BE%E8%AE%A1%EF%BC%884%EF%BC%89%EF%BC%9AAPI%E7%BD%91%E5%85%B3&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="1、前言所在公司目前接入层是阿里云的SLB，然后经过Nginx+Lua转发到后端服务（Lua主要是限流）。 随着业务的发展，发现nginx配置越来越复杂，但又没有统一的管理，于是把Nginx这层改造成基于 OpenResty的Nginx 应用的API Gateway。于是上网总结和梳理网关相关知识。问题:由于我们使用的服务系统架构，所以没办法像传统单体应用一样依靠数据库的 join 查询来得到最终">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191011210956-8b206.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191011210956-57e51.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191011210956-19ac0.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191011210956-c3d04.jpeg">
+<meta property="og:updated_time" content="2019-12-28T07:19:34.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191011210956-8b206.jpeg">
+
+<link rel="canonical" href="http://congsheng.wang/2019/12/28/%E6%9E%B6%E6%9E%84%E8%AE%BE%E8%AE%A1%EF%BC%884%EF%BC%89%EF%BC%9AAPI%E7%BD%91%E5%85%B3/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>架构设计（4）：API网关 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">108</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">82</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">469</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2019/12/28/%E6%9E%B6%E6%9E%84%E8%AE%BE%E8%AE%A1%EF%BC%884%EF%BC%89%EF%BC%9AAPI%E7%BD%91%E5%85%B3/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          架构设计（4）：API网关
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-28 15:19:34" itemprop="dateCreated datePublished" datetime="2019-12-28T15:19:34+08:00">2019-12-28</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E7%B3%BB%E7%BB%9F%E6%9E%B6%E6%9E%84/" itemprop="url" rel="index">
+                    <span itemprop="name">系统架构</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="1、前言"><a href="#1、前言" class="headerlink" title="1、前言"></a>1、前言</h1><p>所在公司目前接入层是阿里云的SLB，然后经过Nginx+Lua转发到后端服务（Lua主要是限流）。 随着业务的发展，发现nginx配置越来越复杂，但又没有统一的管理，于是把Nginx这层改造成<strong>基于 OpenResty的Nginx 应用的API Gateway</strong>。于是上网总结和梳理网关相关知识。<br>问题:<br>由于我们使用的服务系统架构，所以没办法像传统单体应用一样依靠数据库的 join 查询来得到最终结果，那么如何才能访问各个服务呢？<br>按照微服务设计的指导原则，我们的微服务可能存在下面的问题：<br>服务使用了多种协议：因为不同的协议有不同的应场景用，比如可能同时使用 HTTP, AMQP, gRPC 等。<br>服务的划分可能随着时间而变化。<br>服务的实例或者Host+端口可能会动态的变化。<br>那么，对于前端的UI需求也可能会有以下几种：<br>粗粒度的API，而微服务通常提供的细粒度的API，对于UI来说如果要调用细粒度的api可能需要调用很多次，这是个不小的问题。<br>不同的客户端可能需要不同的数据。Web,H5,APP，OpenAPI<br>不同设备的网络性能，对于多个api来说，这个访问需要转移的服务端会快得多<br>以上，就是我们构建微服务的过程中可能会遇到的问题。</p>
+<a id="more"></a>
+
+<h1 id="2、概念"><a href="#2、概念" class="headerlink" title="2、概念"></a>2、概念</h1><p>API Gateway（API GW / API 网关），顾名思义，是企业 IT 在系统边界上提供给外部访问内部接口服务的统一入口。在微服务概念的流行之前，API网关的实体就已经诞生了，例如银行、证券等领域常见的前置机系统，它也是解决访问认证、报文转换、访问统计等问题的。<br>百度百科：API网关是一个服务器，是系统的唯一入口。从面向对象设计的角度看，它与外观模式类似。API网关封装了系统内部架构，为每个客户端提供一个定制的API。它可能还具有其它职责，如身份验证、监控、负载均衡、缓存、请求分片与管理、静态响应处理。<br>API网关方式的核心要点是，所有的客户端和消费端都通过统一的网关接入微服务，在网关层处理所有的非业务功能。通常，网关也是提供REST/HTTP的访问API。服务端通过API-GW注册和管理服务。</p>
+<h1 id="3、网关使用场景"><a href="#3、网关使用场景" class="headerlink" title="3、网关使用场景"></a>3、网关使用场景</h1><p>API网关的流行，源于近几年来，移动应用与企业间互联需求的兴起。移动应用、企业互联，使得后台服务支持的对象，从以前单一的Web应用，扩展到多种使用场景，且每种使用场景对后台服务的要求都不尽相同。这不仅增加了后台服务的响应量，还增加了后台服务的复杂性。<br>当应用架构是由一系列的微服务构建的时候，我们就应当考虑对外提供的服务如何与微服务进行交互。<br>我们根据使用场景分类大体如下：</p>
+<h2 id="1、Web-App-APIGateway-和-Mobile-App-APIGateway："><a href="#1、Web-App-APIGateway-和-Mobile-App-APIGateway：" class="headerlink" title="1、Web App APIGateway 和 Mobile App APIGateway："></a>1、Web App APIGateway 和 Mobile App APIGateway：</h2><p><strong>聚合作用：写简单的业务逻辑，跨多个service获取数据拼装结果。</strong><br>在Mobile app产品信息页面仍然要展现很多的信息。例如，基本的产品信息，该页也会展示产品其他相关信息：<br>购物车；历史订单；顾客评论；低库存预警；运送选项；各种产品推荐；可替代的购买选项；<br>当使用单体应用架构时:<br>移动客户端通过给应用发送一个REST请求来获取数据，比如：<br>GET api.company.com/productdetails/productId<br>负载均衡器路由这个请求到几个相同应用实例其中的一个。单体应用接着查询多个数据库表并返回响应给客户端。<br>当使用微服务架构的时候:<br>显示在产品详细信息页面的数据来自于多个微服务。如下是一些潜在的服务，它们也有可以展示在特定产品信息页面的数据：<br>购物车服务、订单服务、目录服务、评论服务、库存服务、运送服务、推荐服务。<br>这个需要使用Mobile app API Gateway：它通常向移动客户端暴露出一个粗粒度的API。<br>API网关可以提供类似这样的接口：<br>GET api.company.com/productdetails/productId<br>可以使移动客户端在一次调用中获取所有的产品信息。API网关通过调用多个服务—产品服务、推荐服务、评论服务等来处理请求，并封装结果。<br><strong>优点：</strong><br>1、解耦作用：它封装了应用的内部结构，客户端直接和网关通信，而不必调用特定的服务。<br>2、提供给每种客户端特定优化的API。<br>3、减少请求环路、简化客户端逻辑。比如说，API Gateway使得客户端用一次请求就可以从多个service处获取数据。<br><strong>缺点：</strong><br>1、必须被开发、部署和管理成一个高度可用的组件，也有成为开发瓶颈的危险。<br>2、为了暴露出每个微服务的，开发者必须更新API网关。</p>
+<h2 id="2、Partner-OpenAPI："><a href="#2、Partner-OpenAPI：" class="headerlink" title="2、Partner OpenAPI："></a>2、Partner OpenAPI：</h2><p>转发路由作用：对外提供的接口服务，一般直接把请求转发到合适的service，但是此时的API GW需要增加配额、限流、令牌等一系列安全管控功能。对外提供隔离作用：<strong>请求路由，安全认证，负载均衡，限流、监控、权限控制等等</strong>。</p>
+<h1 id="4、API网关需要考虑的因素"><a href="#4、API网关需要考虑的因素" class="headerlink" title="4、API网关需要考虑的因素"></a>4、API网关需要考虑的因素</h1><h2 id="1、安全性问题"><a href="#1、安全性问题" class="headerlink" title="1、安全性问题"></a>1、安全性问题</h2><p>企业在把服务暴露给外部使用时，首先要确保服务使用的安全，防止外部的恶意访问对公司业务的影响，特别是涉及交易方面的服务，更是要全面考虑安全性。为确保安全，需要考虑在通讯链路的建立、通讯数据的加密、数据的完整性、不可抵赖性等方面。</p>
+<h2 id="2、性能问题"><a href="#2、性能问题" class="headerlink" title="2、性能问题"></a>2、性能问题</h2><p>作为企业API的入口，所有的请求都会经过API网关进行转发，可想而知，对API网关的访问压力是巨大的，有的网站甚至达到每分钟上千万的访问量。特别是在一些互联网企业，海量的移动终端每时每刻都需要与后端的服务进行交互，如果不能保证网关的高性能，企业在网关层需要投入大量的设备和成本。曾在一家互联网公司发生过，由于网关性能问题，网关的机器数量，需要与后台服务器的数量保持同步增长。这种情况显然是企业服务忍受的。</p>
+<h2 id="3、高可用问题"><a href="#3、高可用问题" class="headerlink" title="3、高可用问题"></a>3、高可用问题</h2><p>API网关作为逻辑上的单点，一旦发生问题，将造成企业服务的不可用，对企业来说可能造成的致命的影响。计算短时间的不可用，也会给企业带来直接的经济损失。所以，如何保证API网关的7*24小时的稳定运行，网关的自动伸缩、API的热更新等问题，都是企业级的网关需要考虑的。</p>
+<h2 id="4、扩展性问题"><a href="#4、扩展性问题" class="headerlink" title="4、扩展性问题"></a>4、扩展性问题</h2><p>前面说到，企业网关提供了一个脚手架，一些非功能性的问题，例如日志、安全、负载均衡策略、鉴权等。这些插件会随着企业业务规模等的变化进行不断的强化与调整。这就需要网关层提供这样一种机制，使得可以灵活地进行这些调整和变化，而不用频繁对网关层进行改动，确保网关层的稳定性。</p>
+<h2 id="5、API高效运维的问题"><a href="#5、API高效运维的问题" class="headerlink" title="5、API高效运维的问题"></a>5、API高效运维的问题</h2><p>API在上线、发布过程中，都需要涉及到网关层的配合，例如，需要网关层知道API发布的地址，API的接口形式、报文格式，也需要网关层对后台API进行封装。在API调整后，需要作出相应的修改。所以，API网关设计时，需要明确网关层与服务层的职责切分与协作模式，使得API的管理、发布更加高效。</p>
+<h2 id="6、API全生命周期的管理"><a href="#6、API全生命周期的管理" class="headerlink" title="6、API全生命周期的管理"></a>6、API全生命周期的管理</h2><p>API服务的全生命周期，包括服务的开发、测试、上线发布；服务使用的申请、开通；服务分类分级别的管理、服务使用情况的监控、计费等等。<br>一个企业可能会暴露成百上千个API，日常也会经常进行API的发布、升级、改造、下架等操作。对不同的服务，不同的访问者，需要提供不同的服务访问策略。有的商业API公司，还需要对API的使用进行付费。所以，与API网关配套的，需要一套完善的自助系统，提供给服务的提供者、管理者、使用者，来对服务的发布、使用、和运营。</p>
+<h1 id="5、业界常用的API网关方案"><a href="#5、业界常用的API网关方案" class="headerlink" title="5、业界常用的API网关方案"></a>5、业界常用的API网关方案</h1><p>通常情况下， API 网关要做很多工作，它作为一个系统的后端总入口，承载着所有服务的组合路由转换等工作，除此之外，我们一般也会把安全，限流，缓存，日志，监控，重试，熔断等放到 API 网关来做，那么可以试想在高并发的情况下，这里可能会出现一个性能瓶颈。<br>另外，如果没有开源项目的支撑前提下，自己来做这样一套东西，是非常大的一个工作量，而且还要做 API 网关本身的高可用等，如果一旦做不好，有可能最先挂掉的不是你的其他服务，而就是这个API网关。</p>
+<h2 id="1：基于OpenResty-的-Nginx"><a href="#1：基于OpenResty-的-Nginx" class="headerlink" title="1：基于OpenResty 的 Nginx"></a>1：基于OpenResty 的 Nginx</h2><p>性能和高可用性上：<br>Nginx性能极高，Nginx先天的事件驱动型设计、全异步的网络I/O处理机制、极少的进程间切换以及许多优化设计，都使得Nginx天生善于处理高并发压力下的互联网请求。Nginx的稳定性也在各大网站得到验证。官方提供的常用模块都非常稳定，每个worker进程相对独立，master进程在1个worker进程出错时可以快速“拉起”新的worker子进程提供服务。支持热部署，可以不停机更新配置文件、更新日志文件、更新服务器程序版本。<br>扩展性上：<br>Nginx的设计极具扩展性，它完全是由多个不同功能、不同层次、不同类型且耦合度极低的模块组成。因此，当对某一个模块修复Bug或进行升级时，可以专注于模块自身，无须在意其他<br>易用性上：<br>Nginx使用最自由的BSD许可协议，允许用户在自己的项目中直接使用或修改Nginx源码，有大量的插件可以利用。但是，Nginx模块需要用C开发，而且必须符合一系列复杂的规则。虽然通过第三方模块，可以支持Nginx与Perl、Lua等脚本语言集成工作，但对使用者的要求还是很高。</p>
+<h2 id="2：Spring-Cloud-Zuul"><a href="#2：Spring-Cloud-Zuul" class="headerlink" title="2：Spring Cloud Zuul"></a>2：Spring Cloud Zuul</h2><p><img src="http://image.winrains.cn/2019/10/20191011210956-8b206.jpeg" alt="img"><br>基本功能<br><strong>验证与安全保障:</strong> 识别面向各类资源的验证要求并拒绝那些与要求不符的请求。<br><strong>审查与监控:</strong> 在边缘位置追踪有意义数据及统计结果，从而为我们带来准确的生产状态结论。<br><strong>动态路由:</strong> 以动态方式根据需要将请求路由至不同后端集群处。<br><strong>压力测试:</strong> 逐渐增加指向集群的负载流量，从而计算性能水平。<br><strong>负载分配:</strong> 为每一种负载类型分配对应容量，并弃用超出限定值的请求。<br><strong>静态响应处理:</strong> 在边缘位置直接建立部分响应，从而避免其流入内部集群。<br>Netflix公司还利用Zuul的功能通过金丝雀版本实现精确路由与压力测试。<br>虽然提供的功能还算丰富，但都比较弱，很难满足高要求的场景。<br>性能和高可用性<br>Zuul处理每个请求的方式是针对每个请求是用一个线程来处理。通常情况下，为了提高性能，所有请求会被放到处理队列中，从线程池中选取空闲线程来处理该请求。2016年底，Netflix将它们的网关服务Zuul进行了升级，全新的Zuul 2将HTTP请求的处理方式从同步变成了异步，以提升其处理性能。除了Netflix公司，目前Zuul在企业中用的还比较少，性能和稳定性方面还有待进一步观察。<br>扩展性上，<br>从Zuul的架构图上可以看出，Zuul更像是一个过滤器框架，其自身的路由、日志、反向代理、ddos预防等功能都是通过过滤器实现的。提供了PRE、ROUTING、POST和ERROR四个扩展点，可以很容易的添加自定义的过滤器。<br>易用性上<br>Zuul的搭建非常简便，使用和配置也很简单。Zuul的开源社区比较活跃，一直在更新状态，但版本不算太稳定，在使用的过程中，还有一些坑要踩。例如重定向问题、异常处理问题，还没有解决的很好，需要自己重写一些filter。</p>
+<h2 id="3-Mashape-Kong"><a href="#3-Mashape-Kong" class="headerlink" title="3.Mashape Kong"></a>3.Mashape Kong</h2><p><img src="http://image.winrains.cn/2019/10/20191011210956-57e51.jpeg" alt="img"><br>Kong的一个非常诱人的地方就是提供了大量的插件来扩展应用，通过设置不同的插件可以为服务提供各种增强的功能。Kong默认插件插件包括：<br><strong>l 身份认证：</strong>Kong提供了Basic Authentication、Key authentication、OAuth2.0 authentication、HMAC authentication、JWT、LDAP authentication认证实现。<br><strong>l 安全：</strong>ACL（访问控制）、CORS（跨域资源共享）、动态SSL、IP限制、爬虫检测实现。<br><strong>l 流量控制：</strong>请求限流（基于请求计数限流）、上游响应限流（根据upstream响应计数限流）、请求大小限制。限流支持本地、Redis和集群限流模式。<br><strong>l 分析监控：</strong>Galileo（记录请求和响应数据，实现API分析）、Datadog（记录API Metric如请求次数、请求大小、响应状态和延迟，可视化API Metric）、Runscope（记录请求和响应数据，实现API性能测试和监控）。<br><strong>l 转换：</strong>请求转换、响应转换<br>Kong本身也是基于Nginx的，所以在性能和稳定性上都没有问题。Kong作为一款商业软件，在Nginx上做了很扩展工作，而且还有很多付费的商业插件。Kong本身也有付费的企业版，其中包括技术支持、使用培训服务以及 API 分析插件。<br>从对上面三种方案的比较中可以看到，Spring Cloud Zuul非常适合创业初期的团队，快速搭建一个“基本可用”的API网关。Nginx适合有较强研发团队，自主开发企业自己的API网关。Kong适合于没有自身研发团队，但需要拥有企业级API网关能力的公司。</p>
+<h2 id="4、Orange："><a href="#4、Orange：" class="headerlink" title="4、Orange："></a>4、Orange：</h2><p>和Kong类似也是基于OpenResty的一个API网关程序，是由国人开发的。</p>
+<h2 id="5、apiaxle"><a href="#5、apiaxle" class="headerlink" title="5、apiaxle:"></a>5、apiaxle:</h2><p>Nodejs 实现的一个 API 网关。</p>
+<h2 id="6、api-umbrella"><a href="#6、api-umbrella" class="headerlink" title="6、api-umbrella:"></a>6、api-umbrella:</h2><p>Ruby 实现的一个 API 网关。</p>
+<h2 id="7、Tyk："><a href="#7、Tyk：" class="headerlink" title="7、Tyk："></a>7、Tyk：</h2><p>Tyk是一个开放源码的API网关，它是快速、可扩展和现代的。Tyk提供了一个API管理平台，其中包括API网关、API分析、开发人员门户和API管理面板。Try 是一个基于Go实现的网关服务。<br><strong>比较：</strong><br>Spring Cloud Zuul非常适合创业初期的团队，快速搭建一个“基本可用”的API网关。<br>OpenResty+Nginx适合有较强研发团队，自主开发企业自己的API网关。<br>Kong适合于没有自身研发团队，但需要拥有企业级API网关能力的公司。<br>Try扩展需要会Go语言<br>但是上面的这些 API 网关都缺少超时，熔断，重试，聚合查询等功能。这个需要我们业务自己开发。<br><img src="http://image.winrains.cn/2019/10/20191011210956-19ac0.png" alt="img"><br>简单解释：<br>OpenResty Api Gateway<br>HTTP 请求先由DNS在拿到第一手流量后负载均衡到基于 OpenResty 的 API Gataway 网关集群，在这个流程我们可以使用像 Kong,Orage,Tyk 这些开源的支持高并发高访问量 API 网关程序在做第一层流量的防护，在这一级我们可以做一些像身份认证，安全，监控，日志，流控等策略。除了这些我们还可以做一些服务的发现和注册（这个要看不同网关的支持程度），接口的版本控制，路由重写等。<br>OpenResty Api Gateway也可以直接访问内部服务，比如一些对外开放平台api。<br>Web/Mobile Api Gateway<br>然后再由这些 OpenResty API 网关把请求再负载到不同的 Web/Mobile Api Gateway，在这里我们做聚合服务这个操作，具体体现也就是图中的黄色区域是需要由各个语言的开发人员来需要写代码实现的。这期间对于有需求的接口，我们可以应用超时，缓存，熔断，重试等策略。<br>从 Web/Mobile Api Gateway 到后端微服务集群这中间就属于内部的通讯了。</p>
+<h1 id="6、设计API网关"><a href="#6、设计API网关" class="headerlink" title="6、设计API网关"></a>6、设计API网关</h1><h2 id="一：功能需求"><a href="#一：功能需求" class="headerlink" title="一：功能需求"></a>一：功能需求</h2><p>1、API 生命周期管理功能：<br>覆盖 API 的定义、测试、发布的整个生命周期管理，便捷的日常管理、版本管理，支持热升级和快速回滚<br>2、开发和使用支持功能：<br>提供页面调试工具，自动生成 API 文档和 SDK，大大降低人力成本。<br>3、安全防护功能：<br>API 请求到达网关需要经过严格的身份认证、权限认证，才能到达后端服务。支持算法签名，支持 SSL 加密。<br>4、流量控制功能：<br>可控制单位时间内 API 允许被调用次数。用来保护企业的后端服务，实现业务分级和用户分级。 支持对 API 流控，您可以根据 API 的重要程度来配置不同流控，从而保障重要业务的稳定运行； 支持用户、应用和例外流控，您可以根据用户的重要性来配置不同流控，从而可以保证大用户的权益； 流控粒度：分钟、小时、天。<br>5、请求管理功能：<br>可根据配置进行参数类型、参数值（范围、枚举、正则、Json Schema）的校验，减少后端对非法请求、无效请求的资源消耗和处理成本。可以在 API 网关定义参数映射规则，网关通过映射规则将后端服务通过映射翻译成任何形式，以满足不同用户的不同需求，从而避免功能重复开发。<br>6）监控告警功能：<br>提供实时、可视化的 API 监控，包括：调用量、调用方式、响应时间、错误率，让您能够清楚的了解 API 的运行状况和用户的行为习惯。<br>支持自定义报警规则，来针对异常情况进行报警，降低故障处理时间。<br>提供可订阅的数据分析报表和智能分析。</p>
+<h2 id="二：高性能设计"><a href="#二：高性能设计" class="headerlink" title="二：高性能设计"></a>二：高性能设计</h2><p>传统的基于线程的并发模型（Thread-based concurrency），为每一个请求分配一个线程或进程。这种模型编程简单，可以将处理一个完整请求的代码编写在一个代码路径中。这种模型的弊端是，随着线程(进程)数的上升，操作系统在这些线程(进程)之间的频繁切换，将急剧降低系统的性能。<br><img src="http://image.winrains.cn/2019/10/20191011210956-c3d04.jpeg" alt="img"></p>
+<h2 id="三：高可用设计"><a href="#三：高可用设计" class="headerlink" title="三：高可用设计"></a>三：高可用设计</h2><h3 id="1、无状态设计原则。"><a href="#1、无状态设计原则。" class="headerlink" title="1、无状态设计原则。"></a>1、无状态设计原则。</h3><p>网关层为保证高可以，易于伸缩，快速启动，需要设计成无状态的。用户的状态数据我们通常使用session对象来封装，网关层要设计成无状态的，也就是说，不能由网关来负责session的维护。那由谁来维护session相关的信息呢？我们是采用cookie+session服务器的方式;<br>a) 用户在登录页完成登录操作后，服务器会生成一个登录session信息，保存起来，设置个失效时间，并设置到用户的cookie里<br>b) 用户后续的每次请求里会带着这个cookie信息，服务端会对这个cookie信息进行校验，通过了就认为是合法用户，执行请求操作</p>
+<h3 id="2、优雅下线原则"><a href="#2、优雅下线原则" class="headerlink" title="2、优雅下线原则"></a>2、优雅下线原则</h3><p>当需要撤掉一台网关服务的时候，不是直接结束网关进程，而是先关闭监听套接字，但是继续为当前连接的客户提供服务，所有客户端的服务完成后，在把进程关闭。</p>
+<h3 id="3、Slow-start特性"><a href="#3、Slow-start特性" class="headerlink" title="3、Slow start特性"></a>3、Slow start特性</h3><p>当网关监听到有一台新的服务注册上来时，考虑到有些服务启动后，刚开始会有许多初始化的工作，此时服务对请求的响应速度是比较慢的。如果一开始就给这台服务分配太多的压力，有可能导致服务瞬间被压垮。为了避免这种情况，网关层需要考虑支持Slow Start特性。即，经过一段时间，逐渐把压力增加到预设的值。</p>
+<h3 id="4、扩展性设计"><a href="#4、扩展性设计" class="headerlink" title="4、扩展性设计"></a>4、扩展性设计</h3><p>我们知道，网关对请求的处理，可以分为三个阶段：接受请求、路由并转发请求、接受服务的返回数据并返回给请求者，除此之外，还有一种情况是处理错误。所以我们也可以在这四个地方添加扩展点。<br>（1）接受到请求后<br>（2）定位到一个服务，并准备转发之前<br>（3）接受到服务的返回数据，返回给客户端之前<br>（4）当服务调用失败后<br>拦截器的处理顺序，可以分为两大类：一类为网关平台自带的拦截器，例如安全校验、日志记录等；一类为网关层逻辑开发的，例如格式转换等。一般来说，网关先执行网关平台自带的拦截器，再执行为了业务逻辑编写的拦截器。当然，网关也需要提供一种机制，可以较容易地调整拦截器的执行顺序。最简单的一种方法，就是给每个拦截器定义一个优先级，网关按优先级顺序依次调用各拦截器。<br>对网关层来说，它接收和处理的数据都是Request对象，网关层在接收到请求后，把请求封装为Request对象，为了让后续的filter能够获得这个对象，可以考虑把Request对象保存在线程变量中。<br>有些拦截器，例如一些调试日志的拦截器，通常情况下都是关闭的，只有在出现问题的时候才需要打开。为了保证网关的高可用，网关层必须具备在线启用或关闭拦截器的能力。一般，网关需要提供restful接口方式，来关闭和启用一个拦截器。类似这样的命令：PUT /apigateway/v1/filters/filterName?enable=value</p>
+<h3 id="5、API管理与动态发布设计"><a href="#5、API管理与动态发布设计" class="headerlink" title="5、API管理与动态发布设计"></a>5、API管理与动态发布设计</h3><p>对服务管理来说，分为前端服务管理与后端服务管理。前端服务指的是网关层暴露给客户端使用的服务API，后端服务指的是服务层提供的业务服务API。一个服务暴露给客户端使用，除了网关层和服务层提供服务的代码外，还需要配置前端服务与后端服务的映射关系。<br>网关层API调用服务层API，有多种方式。例如，可以由按照服务层API的服务契约，生成一段客户端代码，发布给网关层使用。这种方式的弊端是，网关层代码依赖于服务层代码，服务层频繁修改和调整接口时，导致网关层的代码很难维护。<br>可以通过配置前后端服务映射的方式，解耦网关层对服务层的依赖。当服务层的API（例如服务名、参数名等）发生变化时，只需调整映射关系，无需对网关层的代码进行调整。网关层按照映射，自动装配服务层API所需要的数据格式。这样，网关层团队与服务层团队可以相互不受干扰地开发各自的服务。<br>参考：<br><a href="https://www.nginx.com/blog/building-microservices-using-an-api-gateway/" target="_blank" rel="noopener">https://www.nginx.com/blog/building-microservices-using-an-api-gateway/</a><br><a href="http://blog.csdn.net/sD7O95O/article/details/78771245" target="_blank" rel="noopener">http://blog.csdn.net/sD7O95O/article/details/78771245</a><br><a href="http://blog.csdn.net/zhengpeitao/article/details/72722301" target="_blank" rel="noopener">http://blog.csdn.net/zhengpeitao/article/details/72722301</a></p>
+<blockquote>
+<p>作者：规速</p>
+<p>来源：<a href="https://blog.csdn.net/hguisu/article/details/79143584" target="_blank" rel="noopener">https://blog.csdn.net/hguisu/article/details/79143584</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/28/%E6%9E%B6%E6%9E%84%E8%AE%BE%E8%AE%A1%EF%BC%883%EF%BC%89%EF%BC%9A%E6%9E%B6%E6%9E%84%E6%A8%A1%E5%BC%8F/" rel="prev" title="架构设计（3）：架构模式">
+      <i class="fa fa-chevron-left"></i> 架构设计（3）：架构模式
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/28/%E6%9E%B6%E6%9E%84%E8%AE%BE%E8%AE%A1%EF%BC%885%EF%BC%89%EF%BC%9A%E6%9E%B6%E6%9E%84%E6%84%BF%E6%99%AF%E5%88%86%E6%9E%90/" rel="next" title="架构设计（5）：架构愿景分析">
+      架构设计（5）：架构愿景分析 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#1、前言"><span class="nav-number">1.</span> <span class="nav-text">1、前言</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#2、概念"><span class="nav-number">2.</span> <span class="nav-text">2、概念</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#3、网关使用场景"><span class="nav-number">3.</span> <span class="nav-text">3、网关使用场景</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#1、Web-App-APIGateway-和-Mobile-App-APIGateway："><span class="nav-number">3.1.</span> <span class="nav-text">1、Web App APIGateway 和 Mobile App APIGateway：</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2、Partner-OpenAPI："><span class="nav-number">3.2.</span> <span class="nav-text">2、Partner OpenAPI：</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#4、API网关需要考虑的因素"><span class="nav-number">4.</span> <span class="nav-text">4、API网关需要考虑的因素</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#1、安全性问题"><span class="nav-number">4.1.</span> <span class="nav-text">1、安全性问题</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2、性能问题"><span class="nav-number">4.2.</span> <span class="nav-text">2、性能问题</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3、高可用问题"><span class="nav-number">4.3.</span> <span class="nav-text">3、高可用问题</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#4、扩展性问题"><span class="nav-number">4.4.</span> <span class="nav-text">4、扩展性问题</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#5、API高效运维的问题"><span class="nav-number">4.5.</span> <span class="nav-text">5、API高效运维的问题</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#6、API全生命周期的管理"><span class="nav-number">4.6.</span> <span class="nav-text">6、API全生命周期的管理</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#5、业界常用的API网关方案"><span class="nav-number">5.</span> <span class="nav-text">5、业界常用的API网关方案</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#1：基于OpenResty-的-Nginx"><span class="nav-number">5.1.</span> <span class="nav-text">1：基于OpenResty 的 Nginx</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2：Spring-Cloud-Zuul"><span class="nav-number">5.2.</span> <span class="nav-text">2：Spring Cloud Zuul</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3-Mashape-Kong"><span class="nav-number">5.3.</span> <span class="nav-text">3.Mashape Kong</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#4、Orange："><span class="nav-number">5.4.</span> <span class="nav-text">4、Orange：</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#5、apiaxle"><span class="nav-number">5.5.</span> <span class="nav-text">5、apiaxle:</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#6、api-umbrella"><span class="nav-number">5.6.</span> <span class="nav-text">6、api-umbrella:</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#7、Tyk："><span class="nav-number">5.7.</span> <span class="nav-text">7、Tyk：</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#6、设计API网关"><span class="nav-number">6.</span> <span class="nav-text">6、设计API网关</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#一：功能需求"><span class="nav-number">6.1.</span> <span class="nav-text">一：功能需求</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#二：高性能设计"><span class="nav-number">6.2.</span> <span class="nav-text">二：高性能设计</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#三：高可用设计"><span class="nav-number">6.3.</span> <span class="nav-text">三：高可用设计</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1、无状态设计原则。"><span class="nav-number">6.3.1.</span> <span class="nav-text">1、无状态设计原则。</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2、优雅下线原则"><span class="nav-number">6.3.2.</span> <span class="nav-text">2、优雅下线原则</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#3、Slow-start特性"><span class="nav-number">6.3.3.</span> <span class="nav-text">3、Slow start特性</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#4、扩展性设计"><span class="nav-number">6.3.4.</span> <span class="nav-text">4、扩展性设计</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#5、API管理与动态发布设计"><span class="nav-number">6.3.5.</span> <span class="nav-text">5、API管理与动态发布设计</span></a></li></ol></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">469</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">82</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">108</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
