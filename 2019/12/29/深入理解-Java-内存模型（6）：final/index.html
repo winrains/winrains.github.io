@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="与前面介绍的锁和 volatile 相比较，对 final 域的读和写更像是普通的变量访问。对于 final 域，编译器和处理器要遵守两个重排序规则：  在构造函数内对一个 final 域的写入，与随后把这个被构造对象的引用赋值给一个引用变量，这两个操作之间不能重排序。 初次读一个包含 final 域的对象的引用，与随后初次读这个 final 域，这两个操作之间不能重排序。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="深入理解 Java 内存模型（6）：final">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2019&#x2F;12&#x2F;29&#x2F;%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3-Java-%E5%86%85%E5%AD%98%E6%A8%A1%E5%9E%8B%EF%BC%886%EF%BC%89%EF%BC%9Afinal&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="与前面介绍的锁和 volatile 相比较，对 final 域的读和写更像是普通的变量访问。对于 final 域，编译器和处理器要遵守两个重排序规则：  在构造函数内对一个 final 域的写入，与随后把这个被构造对象的引用赋值给一个引用变量，这两个操作之间不能重排序。 初次读一个包含 final 域的对象的引用，与随后初次读这个 final 域，这两个操作之间不能重排序。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;460fc-6628576a54f0ba625c8c3af4586cef3a.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;a35e8-a0a9b023bc56ab97bbda8812cdca7236.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;5eefa-29b097c36fd531028991826bb7c835db.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;796e4-89e0666e4c3348a4cede04bd25a6f64e.png">
+<meta property="og:updated_time" content="2019-12-29T05:25:33.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;460fc-6628576a54f0ba625c8c3af4586cef3a.jpg">
+
+<link rel="canonical" href="http://congsheng.wang/2019/12/29/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3-Java-%E5%86%85%E5%AD%98%E6%A8%A1%E5%9E%8B%EF%BC%886%EF%BC%89%EF%BC%9Afinal/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>深入理解 Java 内存模型（6）：final | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">winrains的个人博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">108</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">83</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">489</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2019/12/29/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3-Java-%E5%86%85%E5%AD%98%E6%A8%A1%E5%9E%8B%EF%BC%886%EF%BC%89%EF%BC%9Afinal/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="winrains">
+      <meta itemprop="description" content="淡泊明志">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          深入理解 Java 内存模型（6）：final
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-29 13:25:33" itemprop="dateCreated datePublished" datetime="2019-12-29T13:25:33+08:00">2019-12-29</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/" itemprop="url" rel="index">
+                    <span itemprop="name">JVM</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/%E5%86%85%E5%AD%98%E6%A8%A1%E5%9E%8B/" itemprop="url" rel="index">
+                    <span itemprop="name">内存模型</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>与前面介绍的锁和 <code>volatile</code> 相比较，对 <code>final</code> 域的读和写更像是普通的变量访问。对于 <code>final</code> 域，编译器和处理器要遵守两个重排序规则：</p>
+<ol>
+<li>在构造函数内对一个 <code>final</code> 域的写入，与随后把这个被构造对象的引用赋值给一个引用变量，这两个操作之间不能重排序。</li>
+<li>初次读一个包含 <code>final</code> 域的对象的引用，与随后初次读这个 <code>final</code> 域，这两个操作之间不能重排序。</li>
+</ol>
+<a id="more"></a>
+
+<p>下面，我们通过一些示例性的代码来分别说明这两个规则：</p>
+<figure class="highlight cs"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">class</span> <span class="title">FinalExample</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">int</span> i; <span class="comment">// 普通变量</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    final <span class="keyword">int</span> j; <span class="comment">// final 变量</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">static</span> FinalExample obj;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">FinalExample</span>(<span class="params"></span>)</span> &#123; <span class="comment">// 构造函数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        i = <span class="number">1</span>; <span class="comment">// 写普通域</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        j = <span class="number">2</span>; <span class="comment">// 写 final 域</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">writer</span>(<span class="params"></span>)</span> &#123; <span class="comment">// 写线程 A 执行</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        obj = <span class="keyword">new</span> FinalExample();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">reader</span>(<span class="params"></span>)</span> &#123; <span class="comment">// 读线程 B 执行</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        FinalExample <span class="keyword">object</span> = obj; <span class="comment">// 读对象引用</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">int</span> a = <span class="keyword">object</span>.i; <span class="comment">// 读普通域</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">int</span> b = <span class="keyword">object</span>.j; <span class="comment">// 读 final 域</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>这里假设一个线程 A 执行 <code>writer ()</code> 方法，随后另一个线程 B 执行<code>reader ()</code> 方法。下面我们通过这两个线程的交互来说明这两个规则。</p>
+<h2 id="写-final-域的重排序规则"><a href="#写-final-域的重排序规则" class="headerlink" title="写 final 域的重排序规则"></a>写 final 域的重排序规则</h2><p>写 <code>final</code> 域的重排序规则禁止把 <code>final</code> 域的写重排序到构造函数之外。这个规则的实现包含下面 2 个方面：</p>
+<ul>
+<li>JMM 禁止编译器把 <code>final</code> 域的写重排序到构造函数之外。</li>
+<li>编译器会在 <code>final</code> 域的写之后，构造函数 <code>return</code> 之前，插入一个 StoreStore 屏障。这个屏障禁止处理器把 <code>final</code> 域的写重排序到构造函数之外。</li>
+</ul>
+<p>现在让我们分析 <code>writer ()</code> 方法。<code>writer ()</code> 方法只包含一行代码：<code>finalExample = new FinalExample ()</code>。这行代码包含两个步骤：</p>
+<ol>
+<li>构造一个 <code>FinalExample</code> 类型的对象；</li>
+<li>把这个对象的引用赋值给引用变量 <code>obj</code>。</li>
+</ol>
+<p>假设线程 B 读对象引用与读对象的成员域之间没有重排序（马上会说明为什么需要这个假设），下图是一种可能的执行时序：<br><img src="http://image.winrains.cn/2019/10/460fc-6628576a54f0ba625c8c3af4586cef3a.jpg" alt="img"><br>在上图中，写普通域的操作被编译器重排序到了构造函数之外，读线程 B 错误的读取了普通变量 <code>i</code> 初始化之前的值。而写 <code>final</code> 域的操作，被写 <code>final</code> 域的重排序规则“限定”在了构造函数之内，读线程 B 正确的读取了 <code>final</code> 变量初始化之后的值。<br>写 <code>final</code> 域的重排序规则可以确保：在对象引用为任意线程可见之前，对象的 <code>final</code> 域已经被正确初始化过了，而普通域不具有这个保障。以上图为例，在读线程 B“看到”对象引用 <code>obj</code> 时，很可能 <code>obj</code> 对象还没有构造完成（对普通域 <code>i</code> 的写操作被重排序到构造函数外，此时初始值 2 还没有写入普通域 <code>i</code>）。</p>
+<h2 id="读-final-域的重排序规则"><a href="#读-final-域的重排序规则" class="headerlink" title="读 final 域的重排序规则"></a>读 final 域的重排序规则</h2><p>读 <code>final</code> 域的重排序规则如下：</p>
+<ul>
+<li>在一个线程中，初次读对象引用与初次读该对象包含的 <code>final</code> 域，JMM 禁止处理器重排序这两个操作（注意，这个规则仅仅针对处理器）。编译器会在读 <code>final</code> 域操作的前面插入一个 LoadLoad 屏障。</li>
+</ul>
+<p>初次读对象引用与初次读该对象包含的 <code>final</code> 域，这两个操作之间存在间接依赖关系。由于编译器遵守间接依赖关系，因此编译器不会重排序这两个操作。大多数处理器也会遵守间接依赖，大多数处理器也不会重排序这两个操作。但有少数处理器允许对存在间接依赖关系的操作做重排序（比如 alpha 处理器），这个规则就是专门用来针对这种处理器。<br><code>reader()</code> 方法包含三个操作：</p>
+<ol>
+<li>初次读引用变量 <code>obj</code>;</li>
+<li>初次读引用变量 <code>obj</code> 指向对象的普通域 j。</li>
+<li>初次读引用变量 <code>obj</code> 指向对象的 final 域 i。</li>
+</ol>
+<p>现在我们假设写线程 A 没有发生任何重排序，同时程序在不遵守间接依赖的处理器上执行，下面是一种可能的执行时序：<br><img src="http://image.winrains.cn/2019/10/a35e8-a0a9b023bc56ab97bbda8812cdca7236.png" alt="img"><br>在上图中，读对象的普通域的操作被处理器重排序到读对象引用之前。读普通域时，该域还没有被写线程 A 写入，这是一个错误的读取操作。而读 <code>final</code> 域的重排序规则会把读对象 <code>final</code> 域的操作“限定”在读对象引用之后，此时该 <code>final</code> 域已经被 A 线程初始化过了，这是一个正确的读取操作。<br>读 <code>final</code> 域的重排序规则可以确保：在读一个对象的 <code>final</code> 域之前，一定会先读包含这个 <code>final</code> 域的对象的引用。在这个示例程序中，如果该引用不为 null，那么引用对象的 <code>final</code> 域一定已经被 A 线程初始化过了。</p>
+<h2 id="如果-final-域是引用类型"><a href="#如果-final-域是引用类型" class="headerlink" title="如果 final 域是引用类型"></a>如果 final 域是引用类型</h2><p>上面我们看到的 <code>final</code> 域是基础数据类型，下面让我们看看如果 <code>final</code> 域是引用类型，将会有什么效果？<br>请看下列示例代码：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">class</span> <span class="symbol">FinalReferenceExample</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">final</span> <span class="built_in">int</span>[] <span class="built_in">int</span>Array; <span class="comment">// final 是引用类型</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    static FinalReferenceExample obj;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> FinalReferenceExample() &#123; <span class="comment">// 构造函数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">int</span>Array = new <span class="built_in">int</span>[<span class="number">1</span>]; <span class="comment">// 1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">int</span>Array[<span class="number">0</span>] = <span class="number">1</span>; <span class="comment">// 2</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> static <span class="built_in">void</span> writerOne() &#123; <span class="comment">// 写线程 A 执行</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        obj = new FinalReferenceExample(); <span class="comment">// 3</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> static <span class="built_in">void</span> writerTwo() &#123; <span class="comment">// 写线程 B 执行</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        obj.<span class="built_in">int</span>Array[<span class="number">0</span>] = <span class="number">2</span>; <span class="comment">// 4</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> static <span class="built_in">void</span> reader() &#123; <span class="comment">// 读线程 C 执行</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (obj != <span class="literal">null</span>) &#123; <span class="comment">// 5</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            <span class="built_in">int</span> temp1 = obj.<span class="built_in">int</span>Array[<span class="number">0</span>]; <span class="comment">// 6</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>这里 <code>final</code> 域为一个引用类型，它引用一个 int 型的数组对象。对于引用类型，写 <code>final</code> 域的重排序规则对编译器和处理器增加了如下约束：</p>
+<ol>
+<li>在构造函数内对一个 <code>final</code> 引用的对象的成员域的写入，与随后在构造函数外把这个被构造对象的引用赋值给一个引用变量，这两个操作之间不能重排序。</li>
+</ol>
+<p>对上面的示例程序，我们假设首先线程 A 执行<code>writerOne()</code> 方法，执行完后线程 B 执行<code>writerTwo()</code> 方法，执行完后线程 C 执行<code>reader ()</code> 方法。下面是一种可能的线程执行时序：<br><img src="http://image.winrains.cn/2019/10/5eefa-29b097c36fd531028991826bb7c835db.png" alt="img"><br>在上图中，1 是对 <code>final</code> 域的写入，2 是对这个 <code>final</code> 域引用的对象的成员域的写入，3 是把被构造的对象的引用赋值给某个引用变量。这里除了前面提到的 1 不能和 3 重排序外，2 和 3 也不能重排序。<br>JMM 可以确保读线程 C 至少能看到写线程 A 在构造函数中对 <code>final</code> 引用对象的成员域的写入。即 C 至少能看到数组下标 0 的值为 1。而写线程 B 对数组元素的写入，读线程 C 可能看的到，也可能看不到。JMM 不保证线程 B 的写入对读线程 C 可见，因为写线程 B 和读线程 C 之间存在数据竞争，此时的执行结果不可预知。<br>如果想要确保读线程 C 看到写线程 B 对数组元素的写入，写线程 B 和读线程 C 之间需要使用同步原语（<code>lock</code> 或 <code>volatile</code>）来确保内存可见性。</p>
+<h2 id="为什么-final-引用不能从构造函数内“逸出”"><a href="#为什么-final-引用不能从构造函数内“逸出”" class="headerlink" title="为什么 final 引用不能从构造函数内“逸出”"></a>为什么 final 引用不能从构造函数内“逸出”</h2><p>前面我们提到过，写 <code>final</code> 域的重排序规则可以确保：在引用变量为任意线程可见之前，该引用变量指向的对象的 <code>final</code> 域已经在构造函数中被正确初始化过了。其实要得到这个效果，还需要一个保证：在构造函数内部，不能让这个被构造对象的引用为其他线程可见，也就是对象引用不能在构造函数中“逸出”。为了说明问题，让我们来看下面示例代码：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">FinalReferenceEscapeExample</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">final</span> <span class="keyword">int</span> i;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">static</span> FinalReferenceEscapeExample obj;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="title">FinalReferenceEscapeExample</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        i = <span class="number">1</span>; <span class="comment">// 1 写 final 域</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        obj = <span class="keyword">this</span>; <span class="comment">// 2 this 引用在此“逸出”</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">writer</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">new</span> FinalReferenceEscapeExample();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> reader &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (obj != <span class="keyword">null</span>) &#123; <span class="comment">// 3</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">int</span> temp = obj.i; <span class="comment">// 4</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>假设一个线程 A 执行 <code>writer()</code> 方法，另一个线程 B 执行<code>reader()</code> 方法。这里的操作 2 使得对象还未完成构造前就为线程 B 可见。即使这里的操作 2 是构造函数的最后一步，且即使在程序中操作 2 排在操作 1 后面，执行 read() 方法的线程仍然可能无法看到 final 域被初始化后的值，因为这里的操作 1 和操作 2 之间可能被重排序。实际的执行时序可能如下图所示：<br><img src="http://image.winrains.cn/2019/10/796e4-89e0666e4c3348a4cede04bd25a6f64e.png" alt="img"><br>从上图我们可以看出：在构造函数返回前，被构造对象的引用不能为其他线程可见，因为此时的 <code>final</code> 域可能还没有被初始化。在构造函数返回后，任意线程都将保证能看到 <code>final</code> 域正确初始化之后的值。</p>
+<h2 id="final-语义在处理器中的实现"><a href="#final-语义在处理器中的实现" class="headerlink" title="final 语义在处理器中的实现"></a>final 语义在处理器中的实现</h2><p>现在我们以 x86 处理器为例，说明 <code>final</code> 语义在处理器中的具体实现。<br>上面我们提到，写 <code>final</code> 域的重排序规则会要求译编器在 <code>final</code> 域的写之后，构造函数 <code>return</code> 之前，插入一个 StoreStore 障屏。读 final 域的重排序规则要求编译器在读 <code>final</code> 域的操作前面插入一个 LoadLoad 屏障。<br>由于 x86 处理器不会对写 - 写操作做重排序，所以在 x86 处理器中，写 <code>final</code> 域需要的 StoreStore 障屏会被省略掉。同样，由于 x86 处理器不会对存在间接依赖关系的操作做重排序，所以在 x86 处理器中，读 <code>final</code> 域需要的 LoadLoad 屏障也会被省略掉。也就是说在 x86 处理器中，<code>final</code> 域的读 / 写不会插入任何内存屏障！</p>
+<h2 id="JSR-133-为什么要增强-final-的语义"><a href="#JSR-133-为什么要增强-final-的语义" class="headerlink" title="JSR-133 为什么要增强 final 的语义"></a>JSR-133 为什么要增强 final 的语义</h2><p>在旧的 Java 内存模型中 ，最严重的一个缺陷就是线程可能看到 <code>final</code> 域的值会改变。比如，一个线程当前看到一个整形 <code>final</code> 域的值为 0（还未初始化之前的默认值），过一段时间之后这个线程再去读这个 <code>final</code> 域的值时，却发现值变为了 1（被某个线程初始化之后的值）。最常见的例子就是在旧的 Java 内存模型中，String 的值可能会改变（参考文献 2 中有一个具体的例子，感兴趣的读者可以自行参考，这里就不赘述了）。<br>为了修补这个漏洞，JSR-133 专家组增强了 <code>final</code> 的语义。通过为 <code>final</code> 域增加写和读重排序规则，可以为 java 程序员提供初始化安全保证：只要对象是正确构造的（被构造对象的引用在构造函数中没有“逸出”），那么不需要使用同步（指 <code>lock</code> 和 <code>volatile</code> 的使用），就可以保证任意线程都能看到这个 <code>final</code> 域在构造函数中被初始化之后的值。</p>
+<h2 id="参考文献"><a href="#参考文献" class="headerlink" title="参考文献"></a>参考文献</h2><ol>
+<li><a href="http://www.amazon.com/Java-Concurrency-Practice-Brian-Goetz/dp/0321349601/ref=pd_sim_b_1" target="_blank" rel="noopener"> Java Concurrency in Practice </a></li>
+<li><a href="http://www.cs.umd.edu/users/pugh/java/memoryModel/jsr-133-faq.html" target="_blank" rel="noopener"> JSR 133 (Java Memory Model) FAQ </a></li>
+<li><a href="http://www.amazon.com/Java-Concurrency-Practice-Brian-Goetz/dp/0321349601/ref=pd_sim_b_1" target="_blank" rel="noopener"> Java Concurrency in Practice </a></li>
+<li><a href="http://gee.cs.oswego.edu/dl/jmm/cookbook.html" target="_blank" rel="noopener"> The JSR-133 Cookbook for Compiler Writers </a></li>
+<li><a href="http://download.intel.com/products/processor/manual/253668.pdf" target="_blank" rel="noopener">Intel® 64 and IA-32 ArchitecturesvSoftware Developer’s Manual Volume 3A: System Programming Guide, Part 1 </a></li>
+</ol>
+<blockquote>
+<p>作者：程晓明</p>
+<p>来源：<a href="https://www.infoq.cn/article/java-memory-model-6" target="_blank" rel="noopener">https://www.infoq.cn/article/java-memory-model-6</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/29/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3-Java-%E5%86%85%E5%AD%98%E6%A8%A1%E5%9E%8B%EF%BC%885%EF%BC%89%EF%BC%9A%E9%94%81/" rel="prev" title="深入理解 Java 内存模型（5）：锁">
+      <i class="fa fa-chevron-left"></i> 深入理解 Java 内存模型（5）：锁
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/29/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3-Java-%E5%86%85%E5%AD%98%E6%A8%A1%E5%9E%8B%EF%BC%887%EF%BC%89%EF%BC%9A%E6%80%BB%E7%BB%93/" rel="next" title="深入理解 Java 内存模型（7）：总结">
+      深入理解 Java 内存模型（7）：总结 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#写-final-域的重排序规则"><span class="nav-number">1.</span> <span class="nav-text">写 final 域的重排序规则</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#读-final-域的重排序规则"><span class="nav-number">2.</span> <span class="nav-text">读 final 域的重排序规则</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#如果-final-域是引用类型"><span class="nav-number">3.</span> <span class="nav-text">如果 final 域是引用类型</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#为什么-final-引用不能从构造函数内“逸出”"><span class="nav-number">4.</span> <span class="nav-text">为什么 final 引用不能从构造函数内“逸出”</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#final-语义在处理器中的实现"><span class="nav-number">5.</span> <span class="nav-text">final 语义在处理器中的实现</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#JSR-133-为什么要增强-final-的语义"><span class="nav-number">6.</span> <span class="nav-text">JSR-133 为什么要增强 final 的语义</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#参考文献"><span class="nav-number">7.</span> <span class="nav-text">参考文献</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">winrains</p>
+  <div class="site-description" itemprop="description">淡泊明志</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">489</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">83</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">108</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">winrains</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
