@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="Java通过new关键字来创建对象时，JVM在堆中开辟空间存放对象实例数据，这时，定义的局部变量仍存储在栈中，它包含指向堆中对象的指针 ( 即对象在堆内存的起始地址索引 )，而不是对象本身，这个指针在Java中，被称为引用。来看下面的Java方法，它持有一个由String解析而来的Integer对象。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="详解JVM内存管理与垃圾回收机制（4）：References">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2019&#x2F;12&#x2F;29&#x2F;%E8%AF%A6%E8%A7%A3JVM%E5%86%85%E5%AD%98%E7%AE%A1%E7%90%86%E4%B8%8E%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E6%9C%BA%E5%88%B6%EF%BC%884%EF%BC%89%EF%BC%9AReferences&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="Java通过new关键字来创建对象时，JVM在堆中开辟空间存放对象实例数据，这时，定义的局部变量仍存储在栈中，它包含指向堆中对象的指针 ( 即对象在堆内存的起始地址索引 )，而不是对象本身，这个指针在Java中，被称为引用。来看下面的Java方法，它持有一个由String解析而来的Integer对象。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020121337-80d1e.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020121338-2cd15.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020121340-68385.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020121341-dbde6.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020121342-49281.png">
+<meta property="og:updated_time" content="2019-12-29T14:38:41.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020121337-80d1e.png">
+
+<link rel="canonical" href="http://congsheng.wang/2019/12/29/%E8%AF%A6%E8%A7%A3JVM%E5%86%85%E5%AD%98%E7%AE%A1%E7%90%86%E4%B8%8E%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E6%9C%BA%E5%88%B6%EF%BC%884%EF%BC%89%EF%BC%9AReferences/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>详解JVM内存管理与垃圾回收机制（4）：References | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">111</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">83</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">503</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2019/12/29/%E8%AF%A6%E8%A7%A3JVM%E5%86%85%E5%AD%98%E7%AE%A1%E7%90%86%E4%B8%8E%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E6%9C%BA%E5%88%B6%EF%BC%884%EF%BC%89%EF%BC%9AReferences/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          详解JVM内存管理与垃圾回收机制（4）：References
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-29 22:38:41" itemprop="dateCreated datePublished" datetime="2019-12-29T22:38:41+08:00">2019-12-29</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/" itemprop="url" rel="index">
+                    <span itemprop="name">JVM</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6/" itemprop="url" rel="index">
+                    <span itemprop="name">垃圾回收</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>Java通过<code>new</code>关键字来创建对象时，JVM在堆中开辟空间存放对象实例数据，这时，定义的局部变量仍存储在栈中，它包含指向堆中对象的指针 ( 即对象在堆内存的起始地址索引 )，而不是对象本身，这个指针在Java中，被称为引用。来看下面的Java方法，它持有一个由<code>String</code>解析而来的<code>Integer</code>对象。</p>
+<a id="more"></a>
+
+<blockquote>
+<p>这里可能会造成大家的误解：指针 = 引用，但实际上它们并不完全相同<br>当我们一提到指针，就很容易把指针与C语言中的指针划等号，实际上，”指针”是一个概念上的东西，不同的语言有不同的实现，因此在讨论问题时，最好明确前提。<br>从概念上来说：指针就是一个值，而这个值是某块内存的地址，通过这个值，就可以找到这块内存 (可参考维基百科)。<br>而C语言中的指针，可以指向内存中的任何地方，也可以参与运算，甚至还可以指向指针，以及指向指向指针的指针。因此，更多时候它只反映了指针寻址的特性。<br>Java中的引用也是一个值，但这个值不是随便某块内存的地址，而是某个值所在内存的地址(对象首地址)，它关心的是这个值(或者对象)，而不是地址。当值搬家以后(内存整理)，这个引用也会跟着改变。因此，Java中引用可以认为是一个封装后的指针，它屏蔽了指针的复杂性。<br>更多关于引用与指针的区别，可自行查阅，特别是知乎上的一些讨论也非常有意思</p>
+</blockquote>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">foo</span><span class="params">(<span class="keyword">String</span> bar)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    Integer baz = <span class="keyword">new</span> Integer(bar);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>在调用foo方法时，JVM的内存是如何变化的？理解这个变化过程，会让你更好的理解引用，对后面理解垃圾回收也有一定的裨益。首先使用<code>javap -v</code>命令来查看foo方法的字节码，<code>javap</code>命令可以将字节码翻译成易读的JVM指令。</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> static <span class="built_in">void</span> foo(java.lang.String);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  descriptor: (Ljava/lang/String;)V</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  flags: ACC_PUBLIC, ACC_STATIC</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  Code:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 堆栈深度，局部变量表中元素个数，参数个数(如果是非static方法，参数个数=实际参数个数+1)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    stack=<span class="number">3</span>, locals=<span class="number">2</span>, args_size=<span class="number">1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">       <span class="comment">// 创建执行类型的对象实例，对其默认初始化(null)，并将指向该实例的一个引用压入操作数栈顶</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">       <span class="number">0</span>: new  #<span class="number">2</span>   <span class="comment">// class java/lang/Integer</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">       <span class="comment">// 复制栈顶的值，并压入到栈顶</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">       <span class="number">3</span>: dup</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">       <span class="comment">// 将第0个Slot中为reference类型的本地变量推送到操作数栈顶</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">       <span class="number">4</span>: aload_0</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">       <span class="comment">// 栈顶的reference数据是Integer类型，调用其构造方法</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">       <span class="comment">// 这里会创建新的栈帧，并成为当前栈帧，直到Integer的构造方法调用完成后，完成当前栈帧的出栈操作</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">       <span class="number">5</span>: invokespecial #<span class="number">3</span>   <span class="comment">// Method java/lang/Integer."&lt;init&gt;":(Ljava/lang/String;)V</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">       <span class="comment">// 操作数栈出栈，将栈顶的引用保存到局部变量中，即第1个Slot</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">       <span class="number">8</span>: astore_1</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">       <span class="number">9</span>: <span class="keyword">return</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 描述指令与源代码行号之间的关系</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">    LineNumberTable:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">      line <span class="number">5</span>: <span class="number">0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">      line <span class="number">6</span>: <span class="number">9</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 描述局部变量表</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    LocalVariableTable:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">      Start  Length  Slot  Name   Signature</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">          <span class="number">0</span>      <span class="number">10</span>     <span class="number">0</span>   bar   Ljava/lang/String;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">          <span class="number">9</span>       <span class="number">1</span>     <span class="number">1</span>   baz   Ljava/lang/Integer;</span></pre></td></tr></table></figure>
+
+<blockquote>
+<p>每个方法在执行的同时都会创建一个栈帧(Stack Frame)用于存储局部变量表、操作数栈、动态连接、方法出口等信息，当方法调用结束，随着函数栈帧的销毁，局部变量表、操作数栈等也随之消失。更多关于关于虚拟机栈以及栈帧的相关内容，请参考<a href="https://www.jianshu.com/p/f8d71e1e8821" target="_blank" rel="noopener">详解JVM内存管理与垃圾回收机制1 - 内存管理</a></p>
+</blockquote>
+<p>如果你可以轻松理解以上指令代码，可以跳过下一小节，直接进入第二部分，下面介绍代码运行时的栈帧结构。</p>
+<h2 id="运行时栈帧结构"><a href="#运行时栈帧结构" class="headerlink" title="运行时栈帧结构"></a>运行时栈帧结构</h2><h3 id="1-1-局部变量表"><a href="#1-1-局部变量表" class="headerlink" title="1.1 局部变量表"></a>1.1 局部变量表</h3><p>局部变量表是一组变量值存储空间，用于存放方法参数和方法内部定义的局部变量，它的容量是以变量槽 ( Variable Slot )为最小单位，但JVM规范中并未规定一个Slot应占用多大空间，只是要求每个Slot都应该能容纳一个boolean、byte、char、short、int、float、reference和retureAddress类型的数据。而对于64位数据类型long和double，虚拟机会以高位对齐的方式为其分配两个连续的Slot空间。虚拟机为方法中的每个局部变量都分配了一个索引，通过索引可以访问局部变量的指定元素，局部变量的索引从0开始。因为long和double类型的数据占用两个Slot，所以这两种数据类型值采用两个Slot索引中较小的索引来定位。<br>这里需要着重强调的是：reference类型表示对一个对象实例的引用，JVM规范既没有说明它的长度，也没有指明其应有怎样的结构，但一般来说，虚拟机至少都需要通过这个引用做到两点：</p>
+<ul>
+<li>直接或间接地查找到对象在堆中数据的起始地址</li>
+<li>直接或间接地找到对象所属数据类型在方法区中存储的类型信息</li>
+</ul>
+<p>在方法执行时，虚拟机是使用局部变量表完成参数值到参数变量列表的传递过程的，如果执行的是实例方法（非static的方法），那局部变量表中第0个Slot默认是用于传递方法所属对象实例的引用，在方法中可以通过关键字“this”来访问到这个隐含的参数。其余参数则按照参数表顺序排列，占用从1开始的局部变量Slot，参数表分配完毕后，再根据方法体内部定义的变量顺序和作用域分配其余的Slot。而如果是static方法，那么参数列表直接从第0个Slot顺序排列，这个也比较好理解，类方法嘛，也不存在对象实例的引用，也就不需要浪费一个Slot。<br>如果想了解更多关于局部变量表的内容，可以参考 ( 强烈建议大家阅读 ) ：<br><a href="http://www.duokan.com/book/41805" target="_blank" rel="noopener">深入理解Java虚拟机 第8章第2节</a><br><a href="https://www.zhihu.com/question/29056872" target="_blank" rel="noopener">JVM jsr和ret指令始终理解不了？returnAddress又怎么理解呢?</a></p>
+<h3 id="1-2-操作数栈"><a href="#1-2-操作数栈" class="headerlink" title="1.2 操作数栈"></a>1.2 操作数栈</h3><p>操作数栈也常称为操作栈，是一个后入先出 (<code>LIFO</code>) 栈，操作数栈的元素可以是任意Java数据类型，包括long和double。当一个方法刚刚开始执行的时候，这个方法的操作数栈是空的，在方法的执行过程中，会有各种字节码指令往操作数栈中写入和提取内容，也就是出栈/入栈操作。操作数栈中元素的数据类型必须与字节码指令的序列严格匹配，在编译程序代码的时候，编译器要严格保证这一点，在类校验阶段的数据流分析中还要再次验证这一点。比如执行<code>iadd</code>指令时，接近栈顶的两个元素数据类型必须时整型的。</p>
+<h3 id="1-3-方法返回地址"><a href="#1-3-方法返回地址" class="headerlink" title="1.3 方法返回地址"></a>1.3 方法返回地址</h3><p>当一个方法开始执行后，只有两个方式可以退出这个方法：</p>
+<ul>
+<li>正常退出：执行引擎遇到方法返回的字节码指令，这时候可能会有返回值传递给上层的方法调用者</li>
+<li>异常退出：在方法执行过程中遇到异常，且异常没有在方法体内得到处理</li>
+</ul>
+<p>无论采用何种退出方式，在方法退出之后，都需要返回到方法被调用的位置，程序才能继续执行，方法返回时可能需要在栈帧中保存一些信息，用来帮助恢复它的上层方法的执行状态。一般来说，方法正常退出时，调用者的PC计数器的值可以作为返回地址，栈帧中很可能会保存这个计数器值。而方法异常退出时，返回地址是要通过异常处理器表来确定的，栈帧中一般不会保存这部分信息。<br>方法退出的过程实际上就等同于把当前栈帧出栈，因此退出时可能执行的操作有：恢复上层方法的局部变量表和操作数栈，把返回值（如果有的话）压入调用者栈帧的操作数栈中，调整PC计数器的值以指向方法调用指令后面的一条指令等。</p>
+<h2 id="运行时栈帧内存变化过程"><a href="#运行时栈帧内存变化过程" class="headerlink" title="运行时栈帧内存变化过程"></a>运行时栈帧内存变化过程</h2><p>接下来以调用<code>foo(&quot;123&quot;)</code>为例，介绍整个方法调用过程中栈帧的内存变化过程。</p>
+<h3 id="2-1-new指令"><a href="#2-1-new指令" class="headerlink" title="2.1 new指令"></a>2.1 new指令</h3><p><code>new</code>指令用于创建一个对象，其格式： <code>new indexbyte1 indexbyte2</code>，无符号数indexbyte1和indexbyte2用于构建一个指向当前类的运行时常量池索引值，构建方式:<code>(indexbyte1&lt;&lt;8)|indexbyte2</code>，该索引指向运行时常量池中的一个类或接口的符号引用，且这个类或者接口应当是已经解析过的，比如这个例子<code>new #2</code>中的<code>#2</code>代表：<code>class java/lang/Integer</code>。<br>当<code>new</code>指令执行完成后，一个以此类的新实例将会被分配在堆中，并且它所有的实例变量都会初始化为相应类型的初始值，一个代表该对象实例的reference类型数据objectref将入栈到操作数栈中。这里Integer属于引用类型，因此它的初始值默认为null值。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020121337-80d1e.png" alt="img"></p>
+<p>执行new指令后的内存结构示意图</p>
+<h3 id="2-2-dup指令"><a href="#2-2-dup指令" class="headerlink" title="2.2 dup指令"></a>2.2 dup指令</h3><p><code>dup</code>指令用于复制操作数栈顶的值，并插入到栈顶。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020121338-2cd15.png" alt="img"></p>
+<p>执行dup指令后的内存结构示意图</p>
+<h3 id="2-3-aload指令"><a href="#2-3-aload指令" class="headerlink" title="2.3 aload指令"></a>2.3 aload指令</h3><p><code>aload_n</code>指令用于从局部变量表加载一个reference类型值到操作数栈。这个实例中，由于后面调用Integer构造方法时需要传递一个字符串参数，因此在调用之前肯定要把数据压入栈顶。指令中的<code>n</code>代表栈帧中局部变量表的索引值，通过<code>n</code>定位到的局部变量必须是reference类型，成为objectref，指令执行后，objectref将会压入到操作数栈栈顶。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020121340-68385.png" alt="img"></p>
+<p>执行aload指令后的内存结构示意图</p>
+<h3 id="2-4-invokespecial指令"><a href="#2-4-invokespecial指令" class="headerlink" title="2.4 invokespecial指令"></a>2.4 invokespecial指令</h3><p><code>invokespecial</code>指令专门用于调用父类方法、私有方法和实例初始化方法。其格式与<code>new</code>指令类似，都是通过两个无符号数计算出方法在常量池中的索引以便得到该方法所在类或者接口的符号引用。<br>前面也介绍过，JVM在执行static方法时传递的参数即方法中定义的参数，字节码中<code>args_size=1</code>也表明参数个数确实是1。如果将<code>foo</code>方法改成非static方法，这时候<code>args_size=2</code>，即两个参数，除了方法定义的参数，还包含一个对象引用<code>this</code>参数。因此在执行<code>invokespecial</code>指令，需要消耗操作数栈顶的引用作为<code>this</code>参数传递给<code>Integer</code>类的构造方法。所以，当执行<code>invokespecial</code>指令后还需要在操作数栈顶维持有一个指向新建对象的引用，就得在invokespecial之前复制一份引用。这就是为什么要执行<code>dup</code>命令的原因，因此，网上关于一些为什么要执行<code>dup</code>命令原因的解释是错误的。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020121341-dbde6.png" alt="img"></p>
+<p>执行invokespecial指令后的内存结构示意图</p>
+<h3 id="2-5-astore指令"><a href="#2-5-astore指令" class="headerlink" title="2.5 astore指令"></a>2.5 astore指令</h3><p><code>astore_n</code>指令将一个reference类型的数据保存到局部变量表中，与<code>aload</code>指令一样，<code>n</code>也表示指向当前栈帧局部变量表的索引值，而操作数栈栈顶的objectref必须是reference类型的数据。执行此命令后，数据将从操作数栈中出栈，然后保存到<code>n</code>所指向的局部变量表中。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020121342-49281.png" alt="img"></p>
+<p>执行astore指令后的内存结构示意图</p>
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>本文主要分析了运行时栈帧内存结构以及其内存中数据的变化过程，希望通过这个简单的示例，让大家对Java中的引用有一个更直观和深刻的理解。对于文中涉及的指令相关介绍，主要参考了Java虚拟机规范等相关内容。如果大家想要查找某些JVM指令的作用，建议直接查阅虚拟机规范，相比于网上的内容更准确也更节约时间。而关于运行时栈帧结构的内容主要参考深入理解Java虚拟机一书，建议大家阅读。<br>下一小节将介绍引用的4种类型及其应用。</p>
+<h2 id="参考资料"><a href="#参考资料" class="headerlink" title="参考资料"></a>参考资料</h2><ol>
+<li><a href="http://www.duokan.com/book/41805" target="_blank" rel="noopener">深入理解Java虚拟机 第8章第2节</a></li>
+<li><a href="https://www.zhihu.com/question/29056872" target="_blank" rel="noopener">JVM jsr和ret指令始终理解不了？returnAddress又怎么理解呢?</a></li>
+<li><a href="https://www.zhihu.com/question/52749416" target="_blank" rel="noopener">关于JVM字节码中dup指令的问题？</a></li>
+<li><a href="https://book.douban.com/subject/26418340/" target="_blank" rel="noopener">蒂姆·林霍尔姆（Tim Lindholm）等著;周志明等译;Java虚拟机规范（Java SE 8版）;机械工业出版社;2015</a></li>
+</ol>
+<blockquote>
+<p>作者：CHEN川</p>
+<p>来源：<a href="https://www.jianshu.com/p/10c2c1214aab" target="_blank" rel="noopener">https://www.jianshu.com/p/10c2c1214aab</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/29/%E8%AF%A6%E8%A7%A3JVM%E5%86%85%E5%AD%98%E7%AE%A1%E7%90%86%E4%B8%8E%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E6%9C%BA%E5%88%B6%EF%BC%883%EF%BC%89%EF%BC%9AJVM%E4%B8%AD%E5%AF%B9%E8%B1%A1%E7%9A%84%E5%86%85%E5%AD%98%E5%B8%83%E5%B1%80/" rel="prev" title="详解JVM内存管理与垃圾回收机制（3）：JVM中对象的内存布局">
+      <i class="fa fa-chevron-left"></i> 详解JVM内存管理与垃圾回收机制（3）：JVM中对象的内存布局
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/29/%E8%AF%A6%E8%A7%A3JVM%E5%86%85%E5%AD%98%E7%AE%A1%E7%90%86%E4%B8%8E%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E6%9C%BA%E5%88%B6%EF%BC%885%EF%BC%89%EF%BC%9AJava%E4%B8%AD%E7%9A%844%E7%A7%8D%E5%BC%95%E7%94%A8%E7%B1%BB%E5%9E%8B/" rel="next" title="详解JVM内存管理与垃圾回收机制（5）：Java中的4种引用类型">
+      详解JVM内存管理与垃圾回收机制（5）：Java中的4种引用类型 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#运行时栈帧结构"><span class="nav-number">1.</span> <span class="nav-text">运行时栈帧结构</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1-1-局部变量表"><span class="nav-number">1.1.</span> <span class="nav-text">1.1 局部变量表</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#1-2-操作数栈"><span class="nav-number">1.2.</span> <span class="nav-text">1.2 操作数栈</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#1-3-方法返回地址"><span class="nav-number">1.3.</span> <span class="nav-text">1.3 方法返回地址</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#运行时栈帧内存变化过程"><span class="nav-number">2.</span> <span class="nav-text">运行时栈帧内存变化过程</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#2-1-new指令"><span class="nav-number">2.1.</span> <span class="nav-text">2.1 new指令</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-2-dup指令"><span class="nav-number">2.2.</span> <span class="nav-text">2.2 dup指令</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-3-aload指令"><span class="nav-number">2.3.</span> <span class="nav-text">2.3 aload指令</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-4-invokespecial指令"><span class="nav-number">2.4.</span> <span class="nav-text">2.4 invokespecial指令</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-5-astore指令"><span class="nav-number">2.5.</span> <span class="nav-text">2.5 astore指令</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#总结"><span class="nav-number">3.</span> <span class="nav-text">总结</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#参考资料"><span class="nav-number">4.</span> <span class="nav-text">参考资料</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">503</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">83</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">111</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

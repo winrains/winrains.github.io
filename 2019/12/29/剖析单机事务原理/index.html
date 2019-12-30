@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="江湖传说：不了解数据库事务的程序员不是一个好的DBA。阅遍网上无数关于数据库事务的文章，都感觉云里雾里，不知所云。于是乎拍案而起，麻蛋，还是自己写吧。最后便有了这篇文章，它试图用通俗的文字来说明单机事务的ACID特性及其大致的实现原理。">
+<meta name="keywords" content="事务">
+<meta property="og:type" content="article">
+<meta property="og:title" content="剖析单机事务原理">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2019&#x2F;12&#x2F;29&#x2F;%E5%89%96%E6%9E%90%E5%8D%95%E6%9C%BA%E4%BA%8B%E5%8A%A1%E5%8E%9F%E7%90%86&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="江湖传说：不了解数据库事务的程序员不是一个好的DBA。阅遍网上无数关于数据库事务的文章，都感觉云里雾里，不知所云。于是乎拍案而起，麻蛋，还是自己写吧。最后便有了这篇文章，它试图用通俗的文字来说明单机事务的ACID特性及其大致的实现原理。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153430-b891d.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153430-4af24.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153430-c3e8c.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153431-cdacd.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153431-d580e.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153431-978cb.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153432-a6ce2.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153432-cb6bb.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153432-93f9d.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153433-31ed5.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153433-ab09c.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153434-326a8.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153434-3eb5b.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153434-83ef0.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153434-5ae44.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153435-c9805.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153435-713d7.png">
+<meta property="og:updated_time" content="2019-12-29T14:47:40.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191020153430-b891d.png">
+
+<link rel="canonical" href="http://congsheng.wang/2019/12/29/%E5%89%96%E6%9E%90%E5%8D%95%E6%9C%BA%E4%BA%8B%E5%8A%A1%E5%8E%9F%E7%90%86/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>剖析单机事务原理 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">111</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">83</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">503</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2019/12/29/%E5%89%96%E6%9E%90%E5%8D%95%E6%9C%BA%E4%BA%8B%E5%8A%A1%E5%8E%9F%E7%90%86/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          剖析单机事务原理
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2019-12-29 22:47:40" itemprop="dateCreated datePublished" datetime="2019-12-29T22:47:40+08:00">2019-12-29</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>江湖传说：不了解数据库事务的程序员不是一个好的DBA。阅遍网上无数关于数据库事务的文章，都感觉云里雾里，不知所云。于是乎拍案而起，麻蛋，还是自己写吧。最后便有了这篇文章，它试图用通俗的文字来说明单机事务的ACID特性及其大致的实现原理。</p>
+<a id="more"></a>
+
+<h1 id="一、什么是事务？"><a href="#一、什么是事务？" class="headerlink" title="一、什么是事务？"></a>一、什么是事务？</h1><blockquote>
+<p>数据库事务（简称：事务）是数据库管理系统执行过程中的一个逻辑单位，由一个有限的数据库操作序列构成。—— <a href="https://link.jianshu.com?t=https://zh.wikipedia.org/zh-cn/数据库事务" target="_blank" rel="noopener">维基百科</a></p>
+</blockquote>
+<p>好吧，你没怎么看明白？对于应用程序来说，事务就是一系列对数据库的数据进行读或写的操作，在本文中，把一个读或者写操作称为事务单元。同一时刻，可能有多个应用程序同时向数据库发送读写请求，所以对于数据库管理系统（如：MySQL、Oracle等）来说，一个事务包含一系列事务单元。<br>举个栗子，Bob向Smith转账100块这样一个动作，包含多个对数据库的读写操作，我们把这一系列操作称为一个事务，具体操作如下表所示。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153430-b891d.png" alt="img"></p>
+<p>Bob向Smith转账的整个流程</p>
+<p>只要是对数据库的一个操作就是一个事务单元，事务单元也并非只有读写操作，建立索引、删除表等等都是事务单元，例如下面对数据库的操作都是事务单元。</p>
+<ul>
+<li>商品表要建立一个基于某列的索引</li>
+<li>从数据库读取一行记录</li>
+<li>想数据库中写入一行记录，同时更新这行记录</li>
+<li>删除整张表</li>
+<li>……</li>
+</ul>
+<h1 id="二、事务的原子性（Atomicity）"><a href="#二、事务的原子性（Atomicity）" class="headerlink" title="二、事务的原子性（Atomicity）"></a>二、事务的原子性（Atomicity）</h1><blockquote>
+<p>事务作为一个整体被执行，包含在其中的对数据库的操作要么全部被执行，要么都不执行。</p>
+</blockquote>
+<p>还是以Bob向Smith转账100块钱为例，整个事务包含如下操作：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153430-4af24.png" alt="img"></p>
+<p>转账操作</p>
+<p><code>A</code>，<code>B</code>，<code>C</code> 3个操作，要么全部成功，要么全部失败。可以看到，如果能够保证这点，那么对于上层的应用程序就不再需要去做各种中间状态的维持工作，而只要关注业务逻辑即可。比如在<code>C</code>操作开始之前，发现Smith的账户被锁定了无法进行加款操作，那么数据库能够自动的将<code>A</code>和<code>B</code>两个操作进行回滚，从让上层的应用程序只关注具体的业务流程实现，而不需要关注事务本身的实现流程。</p>
+<h2 id="2-1、数据库如何实现原子性？"><a href="#2-1、数据库如何实现原子性？" class="headerlink" title="2.1、数据库如何实现原子性？"></a>2.1、数据库如何实现原子性？</h2><p>实现原子性的核心是要记录下每一个变更的中间状态或者是记录变更的具体过程。这样我们就可以在发现问题时，直接把老数据替换回去，从而实现回滚操作，保证原子性。<br>以转账的实例进行细节分析，在执行A之前，数据库中的数据大概是这样（<code>version1</code>）：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153430-c3e8c.png" alt="img"></p>
+<p>执行A操作：检查Bob账户是否有100块，执行的SQL：<code>select money from T where pk=1</code>，一个简单的查询操作并不涉及对数据的修改，因此不会记录变更数据。<br>执行B操作：Bob账户减去100块，执行SQL：<code>update T set money=money-100 where pk=1</code>，执行完这个操作，数据库应该是这样（<code>version2</code>）</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153431-cdacd.png" alt="img"></p>
+<blockquote>
+<p>注：除了当前运行事务的这个进程，其他的进程只要不是在读未提交状态，完全看不见这些中间状态</p>
+</blockquote>
+<p>接着执行<code>C</code>操作，突然发现Smith的账户出现未知异常，导致加款的操作无法进行，那么整个事务单元执行失败，需要回滚前面的操作，由于<code>A</code>操作不涉及数据的修改，因此只需要回滚<code>B</code>操作。要回滚<code>B</code>操作，就需要知道PK=1这一行在<code>version1</code>版本时的数据：<code>money=100</code>，在回滚时用<code>version1</code>版本的记录替换当前版本（<code>version2</code>）据即可。</p>
+<h2 id="2-2、那数据库是如何实现回滚的呢？"><a href="#2-2、那数据库是如何实现回滚的呢？" class="headerlink" title="2.2、那数据库是如何实现回滚的呢？"></a>2.2、那数据库是如何实现回滚的呢？</h2><p><strong>首先要明确的是回滚必须按照顺序进行</strong>，否则会出现不符合预期的情况。<br>这个很容易理解，如果两条update语句按照不同的顺序执行，那么其结果肯定不一致，同理，如果回滚时，不按照执行顺序的反序执行，那么回滚的结果也肯定不一致。所以我们必须让回滚本身按照执行顺序的反序执行。一般而言，实现方式就是把数据按照顺序记录到文件里，然后将这个文件按照FILO（先入后出）的方式读取出来，这样可以保证按照执行序列的反序来回滚了。<br>除了记录中间状态的数据外，<strong>回滚还要考虑的一个重要因素：并发</strong>。<br>如果数据库系统将所有针对他的读写请求都按照顺序执行，那么完全不用考虑并发因素，回滚也可以很简单的实现。但系统需要更高效的利用CPU和各种物理资源，且很多数据在物理上就是需要被共享的。所以，处理并发和同步就成了一个数据库系统必须面对的实际问题。<br>如果进行不恰当的并发处理，那么多线程执行回滚操作会导致最终数据出现错乱，比如A进程优先进行了两个操作并记录了回滚段，B进程紧接着进行了一个操作并记录了回滚段，这时候A进程要回滚，那么他用自己记录的回滚中间状态恢复了数据，然而B也要进行回滚，就会发现数据本身已经无法回滚到最初的状态去了。<br>如果要切实的解决这个问题，我们只能把每个事务所影响的数据全部都加上锁，这样，在这个事务没有完成之前，其他进程不能进入到这些加锁的数据中对这个数据进行修改。从而保证了尽可能细颗粒度的并发控制，同时也解决了回滚中会出现的回滚时序冲突问题。<br>当然这种方式的代价就是回滚隐含了对事务锁的要求，而事务只要加锁，就存在对加锁数据的读写请求，就需要等待，进而降低并发性能。</p>
+<h1 id="三、事务的一致性-Consistency"><a href="#三、事务的一致性-Consistency" class="headerlink" title="三、事务的一致性(Consistency)"></a>三、事务的一致性(Consistency)</h1><blockquote>
+<p>事务应确保数据库的状态从一个一致状态转变为另一个一致状态。</p>
+</blockquote>
+<p>怎么理解这句话？还是以转账的示例来说明，在整个转账的事务单元中，数据库中的数据有3个版本：<br>A操作(查询)后得到<code>version1</code>：Bob=100，Smith=0<br><code>undo日志：无</code><br>B操作(减款)后得到<code>version2</code>：Bob=0，Smith=0<br><code>undo日志：Bob=100，Smith=0</code><br>C操作(加款)后得到<code>version3</code>：Bob=0，Smith=100<br><code>undo日志：Bob=0，Smith=0</code><br>其中<code>version1</code>是初始的一致状态，<code>version3</code>是最终的一致状态，<code>version2</code>为中间状态，一致性要保证的是应用程序只能看到初始的一致状态或者最终的一致状态，而不能看见中间状态。<br>这里我们需要注意一致性和原子性的区别。<br>原子性的语义只保证数据库记录了回滚段，如上面的<code>undo日志</code>，它可以保证在事务单元执行出现异常时，可根据回滚段(<code>undo日志</code>)回滚到之前的版本。<br>而一致性则保证上层应用程序不看到中间状态，虽然原子性和一致性经常一起出现，但它们没有任何必然的联系。原子性只保证整个事务单元那么全部执行成功，要么全部执行失败。它不保证你看不到中间状态。我举个简单的栗子说明。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153431-d580e.png" alt="img"></p>
+<p>原子性与一致性区别示意图</p>
+<p>现在请只考虑原子性的语义，线程1执行Bob向Smith转账100块，线程2执行向Smith账户加款200块。线程1和线程2同时执行到向Smith转账，线程2执行成功后，Smith账户有200块，这时如果线程1执行成功，那么Smith账户应该有300块，但遗憾的时，线程1的操作失败，那么线程1的事务必须回滚，根据上文的分析，这时候线程1的<code>undo日志</code>一定是<code>Bob=100，Smith=0</code>，回滚结束后，你会发现线程2给Smith加款的200块钱莫名其妙的消失了。出现这种情况是肯定不能接受，所以一致性就是为了防止这种情况。一致性保证线程2只能看到两种状态，即<code>Bob=100,Smith=0</code>或者<code>Bob=0,Smith=100</code>，而不会看到<code>Bob=0,Smith=0</code>这种状态，更不会在中间状态时就向Smith账户加款。<br>那数据库是如何实现一致性呢？答案很简单，就是<strong>锁</strong>。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153431-978cb.png" alt="img"></p>
+<p>一致性保证</p>
+<p>线程1在执行Bob向Smith转账，同时线程2执行向Smith加款时，发现Smith账户已经被锁定，那么线程2等待，直到Smith账户解除锁定为止。</p>
+<h1 id="四、事务的隔离性（Isolation）"><a href="#四、事务的隔离性（Isolation）" class="headerlink" title="四、事务的隔离性（Isolation）"></a>四、事务的隔离性（Isolation）</h1><blockquote>
+<p>多个事务并发执行时，一个事务的执行不应影响其他事务的执行</p>
+</blockquote>
+<p>简单的理解就是一个事务内部的操作以及正在操作的数据必须封锁起来，不被其他企图修改这些数据的事务看到。那么如何保证事物的隔离性？就如同上面保持一致性所讲的那样，只需要在每个事务执行之前加一把排他锁，事务执行结束后释放锁，然后再执行下一个事务，直到执行完成所有的事务单元即可，就如同这样：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153432-a6ce2.png" alt="img"></p>
+<p>数据库依次执行事务单元</p>
+<p>将所有的事务排队，利用排他锁的方式，将事务锁住，单位时间内，只有一个事务进来，这就是事务隔离级别中的<strong>可序列化（Serializable）</strong>级别。<br>可序列化级别是事务的最高隔离级别，它强制事务排序，使事务间不可能相互冲突。但很明显的，这种方式有一个很严重的问题：并行度太低，导致性能非常差。性能太差就意味着大多数情况下不可用，就需要想办法提高性能。<br>通过仔细分析，我们可以发现最核心的问题就是一把大锁堵住了所有的请求。一种行之有效的方法就是利用<strong>锁分离 + 读写锁</strong>来提升并行度。<br><strong>锁分离</strong>是指使用多个锁来控制没有冲突的事务，每个事务都有自己的锁，这样就可以让没有冲突的事务并行的执行。请看下面的小例子：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153432-cb6bb.png" alt="img"></p>
+<p>锁分离示例</p>
+<p>有三个事务，事务1为Bob向Smith转账，涉及3个数据库操作、事务2为查询Joe账户余额，只有一个读操作、事务3为Jack向LILei转账。如果事务的隔离级别为可序列化级别，那么事务的执行顺序应该是这样的：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153432-93f9d.png" alt="img"></p>
+<p>串行事务单元</p>
+<p>但很明显，三个事务之间完全没有冲突，使用<strong>锁分离</strong>技术后，他们的执行顺序就变成了这样：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153433-31ed5.png" alt="img"></p>
+<p>利用锁分离提高并行度</p>
+<p>采用锁分离技术可以提高并行度，但我还想要再提高速度呢？我们可以把控制事务的锁拆分成读写锁。使用读写锁后，事务内部的所有读操作都可以并行，就如同这样：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153433-ab09c.png" alt="img"></p>
+<p>读写锁 - 读读并行</p>
+<p>这就是事务隔离级别中的<strong>可重复读（Repeatable Read）</strong>级别。可重复读级别在序列化级别上的基础上，让两个读操作可以并行执行，提高并行度。可重复读保证了同一个事务里，所有读操作的结果都是事务开始时的状态（一致性）。但是，由于当前的事务（A事务）对已经存在的行加读或写锁，不能阻止另一个事务（B事务）<code>插入</code>新数据，所以当A事务再次查询时可能会查出更多的结果，这就是<strong>幻读</strong>现象。<br>举一个非常简单的例子，在工资表中，事务A第一次查询所有工资为2000的用户，结果有10人，但同一时刻事务B新增了若干条工资数据，导致事务A再次查询工资为2000的用户时，结果变成了15人，这就是幻读。<br>可重复读只能做到读读并行，并不能完美的提升性能，这个时候就产生了另外一个事务隔离级别<strong>读已提交（Read Commited）</strong>。”读已提交“与”可重复读“的区别就在于<strong>读锁能不能被写锁升级</strong>。<br>怎样理解这句话？<br>数据库对当前的读操作加锁，这时来了一个写操作，我们要不要放写操作进来呢？如果不放，那么只能读读并行，就是可重复读的隔离级别。如果放进来，新的写请求会将原来的读锁升级为写锁，这样除了读读可并行，读写也可并行，进一步提升了并行度，原来的读读并行就变成了这个样子：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153434-326a8.png" alt="img"></p>
+<p>读锁被写锁升级</p>
+<p>当然性能的提高，肯定是要付出代价的，读已提交的事务隔离级别除了可能会出现“幻读”的情况，还会出现“不可重复读”。<br>一个事务执行一个查询，读取了大量的数据行。由于读锁可以被写锁升级，所以在它结束读取之前，另一个事务可能完成了对数据行的更改。当第一个事务试图再次执行同一个查询，服务器就会返回不同的结果，这就是“不可重复读”。<br>还是举一个非常简单的例子，比如事务A是Bob向Smith转账100块，事务B是向Bob收取管理费10块。事务A在检查Bob是否有100块时，查询后发现有100，同一时刻，事务B发起扣手续费的操作，当事务B达到时，发现数据被事务A的读锁锁住的，由于事务的隔离级别是“读已提交”，读锁直接被升级，B事务顺利扣款10块，Bob账户还剩90块，B事务结束后，A事务再进行转账操作时就会发现余额已经不够100了。<br>既然读锁可以被写锁升级，那如果干脆不要读锁呢？这样的话读读、读写、写读都可以并行，只有写写还是串行，这样又可以更进一步提升并行度，就如同这样：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153434-3eb5b.png" alt="img"></p>
+<p>写读并行</p>
+<p>这就是4种事务隔离级别的最后一种：<strong>读未提交（Read Uncommitted）</strong>，隔离级别最低，同时也是并行度最高、性能最好的隔离级别。当然也存在很大的问题，就是“脏读”。所谓“脏读”就是事务A修改了一行，另一个事务B也可以读到该行。如果第一个事务A执行了回滚，那么事务B读取的就是从来没有正式出现过的值，也就是前面提到的读取到中间状态数据，这肯定是不能够接受的，所以大部分情况都不应该使用这个隔离级别。<br>最后做个小结，回顾这4种隔离级别，我们可以看到隔离级别越高，性能越差，越能保持一致性；隔离级别越低，性能越好，对一致性的破坏也就更彻底，出现的问题也就越多。所以我们可以用一句话来总结：事务的隔离性就是<strong>以性能为理由，对强一致性的破坏</strong>。<br>大多数数据库的默认事务隔离级别是“读已提交”，MySQL的默认事务隔离级别是“可重复读”。像“可重复读”这种事务隔离级别并发性能是非常低的，那MySQL又是如何在“可重复读”的隔离级别下达到很高的性能的？答案请参考第六部分。</p>
+<h1 id="五、事务的持久性（Durability）"><a href="#五、事务的持久性（Durability）" class="headerlink" title="五、事务的持久性（Durability）"></a>五、事务的持久性（Durability）</h1><p>终于说到ACID的最后一个字母了，所谓事务的持久性就是指：</p>
+<blockquote>
+<p>已被提交的事务对数据库的修改应该永久保存在数据库中</p>
+</blockquote>
+<p>也就是说：如果一个事务一旦提交，它对数据库中数据的改变就应该是永久性的，接下来的其他操作或故障不应该对其有任何影响。<br>其实在很多数据库系统中，由于性能的原因，事务操作时，并不是数据每次被修改后立即被写入磁盘，而是采用异步刷盘的模式。持久性就是为了保证这些在缓存中的数据，在故障（硬件损坏或者断电等）恢复后，仍然能够正确的写入磁盘。<br>这里就存在两种情况，如果在事务提交之前发生故障，那么缓存的数据丢失，修改的信息也就丢失了，数据库只能根据日志做回滚。如果在事务提交之后发生故障，即使缓存中的数据丢失，仍然可以根据日志将事务单元继续提交，整个事务仍然是成功的，不会导致任何数据丢失。当然这里日志的持久化又是另外一个话题了，简单的说，就是在对数据库更新时，一定要保证日志已经写入磁盘，如果日志没有写入磁盘，故障发生后，数据只能丢失。<br>所以持久化的语义更多的体现在数据库发生故障时，确保提交的事务不丢失。</p>
+<h1 id="六、MVCC"><a href="#六、MVCC" class="headerlink" title="六、MVCC"></a>六、MVCC</h1><p>在前文已经说到，<strong>读未提交</strong>级别下会出现脏读，而在<strong>可序列化</strong>隔离级别下，事务只能串行执行，性能太低。大多数情况下，这两个事务隔离级别都是不能接受的，一般情况下会在<strong>可重复读</strong>与<strong>读已提交</strong>两个隔离级别下对系统性能进行优化。<br>其中<strong>可重复读</strong>可以做到读读并行，<strong>读已提交</strong>写锁可以将读锁升级。在这两个事务隔离级别下，如果当前事务正在写，那么其他所有的读都将被阻塞（这里的读写事务是针对相同的资源，或者说是针对数据库的同一行数据），所以优化的点也在这里，有没有办法让写不阻塞读呢？这样的话，可以大大提升数据库读的性能，尤其是在读多写少的场景下，这样的性能优化尤其重要。<br>MVCC（多版本并发控制）模型为解决这个问题提供了思路。数据库为了支持事务，在每个写事务（更新数据）时，都会记录<code>undo log</code>以便在事务执行出现异常时可以回滚到事务初始的状态，就如同这样：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153434-83ef0.png" alt="img"></p>
+<p>undo log</p>
+<p>事务A为Bob向Smith转账的操作，假设目前数据正在进行事务A，这时候正好来了一个读事务B，传统情况下，读事务B是需要在此等待的，直到事务A执行完成，就如同这样：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153434-5ae44.png" alt="img"></p>
+<p>事务B被事务A阻塞</p>
+<p>在MVCC模型下，每行数据具有多个版本，假设事务A下数据的当前版本为<code>版本1</code>，那么这一时刻其回滚段中对应的数据版本为<code>版本0</code>，当事务B到达时，发现事务A为写事务，且数据当前版本为<code>版本1</code>，那么事务B自动到回滚段中读取版本为<code>版本0</code>的数据，<code>版本0</code>的数据也称为<strong>快照数据</strong>，就如同下图这样。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153435-c9805.png" alt="img"></p>
+<p>MVCC</p>
+<p>如上示例，事务A正在转账，整个转账的过账中Bob和Smith账户数据有3个版本，其对应回滚段中的数据有两个版本，所以事务B读到的数据始终是初始状态的值，也就是回滚段中<code>version2</code>的数据，其对应的是事务A中<code>version1</code>的数据。<br>这里请大家考虑一个问题，假如现在有两个同样的A事务：A1、A2，还有一个事务B，这3个事务几乎同时达到，那么B事务是应该读取A1之前的数据，还是读取A2之前的数据呢？这里引申出来的问题就是：一个读请求应该读哪一个写之后的数据？<br>不同的数据库有不同的实现方式，但是大致的原理都是在系统内部维护一个逻辑时间戳，比如：根据时间先后顺序在内部维持一个全局的自增号，每来一个请求加1，利用这个自增号来维持先后顺序，比如Oracle中的SCN，Innodb中的Trx_id（事务ID）。这样就可以确定读事务应该读取那个版本的快照数据。<br>不同的数据库，实现MVCC的方式不同，甚至是同一数据库，不同隔离级别下的实现方式也不同。比如MySQL的InnoDB存储引擎下，在读已提交（READ COMMITTED）事务隔离级别下，总是读取被锁定行的最新一份快照数据。而在可重复读（REPEATABLE READ）事务隔离级别下，总是读取事务开始时的行数据版本。这两者之间的不同，请看下图：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191020153435-713d7.png" alt="img"></p>
+<p>不同事务隔离级别下，实现MVCC的方式也不同</p>
+<p>数据表Table在事务AB开始之前查询id=1的这行数据的结果是amount=1</p>
+<blockquote>
+<p>时刻1：开始AB事务<br>时刻2：事务B更新amount的值为3，同一时刻A事务并未结束<br>时刻3：事务A再次查询，读取事务B开始之前的数据，在两种隔离级别下amount均为1<br>时刻4：事务B提交，同一时刻A事务并未结束<br>时刻5：事务A再次查询，在读已提交事务隔离级别下，读取被锁定行的最新一份快照数据即amount=3，在可重复读事务隔离级别下，总是读取事务开始时的行数据即amout=1</p>
+</blockquote>
+<p>还有一点需要说明的是在MVCC并发控制中，读操作可以分成两类：快照读 (snapshot read)与当前读 (current read)。快照读，读取的是记录的可见版本 (有可能是历史版本)，不用加锁。当前读，读取的是记录的最新版本，并且当前读返回的记录，都会加上锁，保证其他事务不会再并发修改这条记录。<br>那哪些读操作是快照读？哪些操作又是当前读呢？以MySQL InnoDB为例：<br>快照读：简单的select操作，属于快照读，不加锁：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">select</span> * <span class="keyword">from</span> <span class="keyword">table</span> <span class="keyword">where</span> A=?;</span></pre></td></tr></table></figure>
+
+<p>当前读：特殊的读操作，插入/更新/删除操作，属于当前读，需要加锁。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">select</span> * <span class="keyword">from</span> <span class="keyword">table</span> <span class="keyword">where</span> A=? <span class="keyword">lock</span> <span class="keyword">in</span> <span class="keyword">share</span> <span class="keyword">mode</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">select</span> * <span class="keyword">from</span> <span class="keyword">table</span> <span class="keyword">where</span> A=? <span class="keyword">for</span> <span class="keyword">update</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">insert</span> <span class="keyword">into</span> <span class="keyword">table</span> <span class="keyword">values</span> (…);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">update</span> <span class="keyword">table</span> <span class="keyword">set</span> A=? <span class="keyword">where</span> B=?;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">delete</span> <span class="keyword">from</span> <span class="keyword">table</span> <span class="keyword">where</span> A=?;</span></pre></td></tr></table></figure>
+
+<p>所有以上的语句，都属于当前读，读取记录的最新版本。并且，读取之后，还需要保证其他并发事务不能修改当前记录，对读取记录加锁。其中，除了第一条语句，对读取记录加S锁 (共享锁)外，其他的操作，都加的是X锁 (排它锁)。</p>
+<blockquote>
+<p>说明：关于MVCC，我想写的也就这么多，也就一些最基本的原理，其实网上关于MVCC的介绍不是很多，而已有的大多数文章分析也不是很透彻，总感觉云里雾里的，也希望可以看到更多深入浅出介绍MVCC的文章或者书籍，大家也可以留言推荐给我。</p>
+</blockquote>
+<h1 id="七、反思"><a href="#七、反思" class="headerlink" title="七、反思"></a>七、反思</h1><p>写了这么多，总结起来，什么是事务？</p>
+<blockquote>
+<p><strong>事务的核心是锁和并发</strong></p>
+</blockquote>
+<p>怎么优化事务？</p>
+<blockquote>
+<p><strong>在锁和并发之间找到一个平衡值</strong></p>
+</blockquote>
+<p>你觉得这句话太抽象了？那换种方式，在优化事务时，你可以尽量减少锁的覆盖范围，比如：<code>MyISAM</code>使用表锁，它的锁范围就大于<code>Innodb</code>的行锁，所以如果写多读少且需要支持事务的话，请使用<code>Innodb</code>存储引擎，如果读多写少的话，可以使用<code>MyISAM</code>存储引擎。当然现在大部分数据库都参考MVCC模型来实现以提高并发性能，但是仍然需要设置合理的事务隔离级别。<br>除了这个你还可以增加锁上可并行的线程数，将读写锁分离，并行读取数据。具体实现也就是尽量把大事务拆分成小事务，这样在缩小锁范围同时，可以将读写锁分离开，何乐而不为呢？最后还要使用正确的锁类型，比如：悲观锁就适合并发争抢比较严重场景，而乐观锁则适合并发争抢不太严重场景。<br>还有就是MVCC实现的核心思路就是：<strong>无锁编程 + copy on write</strong>，本质就是能够做到写不阻塞读。<br>最后一句话：容易理解的模型性，实现简单，但性能都不好，性能好的模型都不容易理解，且实现困难。</p>
+<h1 id="参考资料"><a href="#参考资料" class="headerlink" title="参考资料"></a>参考资料</h1><p>文字资料：<a href="https://www.jianshu.com/p/2af078f4cc5d" target="_blank" rel="noopener">https://www.jianshu.com/p/2af078f4cc5d</a><br><a href="https://link.jianshu.com?t=http://blog.sina.com.cn/s/blog_693f08470101rnfk.html" target="_blank" rel="noopener">事务原子性</a><br>视频资料：<br><a href="https://link.jianshu.com?t=http://v.youku.com/v_show/id_XODkwMzA1NDYw.html?from=s1.8-1-1.2" target="_blank" rel="noopener">单机事务原理与实现1</a><br><a href="https://link.jianshu.com?t=http://v.youku.com/v_show/id_XODg5Mzc2ODA4.html?from=s1.8-1-1.2" target="_blank" rel="noopener">单机事务原理与实现2</a><br><a href="https://link.jianshu.com?t=http://v.youku.com/v_show/id_XODg4MjY5Mzky.html?from=s1.8-1-1.2" target="_blank" rel="noopener">单机事务原理与实现3</a></p>
+<blockquote>
+<p>作者：CHEN川</p>
+<p>来源：<a href="https://www.jianshu.com/p/2af078f4cc5d" target="_blank" rel="noopener">https://www.jianshu.com/p/2af078f4cc5d</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E4%BA%8B%E5%8A%A1/" rel="tag"># 事务</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2019/12/29/Java%E5%86%85%E5%AD%98%E6%BA%A2%E5%87%BA%EF%BC%88OOM%EF%BC%89%E5%BC%82%E5%B8%B8%E5%AE%8C%E5%85%A8%E6%8C%87%E5%8D%97/" rel="prev" title="Java内存溢出（OOM）异常完全指南">
+      <i class="fa fa-chevron-left"></i> Java内存溢出（OOM）异常完全指南
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2019/12/29/%E5%88%86%E5%B8%83%E5%BC%8F%E5%BC%80%E6%94%BE%E6%B6%88%E6%81%AF%E7%B3%BB%E7%BB%9F%EF%BC%88RocketMQ%EF%BC%89%E7%9A%84%E5%8E%9F%E7%90%86%E4%B8%8E%E5%AE%9E%E8%B7%B5/" rel="next" title="分布式开放消息系统（RocketMQ）的原理与实践">
+      分布式开放消息系统（RocketMQ）的原理与实践 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#一、什么是事务？"><span class="nav-number">1.</span> <span class="nav-text">一、什么是事务？</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#二、事务的原子性（Atomicity）"><span class="nav-number">2.</span> <span class="nav-text">二、事务的原子性（Atomicity）</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#2-1、数据库如何实现原子性？"><span class="nav-number">2.1.</span> <span class="nav-text">2.1、数据库如何实现原子性？</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-2、那数据库是如何实现回滚的呢？"><span class="nav-number">2.2.</span> <span class="nav-text">2.2、那数据库是如何实现回滚的呢？</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#三、事务的一致性-Consistency"><span class="nav-number">3.</span> <span class="nav-text">三、事务的一致性(Consistency)</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#四、事务的隔离性（Isolation）"><span class="nav-number">4.</span> <span class="nav-text">四、事务的隔离性（Isolation）</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#五、事务的持久性（Durability）"><span class="nav-number">5.</span> <span class="nav-text">五、事务的持久性（Durability）</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#六、MVCC"><span class="nav-number">6.</span> <span class="nav-text">六、MVCC</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#七、反思"><span class="nav-number">7.</span> <span class="nav-text">七、反思</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#参考资料"><span class="nav-number">8.</span> <span class="nav-text">参考资料</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">503</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">83</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">111</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2019</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
