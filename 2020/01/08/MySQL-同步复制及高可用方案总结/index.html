@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="1.前言mysql作为应用程序的数据存储服务，要实现mysql数据库的高可用。必然要使用的技术就是数据库的复制，如果主节点出现故障可以手动的切换应用到从节点，这点相信运维同学都是知道，并且可以实现的。但是这种情况只是手动的切换，对可用性有要求的业务需要分别实现主库和从库的高可用，保障在数据库出现down机的情况下，可以自动实现数据库的故障转移，保障应用的可用性和用户体验。本文将会对一些常用的数据库">
+<meta name="keywords" content="高可用">
+<meta property="og:type" content="article">
+<meta property="og:title" content="MySQL 同步复制及高可用方案总结">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;MySQL-%E5%90%8C%E6%AD%A5%E5%A4%8D%E5%88%B6%E5%8F%8A%E9%AB%98%E5%8F%AF%E7%94%A8%E6%96%B9%E6%A1%88%E6%80%BB%E7%BB%93&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="1.前言mysql作为应用程序的数据存储服务，要实现mysql数据库的高可用。必然要使用的技术就是数据库的复制，如果主节点出现故障可以手动的切换应用到从节点，这点相信运维同学都是知道，并且可以实现的。但是这种情况只是手动的切换，对可用性有要求的业务需要分别实现主库和从库的高可用，保障在数据库出现down机的情况下，可以自动实现数据库的故障转移，保障应用的可用性和用户体验。本文将会对一些常用的数据库">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021140013-7b4c2.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021140014-8a1fd.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021140014-c6b0a.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021140014-1c5c2.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021140014-39339.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021140015-749a9.png">
+<meta property="og:updated_time" content="2020-01-08T01:44:09.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021140013-7b4c2.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/MySQL-%E5%90%8C%E6%AD%A5%E5%A4%8D%E5%88%B6%E5%8F%8A%E9%AB%98%E5%8F%AF%E7%94%A8%E6%96%B9%E6%A1%88%E6%80%BB%E7%BB%93/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>MySQL 同步复制及高可用方案总结 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/MySQL-%E5%90%8C%E6%AD%A5%E5%A4%8D%E5%88%B6%E5%8F%8A%E9%AB%98%E5%8F%AF%E7%94%A8%E6%96%B9%E6%A1%88%E6%80%BB%E7%BB%93/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          MySQL 同步复制及高可用方案总结
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 09:44:09" itemprop="dateCreated datePublished" datetime="2020-01-08T09:44:09+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/MySQL/" itemprop="url" rel="index">
+                    <span itemprop="name">MySQL</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="1-前言"><a href="#1-前言" class="headerlink" title="1.前言"></a>1.前言</h1><p>mysql作为应用程序的数据存储服务，要实现mysql数据库的高可用。必然要使用的技术就是数据库的复制，如果主节点出现故障可以手动的切换应用到从节点，这点相信运维同学都是知道，并且可以实现的。但是这种情况只是手动的切换，对可用性有要求的业务需要分别实现主库和从库的高可用，保障在数据库出现down机的情况下，可以自动实现数据库的故障转移，保障应用的可用性和用户体验。<br>本文将会对一些常用的数据库高可用方案进行介绍，根据你不同的场景，选择合适的高可用方案即可。</p>
+<a id="more"></a>
+
+<h1 id="2-MMM高可用方案"><a href="#2-MMM高可用方案" class="headerlink" title="2.MMM高可用方案"></a>2.MMM高可用方案</h1><h2 id="2-1-Mysql-MMM介绍"><a href="#2-1-Mysql-MMM介绍" class="headerlink" title="2.1.Mysql-MMM介绍"></a><strong>2.1.Mysql-MMM介绍</strong></h2><p>MMM(Master-Master replication managerfor Mysql，Mysql主主复制管理器)是一套灵活的脚本程序，基于perl实现，用来对mysql replication进行监控和故障迁移，并能管理mysql Master-Master复制的配置(同一时间只有一个节点是可写的)。</p>
+<h2 id="2-2-组件"><a href="#2-2-组件" class="headerlink" title="2.2.组件"></a><strong>2.2.组件</strong></h2><p>mmm_mond：监控进程，负责所有的监控工作，决定和处理所有节点角色活动。此脚本需要在监管机上运行。<br>mmm_agentd：运行在每个mysql服务器上的代理进程，完成监控的探针工作和执行简单的远端服务设置。此脚本需要在被监管机上运行。<br>mmm_control：一个简单的脚本，提供管理mmm_mond进程的命令。<br>mysql-mmm的监管端会提供多个虚拟IP（VIP），包括一个可写VIP，多个可读VIP，通过监管的管理，这些IP会绑定在可用mysql之上，当某一台mysql宕机时，监管会将VIP迁移至其他mysql。<br>在整个监管过程中，需要在mysql中添加相关授权用户，以便让mysql可以支持监理机的维护。授权的用户包括一个mmm_monitor用户和一个mmm_agent用户，如果想使用mmm的备份工具则还要添加一个mmm_tools用户。</p>
+<h2 id="2-3-架构图"><a href="#2-3-架构图" class="headerlink" title="2.3.架构图"></a><strong>2.3.架构图</strong></h2><p>正常工作时：<br><img src="http://image.winrains.cn/2019/10/20191021140013-7b4c2.png" alt="http://image.winrains.cn/2019/10/20191021140013-7b4c2.png"><br>主节点故障时：<br><img src="http://image.winrains.cn/2019/10/20191021140014-8a1fd.png" alt="http://image.winrains.cn/2019/10/20191021140014-8a1fd.png"></p>
+<h2 id="2-4-MMM优点"><a href="#2-4-MMM优点" class="headerlink" title="2.4.MMM优点"></a><strong>2.4.MMM优点</strong></h2><p>（1）高可用性，扩展性好，出现故障自动转移，对于主主同步，在同一时间只提供一台数据库写操作，保证数据的一致性。<br>（2）配置简单，容易操作。</p>
+<h2 id="2-5-MMM缺点"><a href="#2-5-MMM缺点" class="headerlink" title="2.5.MMM缺点"></a><strong>2.5.MMM缺点</strong></h2><p>（1）需要一台备份服务器，浪费资源<br>（2）需要多个虚拟IP<br>（3）agent可能意外终止，引起裂脑。</p>
+<h1 id="3-MHA介绍"><a href="#3-MHA介绍" class="headerlink" title="3.MHA介绍"></a>3.MHA介绍</h1><p>MHA（Master High Availability）目前在MySQL高可用方面是一个相对成熟的解决方案，它由日本DeNA公司youshimaton（现就职于Facebook公司）开发，是一套优秀的作为MySQL高可用性环境下故障切换和主从提升的高可用软件。在MySQL故障切换过程中，MHA能做到在0~30秒之内自动完成数据库的故障切换操作，并且在进行故障切换的过程中，MHA能在最大程度上保证数据的一致性，以达到真正意义上的高可用。</p>
+<h2 id="3-1-MHA架构介绍"><a href="#3-1-MHA架构介绍" class="headerlink" title="3.1.MHA架构介绍"></a><strong>3.1.MHA架构介绍</strong></h2><p>该软件由两部分组成：MHA Manager（管理节点）和MHA Node（数据节点）。MHA Manager可以单独部署在一台独立的机器上管理多个master-slave集群，也可以部署在一台slave节点上。MHA Node运行在每台MySQL服务器上，MHA Manager会定时探测集群中的master节点，当master出现故障时，它可以自动将最新数据的slave提升为新的master，然后将所有其他的slave重新指向新的master。整个故障转移过程对应用程序完全透明。<br>在MHA自动故障切换过程中，MHA试图从宕机的主服务器上保存二进制日志，最大程度的保证数据的不丢失(配合mysql半同步复制效果更佳)，但这并不总是可行的。例如，如果主服务器硬件故障或无法通过ssh访问，MHA没法保存二进制日志，只进行故障转移而丢失了最新的数据。使用MySQL 5.5的半同步复制，可以大大降低数据丢失的风险。MHA可以与半同步复制结合起来。如果只有一个slave已经收到了最新的二进制日志，MHA可以将最新的二进制日志应用于其他所有的slave服务器上，因此可以保证所有节点的数据一致性。<br>注意：目前MHA主要支持一主多从的架构，要搭建MHA,要求一个复制集群中必须最少有三台数据库服务器，一主二从，即一台充当master，一台充当备用master，另外一台充当从库，因为至少需要三台服务器，出于机器成本的考虑，淘宝也在该基础上进行了改造，目前淘宝TMHA已经支持一主一从。</p>
+<h2 id="3-2-MHA架构图"><a href="#3-2-MHA架构图" class="headerlink" title="3.2.MHA架构图"></a><strong>3.2.MHA架构图</strong></h2><p>正常工作时架构图：<br><img src="http://image.winrains.cn/2019/10/20191021140014-c6b0a.png" alt="http://image.winrains.cn/2019/10/20191021140014-c6b0a.png"><br>主库down机时架构：<br><img src="http://image.winrains.cn/2019/10/20191021140014-1c5c2.png" alt="http://image.winrains.cn/2019/10/20191021140014-1c5c2.png"></p>
+<h2 id="3-3-故障转移过程"><a href="#3-3-故障转移过程" class="headerlink" title="3.3.故障转移过程"></a><strong>3.3.故障转移过程</strong></h2><p>（1）从宕机崩溃的master保存二进制日志事件（binlog events）;<br>（2）识别含有最新更新的slave；<br>（3）应用差异的中继日志（relay log）到其他的slave；<br>（4）应用从master保存的二进制日志事件（binlog events）；<br>（5）提升一个slave为新的master；<br>（6）使其他的slave连接新的master进行复制；<br>（7）在新的master启动vip地址，保证前端请求可以发送到新的master。</p>
+<h2 id="3-4-MHA优点"><a href="#3-4-MHA优点" class="headerlink" title="3.4.MHA优点"></a><strong>3.4.MHA优点</strong></h2><p>（1）不需要备份服务器<br>（2）不改变现有环境<br>（3）操作非常简单<br>（4）可以进行日志的差异修复<br>（5）可以将任意slave提升为master</p>
+<h2 id="3-5-MHA缺点"><a href="#3-5-MHA缺点" class="headerlink" title="3.5.MHA缺点"></a><strong>3.5.MHA缺点</strong></h2><p>（1）需要全部节点做ssh秘钥<br>（2）MHA出现故障后配置文件会被修改，如果再次故障转移需要重新修改配置文件。<br>（3）自带的脚本还需要进一步补充完善，且用perl开发，二次开发困难。</p>
+<h1 id="4-DRBD-（heartbeat-corosync）"><a href="#4-DRBD-（heartbeat-corosync）" class="headerlink" title="4.DRBD +（heartbeat,corosync）"></a>4.DRBD +（heartbeat,corosync）</h1><h2 id="4-1-方案简介"><a href="#4-1-方案简介" class="headerlink" title="4.1.方案简介"></a><strong>4.1.方案简介</strong></h2><p>本方案采用Heartbeat或者corosync双机热备软件来保证数据库的高稳定性和连续性，数据的一致性由DRBD这个工具来保证（如果可以尽量放到分布式存储上面）。默认情况下只有一台mysql在工作，当主mysql服务器出现问题后，系统将自动切换到备机上继续提供服务，当主数据库修复完毕，又将服务切回继续由主mysql提供服务。</p>
+<h2 id="4-2-组件"><a href="#4-2-组件" class="headerlink" title="4.2.组件"></a><strong>4.2.组件</strong></h2><p>Heartbeat,corosync作为心跳检测机制，监控primary节点的状态。当主节点宕掉之后，迅速提升secondary节点为新的主节点，并切换IP；<br>drbd负责数据同步</p>
+<h2 id="4-3-架构图"><a href="#4-3-架构图" class="headerlink" title="4.3.架构图 "></a><strong>4.3.架构图</strong> <img src="http://image.winrains.cn/2019/10/20191021140014-39339.jpeg" alt="http://image.winrains.cn/2019/10/20191021140014-39339.jpeg"></h2><h2 id="4-4-数据同步过程"><a href="#4-4-数据同步过程" class="headerlink" title="4.4.数据同步过程"></a><strong>4.4.数据同步过程</strong></h2><p>mysql进行刷盘时，会通过不同的sync方式，最终将数据写入disk；<br>drbd收到刷盘成功的信息后，将对应的磁盘块位置，和变更动作，通过网络传递至secondary节点；<br>secondary的drbd接收到变更信息后，将这些信息落盘；</p>
+<h2 id="4-5-切换过程"><a href="#4-5-切换过程" class="headerlink" title="4.5.切换过程"></a><strong>4.5.切换过程</strong></h2><p>前提：secondary节点的mysql服务不启动；<br>heartbeat检测到primary的mysql服务停止，则摘掉IP、umount掉数据盘、将primary切换为secondary；<br>在原来的secondary上，提升drbd同步为primary，挂载数据盘，启动mysql服务、绑定IP；<br>从库跟着IP和端口自动进行迁移；</p>
+<h2 id="4-6-方案优点"><a href="#4-6-方案优点" class="headerlink" title="4.6.方案优点"></a><strong>4.6.方案优点</strong></h2><p>（1）历史悠久、安全性高、稳定性高、可用性高、出现故障自动切换。<br>（2）数据一致性强</p>
+<h2 id="4-7-方案缺点"><a href="#4-7-方案缺点" class="headerlink" title="4.7.方案缺点"></a><strong>4.7.方案缺点</strong></h2><p>（1）需要一台备份服务器，浪费资源<br>（2）不方便扩展<br>（3）无论drbd还是headbetart，corosync都可能发生裂脑</p>
+<h1 id="5-Mysql-route介绍"><a href="#5-Mysql-route介绍" class="headerlink" title="5.Mysql route介绍"></a>5.Mysql route介绍</h1><h2 id="5-1-什么是mysql-route"><a href="#5-1-什么是mysql-route" class="headerlink" title="5.1.什么是mysql route"></a><strong>5.1.什么是mysql route</strong></h2><p>MySQL Router是处于应用client和dbserver之间的轻量级代理程序，它能检测，分析和转发查询到后端数据库实例，并把结果返回给client。是mysql-proxy的一个替代品。其架构图和功能如下。<br><img src="http://image.winrains.cn/2019/10/20191021140015-749a9.png" alt="http://image.winrains.cn/2019/10/20191021140015-749a9.png"><br>（1）Router实现读写分离，程序不是直接连接数据库IP，而是固定连接到mysql router。MySQL Router对前端应用是透明的。应用程序把MySQL Router当作是普通的mysql实例，把查询发给MySQL Router,而MySQL Router会把查询结果返回给前端的应用程序。<br>（2）从数据库服务器故障，业务可以正常运行。由MySQL Router来进行自动下线不可用服务器。程序配置不需要任何修改。<br>（3）主数据库故障，由MySQL Router来决定主从自动切换，业务可以正常访问。程序配置不需要做任何修改。</p>
+<h2 id="5-2-读写分离原理"><a href="#5-2-读写分离原理" class="headerlink" title="5.2.读写分离原理"></a><strong>5.2.读写分离原理</strong></h2><p>MySQL Router接受前端应用程序请求后，根据不同的端口来区分读写，把连接读写端口的所有查询发往主库，把连接只读端口的select查询以轮询方式发往多个从库，从而实现读写分离的目的。读写返回的结果会交给MySQL Router,由MySQL Router返回给客户端的应用程序。</p>
+<h2 id="5-3-Mysql-router用途"><a href="#5-3-Mysql-router用途" class="headerlink" title="5.3.Mysql router用途"></a><strong>5.3.Mysql router用途</strong></h2><p>MySQL Router的主要用途是读写分离，主主故障自动切换，负载均衡，连接池等。</p>
+<h2 id="5-4-Mysql-router主主故障自动切换的坑"><a href="#5-4-Mysql-router主主故障自动切换的坑" class="headerlink" title="5.4.Mysql router主主故障自动切换的坑"></a><strong>5.4.Mysql router主主故障自动切换的坑</strong></h2><p>Mysql router主主故障切换功能经过测试没有问题，但是有一个比较大的坑需要注意，主库发生切换之后，从库的连接的master服务器地址不会发生改变，需要自己写脚本进行判断。</p>
+<h2 id="5-5-优点"><a href="#5-5-优点" class="headerlink" title="5.5.优点"></a><strong>5.5.优点</strong></h2><p>（1）基于DAL层实现mysql的高可用。<br>（2）可以同时实现主主故障切换和读写分离。<br>（3）插件式架构允许用户进行额外的功能扩展。</p>
+<h2 id="5-6-缺点"><a href="#5-6-缺点" class="headerlink" title="5.6.缺点"></a><strong>5.6.缺点</strong></h2><p>（1）高可用功能需要进一步完善：存在主库切换之后，从库不会自动切换主库地址的坑。<br>（2）读写情况使用不同端口，需要修改应用程序。</p>
+<h1 id="6-mysql-Cluster"><a href="#6-mysql-Cluster" class="headerlink" title="6.mysql Cluster"></a>6.mysql Cluster</h1><p>国内用的非常少，主要因为一下三点：<br>（1）需要更改存储引擎<br>（2）付费<br>（3）国内几乎没有使用案例<br><strong>优点：</strong><br>高可用，可用率达99.999%</p>
+<h2 id="6-1-结束语"><a href="#6-1-结束语" class="headerlink" title="6.1.结束语"></a><strong>6.1.结束语</strong></h2><p>上面的高可用方案，只是我自己比较熟悉的，而且也是应用比较多的。mysql毕竟发展了有20多年了，各种高可用方案还是很多的，其他的高可用方案各位钥匙有兴趣，可以自己研究。</p>
+<blockquote>
+<p>版权申明：作者：西门飞冰，一名90后it男，一直在北京工作，热爱运动，热爱冒险，热爱旅行。由作者原创投稿，版权归原创者所有。除非无法确认，我们都会标明作者及出处，如有侵权烦请告知，我们会立即删除并表示歉意，谢谢。</p>
+</blockquote>
+<blockquote>
+<p>作者：西门飞冰</p>
+<p>来源：<a href="https://segmentfault.com/a/1190000020693588" target="_blank" rel="noopener">https://segmentfault.com/a/1190000020693588</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E9%AB%98%E5%8F%AF%E7%94%A8/" rel="tag"># 高可用</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Java%E4%B8%AD%E7%9A%84%E5%85%B3%E9%94%AE%E5%AD%97transient/" rel="prev" title="Java中的关键字transient">
+      <i class="fa fa-chevron-left"></i> Java中的关键字transient
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/JVM-%E5%8D%B3%E6%97%B6%E7%BC%96%E8%AF%91%E5%99%A8/" rel="next" title="JVM 即时编译器">
+      JVM 即时编译器 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#1-前言"><span class="nav-number">1.</span> <span class="nav-text">1.前言</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#2-MMM高可用方案"><span class="nav-number">2.</span> <span class="nav-text">2.MMM高可用方案</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#2-1-Mysql-MMM介绍"><span class="nav-number">2.1.</span> <span class="nav-text">2.1.Mysql-MMM介绍</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-2-组件"><span class="nav-number">2.2.</span> <span class="nav-text">2.2.组件</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-3-架构图"><span class="nav-number">2.3.</span> <span class="nav-text">2.3.架构图</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-4-MMM优点"><span class="nav-number">2.4.</span> <span class="nav-text">2.4.MMM优点</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-5-MMM缺点"><span class="nav-number">2.5.</span> <span class="nav-text">2.5.MMM缺点</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#3-MHA介绍"><span class="nav-number">3.</span> <span class="nav-text">3.MHA介绍</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#3-1-MHA架构介绍"><span class="nav-number">3.1.</span> <span class="nav-text">3.1.MHA架构介绍</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3-2-MHA架构图"><span class="nav-number">3.2.</span> <span class="nav-text">3.2.MHA架构图</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3-3-故障转移过程"><span class="nav-number">3.3.</span> <span class="nav-text">3.3.故障转移过程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3-4-MHA优点"><span class="nav-number">3.4.</span> <span class="nav-text">3.4.MHA优点</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3-5-MHA缺点"><span class="nav-number">3.5.</span> <span class="nav-text">3.5.MHA缺点</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#4-DRBD-（heartbeat-corosync）"><span class="nav-number">4.</span> <span class="nav-text">4.DRBD +（heartbeat,corosync）</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#4-1-方案简介"><span class="nav-number">4.1.</span> <span class="nav-text">4.1.方案简介</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#4-2-组件"><span class="nav-number">4.2.</span> <span class="nav-text">4.2.组件</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#4-3-架构图"><span class="nav-number">4.3.</span> <span class="nav-text">4.3.架构图 </span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#4-4-数据同步过程"><span class="nav-number">4.4.</span> <span class="nav-text">4.4.数据同步过程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#4-5-切换过程"><span class="nav-number">4.5.</span> <span class="nav-text">4.5.切换过程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#4-6-方案优点"><span class="nav-number">4.6.</span> <span class="nav-text">4.6.方案优点</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#4-7-方案缺点"><span class="nav-number">4.7.</span> <span class="nav-text">4.7.方案缺点</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#5-Mysql-route介绍"><span class="nav-number">5.</span> <span class="nav-text">5.Mysql route介绍</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#5-1-什么是mysql-route"><span class="nav-number">5.1.</span> <span class="nav-text">5.1.什么是mysql route</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#5-2-读写分离原理"><span class="nav-number">5.2.</span> <span class="nav-text">5.2.读写分离原理</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#5-3-Mysql-router用途"><span class="nav-number">5.3.</span> <span class="nav-text">5.3.Mysql router用途</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#5-4-Mysql-router主主故障自动切换的坑"><span class="nav-number">5.4.</span> <span class="nav-text">5.4.Mysql router主主故障自动切换的坑</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#5-5-优点"><span class="nav-number">5.5.</span> <span class="nav-text">5.5.优点</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#5-6-缺点"><span class="nav-number">5.6.</span> <span class="nav-text">5.6.缺点</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#6-mysql-Cluster"><span class="nav-number">6.</span> <span class="nav-text">6.mysql Cluster</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#6-1-结束语"><span class="nav-number">6.1.</span> <span class="nav-text">6.1.结束语</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

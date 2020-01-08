@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="背景介绍TLAB之前先思考一个问题：创建对象时，需要在堆上申请指定大小的内存，如果同时有大量线程申请内存的话，可以通过锁机制或者指针碰撞的方式确保不会申请到同一块内存，在JVM运行中，内存分配是一个极其频繁的动作，这种方式势必会降低性能。因此，在Hotspot 1.6的实现中引入了TLAB技术。">
+<meta name="keywords" content="源码">
+<meta property="og:type" content="article">
+<meta property="og:title" content="JVM源码分析（13）：线程局部缓存TLAB">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8813%EF%BC%89%EF%BC%9A%E7%BA%BF%E7%A8%8B%E5%B1%80%E9%83%A8%E7%BC%93%E5%AD%98TLAB&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="背景介绍TLAB之前先思考一个问题：创建对象时，需要在堆上申请指定大小的内存，如果同时有大量线程申请内存的话，可以通过锁机制或者指针碰撞的方式确保不会申请到同一块内存，在JVM运行中，内存分配是一个极其频繁的动作，这种方式势必会降低性能。因此，在Hotspot 1.6的实现中引入了TLAB技术。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:updated_time" content="2020-01-08T03:48:53.000Z">
+<meta name="twitter:card" content="summary">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8813%EF%BC%89%EF%BC%9A%E7%BA%BF%E7%A8%8B%E5%B1%80%E9%83%A8%E7%BC%93%E5%AD%98TLAB/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>JVM源码分析（13）：线程局部缓存TLAB | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8813%EF%BC%89%EF%BC%9A%E7%BA%BF%E7%A8%8B%E5%B1%80%E9%83%A8%E7%BC%93%E5%AD%98TLAB/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          JVM源码分析（13）：线程局部缓存TLAB
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 11:48:53" itemprop="dateCreated datePublished" datetime="2020-01-08T11:48:53+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/" itemprop="url" rel="index">
+                    <span itemprop="name">JVM</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h2 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h2><p>介绍TLAB之前先思考一个问题：<br>创建对象时，需要在堆上申请指定大小的内存，如果同时有大量线程申请内存的话，可以通过锁机制或者指针碰撞的方式确保不会申请到同一块内存，在JVM运行中，内存分配是一个极其频繁的动作，这种方式势必会降低性能。<br>因此，在Hotspot 1.6的实现中引入了TLAB技术。</p>
+<a id="more"></a>
+
+<h2 id="什么是TLAB"><a href="#什么是TLAB" class="headerlink" title="什么是TLAB"></a>什么是TLAB</h2><p>TLAB全称<code>ThreadLocalAllocBuffer</code>，是线程的一块私有内存，如果设置了虚拟机参数 <code>-XX:UseTLAB</code>，在线程初始化时，同时也会申请一块指定大小的内存，只给当前线程使用，这样每个线程都单独拥有一个Buffer，如果需要分配内存，就在自己的Buffer上分配，这样就不存在竞争的情况，可以大大提升分配效率，当Buffer容量不够的时候，再重新从Eden区域申请一块继续使用，这个申请动作还是需要原子操作的。<br>TLAB的目的是在为新对象分配内存空间时，让每个Java应用线程能在使用自己专属的分配指针来分配空间，均摊对GC堆（eden区）里共享的分配指针做更新而带来的同步开销。<br>TLAB只是让每个线程有私有的分配指针，但底下存对象的内存空间还是给所有线程访问的，只是其它线程无法在这个区域分配而已。当一个TLAB用满（分配指针top撞上分配极限end了），就新申请一个TLAB，而在老TLAB里的对象还留在原地什么都不用管——它们无法感知自己是否是曾经从TLAB分配出来的，而只关心自己是在eden里分配的。</p>
+<h2 id="TLAB实现"><a href="#TLAB实现" class="headerlink" title="TLAB实现"></a>TLAB实现</h2><p>实现位于<code>/Users/zhanjun/openjdk/hotspot/src/share/vm/memory/threadLocalAllocBuffer.hpp</code></p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// ThreadLocalAllocBuffer: a descriptor for thread-local storage used by</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// the threads for allocation.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//            It is thread-private at any time, but maybe multiplexed over</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//            time across multiple threads. The park()/unpark() pair is</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//            used to make it avaiable for such multiplexing.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">ThreadLocalAllocBuffer</span>:</span> <span class="keyword">public</span> CHeapObj&lt;mtThread&gt; &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">friend</span> <span class="class"><span class="keyword">class</span> <span class="title">VMStructs</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">  HeapWord* _start;                              <span class="comment">// address of TLAB</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">  HeapWord* _top;                                <span class="comment">// address after last allocation</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">  HeapWord* _pf_top;                             <span class="comment">// allocation prefetch watermark</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">  HeapWord* _end;                                <span class="comment">// allocation end (excluding alignment_reserve)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">size_t</span>    _desired_size;                       <span class="comment">// desired size   (including alignment_reserve)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">size_t</span>    _refill_waste_limit;                 <span class="comment">// hold onto tlab if free() is larger than this</span></span></pre></td></tr></table></figure>
+
+<p>TLAB简单来说本质上就是三个指针：start，top 和 end，每个线程都会从Eden分配一大块空间，例如说100KB，作为自己的TLAB，其中 start 和 end 是占位用的，标识出 eden 里被这个 TLAB 所管理的区域，卡住eden里的一块空间不让其它线程来这里分配。而 top 就是里面的分配指针，一开始指向跟 start 同样的位置，然后逐渐分配，直到再要分配下一个对象就会撞上 end 的时候就会触发一次 TLAB refill，refill过程后续会解释。<br>_desired_size 是指TLAB的内存大小。<br>_refill_waste_limit 是指最大的浪费空间，假设为5KB，通俗一点讲就是：<br>1、假如当前TLAB已经分配96KB，还剩下4KB，但是现在new了一个对象需要6KB的空间，显然TLAB的内存不够了，这时可以简单的重新申请一个TLAB，原先的TLAB交给Eden管理，这时只浪费4KB的空间，在_refill_waste_limit 之内。<br>2、假如当前TLAB已经分配90KB，还剩下10KB，现在new了一个对象需要11KB，显然TLAB的内存不够了，这时就不能简单的抛弃当前TLAB，这11KB会被安排到Eden区进行申请。<br>在Java代码中执行new Thread()的时候，会触发以下代码</p>
+<figure class="highlight kotlin"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// The first routine called by a new Java thread</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">void JavaThread::run() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// initialize thread-local alloc buffer related fields</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">this</span>-&gt;initialize_tlab();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// used to test validitity of stack trace backs</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">this</span>-&gt;record_base_of_stack_pointer();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// Record real stack base and size.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">this</span>-&gt;record_stack_base_and_size();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// Initialize thread local storage; set before calling MutexLocker</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">this</span>-&gt;initialize_thread_local_storage();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">this</span>-&gt;create_stack_guard_pages();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">this</span>-&gt;cache_global_variables();</span></pre></td></tr></table></figure>
+
+<p>JavaThread的run方法中，第一步就是调用<code>this-&gt;initialize_tlab();</code>方法初始化TLAB，<code>initialize_tlab</code>实现如下：</p>
+<figure class="highlight less"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">void</span> <span class="selector-tag">initialize_tlab</span>() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="selector-tag">if</span> (UseTLAB) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">      <span class="selector-tag">tlab</span>()<span class="selector-class">.initialize</span>();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>其中<code>tlab()</code>返回的就是一个ThreadLocalAllocBuffer对象，调用<code>initialize()</code>初始化TLAB，实现如下：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">void ThreadLocalAllocBuffer::initialize<span class="literal">()</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  initialize(NULL,                    <span class="comment">// start</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">             NULL,                    <span class="comment">// top</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">             NULL);                   <span class="comment">// end</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  set<span class="constructor">_desired_size(<span class="params">initial_desired_size</span>()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// Following check is needed because at startup the main (primordial)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// thread is initialized before the heap is.  The initialization for</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// this thread is redone in startup_initialization below.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">if</span> (Universe::heap<span class="literal">()</span> != NULL) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    size_t capacity   = Universe::heap<span class="literal">()</span>-&gt;tlab<span class="constructor">_capacity(<span class="params">myThread</span>()</span>)<span class="operator"> / </span>HeapWordSize;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    double alloc_frac = desired<span class="constructor">_size()</span><span class="operator"> * </span>target<span class="constructor">_refills()</span><span class="operator"> / </span>(double) capacity;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">_allocation_fraction</span>.</span></span>sample(alloc_frac);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">  set<span class="constructor">_refill_waste_limit(<span class="params">initial_refill_waste_limit</span>()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">  initialize<span class="constructor">_statistics()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>1、设置当前TLAB的_desired_size，该值通过<code>initial_desired_size()</code>方法计算；<br>2、设置当前TLAB的_refill_waste_limit，该值通过<code>initial_refill_waste_limit()</code>方法计算；<br>3、初始化一些统计字段，如_number_of_refills、_fast_refill_waste、_slow_refill_waste、_gc_waste和_slow_allocations；</p>
+<h3 id="字段-desired-size的计算过程分析"><a href="#字段-desired-size的计算过程分析" class="headerlink" title="字段_desired_size的计算过程分析"></a>字段_desired_size的计算过程分析</h3><figure class="highlight livescript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">size_t ThreadLocalAllocBuffer::initial_desired_size() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  size_t init_sz;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">if</span> (TLABSize &gt; <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    init_sz = MIN2(TLABSize / HeapWordSize, max_size());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  &#125; <span class="keyword">else</span> <span class="keyword">if</span> (global_stats() == NULL) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="regexp">// Startup issue - main thread initialized before heap initialized.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="regexp">    init_sz = min_size();</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="regexp">  &#125; else &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="regexp">    //</span> Initial size <span class="keyword">is</span> a <span class="keyword">function</span> <span class="keyword">of</span> the average number <span class="keyword">of</span> allocating threads.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    unsigned nof_threads = global_stats<span class="function"><span class="params">()</span>-&gt;</span>allocating_threads_avg();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="title">init_sz</span>  = <span class="params">(Universe::heap()-&gt;tlab_capacity(myThread()) / HeapWordSize)</span> /</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="function">                      <span class="params">(nof_threads * target_refills())</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="function">    <span class="title">init_sz</span> = <span class="title">align_object_size</span><span class="params">(init_sz)</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="function">    <span class="title">init_sz</span> = <span class="title">MIN2</span><span class="params">(MAX2(init_sz, min_size()), max_size())</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="function">  &#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="function">  <span class="title">return</span> <span class="title">init_sz</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="function">&#125;</span></span></pre></td></tr></table></figure>
+
+<p>TLABSize在argument模块中默认会设置大小为 256 * K，也可以通过JVM参数选择进行设置，不过即使设置了也会和一个最大值max_size进行比较，然后取一个较小值，其中max_size计算如下：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">const</span> <span class="keyword">size_t</span> ThreadLocalAllocBuffer::max_size() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// TLABs can't be bigger than we can fill with a int[Integer.MAX_VALUE].</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// This restriction could be removed by enabling filling with multiple arrays.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// If we compute that the reasonable way as</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">//    header_size + ((sizeof(jint) * max_jint) / HeapWordSize)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// we'll overflow on the multiply, so we do the divide first.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// We actually lose a little by dividing first,</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// but that just makes the TLAB  somewhat smaller than the biggest array,</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// which is fine, since we'll be able to fill that.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">size_t</span> unaligned_max_size = typeArrayOopDesc::header_size(T_INT) +</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">                              <span class="keyword">sizeof</span>(jint) *</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">                              ((juint) max_jint / (<span class="keyword">size_t</span>) HeapWordSize);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">return</span> align_size_down(unaligned_max_size, MinObjAlignment);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>这里明确说明了TLAB的大小不能超过可以容纳 int[Integer.MAX_VALUE]，有点疑惑，why?</p>
+<h3 id="字段-refill-waste-limit计算分析"><a href="#字段-refill-waste-limit计算分析" class="headerlink" title="字段_refill_waste_limit计算分析"></a>字段_refill_waste_limit计算分析</h3><figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">size_t</span> initial_refill_waste_limit()  &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> desired_size() / TLABRefillWasteFraction;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>计算逻辑很简单，其中<code>TLABRefillWasteFraction</code>默认 64</p>
+<h2 id="内存分配"><a href="#内存分配" class="headerlink" title="内存分配"></a>内存分配</h2><p>new一个对象，假设需要1K的大小，我们一步一步看看是如何分配的。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">instanceOop instanceKlass::allocate<span class="constructor">_instance(TRAPS)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">assert</span>(!oop<span class="constructor">_is_instanceMirror()</span>, <span class="string">"wrong allocation path"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="built_in">bool</span> has_finalizer_flag = has<span class="constructor">_finalizer()</span>; <span class="comment">// Query before possible GC</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="built_in">int</span> size = size<span class="constructor">_helper()</span>;  <span class="comment">// Query before forming handle.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  KlassHandle h<span class="constructor">_k(THREAD, <span class="params">as_klassOop</span>()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  instanceOop i;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  i = (instanceOop)CollectedHeap::obj<span class="constructor">_allocate(<span class="params">h_k</span>, <span class="params">size</span>, CHECK_NULL)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">if</span> (has_finalizer_flag<span class="operator"> &amp;&amp; </span>!RegisterFinalizersAtInit) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    i = register<span class="constructor">_finalizer(<span class="params">i</span>, CHECK_NULL)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">  return i;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>对象的内存分配入口为<code>instanceKlass::allocate_instance()</code>，通过<code>CollectedHeap::obj_allocate()</code>方法在堆内存上进行分配</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">oop CollectedHeap::obj<span class="constructor">_allocate(KlassHandle <span class="params">klass</span>, <span class="params">int</span> <span class="params">size</span>, TRAPS)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  debug<span class="constructor">_only(<span class="params">check_for_valid_allocation_state</span>()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">assert</span>(!Universe::heap<span class="literal">()</span>-&gt;is<span class="constructor">_gc_active()</span>, <span class="string">"Allocation during gc not allowed"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">assert</span>(size &gt;= <span class="number">0</span>, <span class="string">"int won't convert to size_t"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  HeapWord* obj = common<span class="constructor">_mem_allocate_init(<span class="params">klass</span>, <span class="params">size</span>, CHECK_NULL)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  post<span class="constructor">_allocation_setup_obj(<span class="params">klass</span>, <span class="params">obj</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  <span class="constructor">NOT_PRODUCT(Universe::<span class="params">heap</span>()</span>-&gt;check<span class="constructor">_for_bad_heap_word_value(<span class="params">obj</span>, <span class="params">size</span>)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  return (oop)obj;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>其中<code>common_mem_allocate_init()</code>方法最终会调用<code>CollectedHeap::common_mem_allocate_noinit()</code>方法，实现如下：</p>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">HeapWord* CollectedHeap::common_mem_allocate_noinit(KlassHandle klass, <span class="keyword">size_t</span> <span class="built_in">size</span>, TRAPS) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// Clear unhandled oops for memory allocation.  Memory allocation might</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// not take out a lock if from tlab, so clear here.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  CHECK_UNHANDLED_OOPS_ONLY(THREAD-&gt;clear_unhandled_oops();)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">if</span> (HAS_PENDING_EXCEPTION) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    NOT_PRODUCT(guarantee(<span class="literal">false</span>, <span class="string">"Should not allocate with exception pending"</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> <span class="literal">NULL</span>;  <span class="comment">// caller does a CHECK_0 too</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">  HeapWord* result = <span class="literal">NULL</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">if</span> (UseTLAB) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    result = allocate_from_tlab(klass, THREAD, <span class="built_in">size</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (result != <span class="literal">NULL</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">      assert(!HAS_PENDING_EXCEPTION,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">             <span class="string">"Unexpected exception, will result in uninitialized storage"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">      <span class="keyword">return</span> result;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">bool</span> gc_overhead_limit_was_exceeded = <span class="literal">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">  result = Universe::heap()-&gt;mem_allocate(<span class="built_in">size</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">                                          &amp;gc_overhead_limit_was_exceeded);</span></pre></td></tr></table></figure>
+
+<p>根据UseTLAB的值，决定是否在TLAB上进行内存分配，如果JVM参数中没有手动取消UseTLAB，会调用<code>allocate_from_tlab()</code>在TLAB上尝试分配，因为可能存在分配失败的情况，比如TLAB容量不足，看下<code>allocate_from_tlab()</code>的实现：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">HeapWord* CollectedHeap::allocate<span class="constructor">_from_tlab(KlassHandle <span class="params">klass</span>, Thread<span class="operator">*</span> <span class="params">thread</span>, <span class="params">size_t</span> <span class="params">size</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">assert</span>(UseTLAB, <span class="string">"should use UseTLAB"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  HeapWord* obj = thread-&gt;tlab<span class="literal">()</span>.allocate(size);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">if</span> (obj != NULL) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    return obj;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// Otherwise...</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  return allocate<span class="constructor">_from_tlab_slow(<span class="params">klass</span>, <span class="params">thread</span>, <span class="params">size</span>)</span>;</span></pre></td></tr></table></figure>
+
+<p>从上述实现可以看出，先会尝试调用<code>ThreadLocalAllocBuffer</code> 的 allocate 方法，如果返回为空，再执行<code>allocate_from_tlab_slow()</code>进行分配，从这个方法命名可以看出这是比较慢的分配路径。<br><code>ThreadLocalAllocBuffer</code> 的 allocate 方法实现如下：</p>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">inline</span> HeapWord* ThreadLocalAllocBuffer::allocate(<span class="keyword">size_t</span> <span class="built_in">size</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  invariants();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  HeapWord* obj = top();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">if</span> (pointer_delta(<span class="built_in">end</span>(), obj) &gt;= <span class="built_in">size</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// successful thread-local allocation</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="meta">#<span class="meta-keyword">ifdef</span> ASSERT</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// Skip mangling the space corresponding to the object header to</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// ensure that the returned space is not considered parsable by</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// any concurrent GC thread.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">size_t</span> hdr_size = oopDesc::header_size();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    Copy::fill_to_words(obj + hdr_size, <span class="built_in">size</span> - hdr_size, badHeapWordVal);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="meta">#<span class="meta-keyword">endif</span> <span class="comment">// ASSERT</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// This addition is safe because we know that top is</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// at least size below end, so the add can't wrap.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    set_top(obj + <span class="built_in">size</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    invariants();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> obj;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">return</span> <span class="literal">NULL</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>通过判断当前TLAB的剩余容量是否大于需要分配的大小，来决定分配结果，如果当前剩余容量不够，就返回NULL，表示分配失败。<br>慢分配<code>allocate_from_tlab_slow()</code>实现如下：</p>
+<figure class="highlight lasso"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">HeapWord* CollectedHeap<span class="type">::allocate_from_tlab_slow</span>(KlassHandle klass, <span class="keyword">Thread</span>* <span class="keyword">thread</span>, size_t size) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// Retain tlab and allocate object in shared space if</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// the amount free in the tlab is too large to discard.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">if</span> (<span class="keyword">thread</span>-&gt;tlab().free() &gt; <span class="keyword">thread</span>-&gt;tlab().refill_waste_limit()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">thread</span>-&gt;tlab().record_slow_allocation(size);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> <span class="built_in">NULL</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// Discard tlab and allocate a new one.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// To minimize fragmentation, the last TLAB may be smaller than the rest.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">  size_t new_tlab_size = <span class="keyword">thread</span>-&gt;tlab().compute_size(size);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">thread</span>-&gt;tlab().clear_before_allocation();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">if</span> (new_tlab_size == <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> <span class="built_in">NULL</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// Allocate a new TLAB...</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">  HeapWord* obj = Universe<span class="type">::heap</span>()-&gt;allocate_new_tlab(new_tlab_size);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">if</span> (obj == <span class="built_in">NULL</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> <span class="built_in">NULL</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"> <span class="comment">// 删除了一些代码</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">thread</span>-&gt;tlab().fill(obj, obj + size, new_tlab_size);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">return</span> obj;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>1、如果当前TLAB的剩余容量大于浪费阈值，就不在当前TLAB分配，直接在共享的Eden区进行分配，并且记录慢分配的内存大小；<br>2、如果剩余容量小于浪费阈值，说明可以丢弃当前TLAB了；<br>3、通过<code>allocate_new_tlab()</code>方法，从eden新分配一块裸的空间出来（这一步可能会失败），如果失败说明eden没有足够空间来分配这个新TLAB，就会触发YGC。<br>申请好新的TLAB内存之后，执行TLAB的<code>fill()</code>方法，实现如下：</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="type">void</span> ThreadLocalAllocBuffer::fill(HeapWord* <span class="keyword">start</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">                                  HeapWord* top,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">                                  size_t    new_size) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  _number_of_refills++;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">if</span> (PrintTLAB &amp;&amp; <span class="keyword">Verbose</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    print_stats("fill");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">assert</span>(top &lt;= <span class="keyword">start</span> + new_size - alignment_reserve(), "size too small");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">  initialize(<span class="keyword">start</span>, top, <span class="keyword">start</span> + new_size - alignment_reserve());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">  // <span class="keyword">Reset</span> amount <span class="keyword">of</span> <span class="type">internal</span> fragmentation</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">  set_refill_waste_limit(initial_refill_waste_limit());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>包括下述几个动作：<br>1、统计refill的次数<br>2、初始化重新申请到的内存块<br>3、将当前TLAB抛弃（retire）掉，这个过程中最重要的动作是将TLAB末尾尚未分配给Java对象的空间（浪费掉的空间）分配成一个假的“filler object”（目前是用int[]作为filler object）。这是为了保持GC堆可以线性parse（heap parseability）用的。</p>
+<blockquote>
+<p>作者：占小狼</p>
+<p>来源：<a href="https://www.jianshu.com/p/cd85098cca39" target="_blank" rel="noopener">https://www.jianshu.com/p/cd85098cca39</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E6%BA%90%E7%A0%81/" rel="tag"># 源码</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Kafka%E6%B7%B1%E5%BA%A6%E8%A7%A3%E6%9E%90/" rel="prev" title="Kafka深度解析">
+      <i class="fa fa-chevron-left"></i> Kafka深度解析
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8814%EF%BC%89%EF%BC%9AYGC%E7%9A%84%E6%9D%A5%E9%BE%99%E5%8E%BB%E8%84%89/" rel="next" title="JVM源码分析（14）：YGC的来龙去脉">
+      JVM源码分析（14）：YGC的来龙去脉 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#背景"><span class="nav-number">1.</span> <span class="nav-text">背景</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#什么是TLAB"><span class="nav-number">2.</span> <span class="nav-text">什么是TLAB</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#TLAB实现"><span class="nav-number">3.</span> <span class="nav-text">TLAB实现</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#字段-desired-size的计算过程分析"><span class="nav-number">3.1.</span> <span class="nav-text">字段_desired_size的计算过程分析</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#字段-refill-waste-limit计算分析"><span class="nav-number">3.2.</span> <span class="nav-text">字段_refill_waste_limit计算分析</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#内存分配"><span class="nav-number">4.</span> <span class="nav-text">内存分配</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

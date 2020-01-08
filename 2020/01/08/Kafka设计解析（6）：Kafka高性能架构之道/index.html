@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="摘要上一篇文章《Kafka设计解析（五）- Kafka性能测试方法及Benchmark报告》从测试角度说明了Kafka的性能。本文从宏观架构层面和具体实现层面分析了Kafka如何实现高性能。">
+<meta name="keywords" content="kafka">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Kafka设计解析（6）：Kafka高性能架构之道">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;Kafka%E8%AE%BE%E8%AE%A1%E8%A7%A3%E6%9E%90%EF%BC%886%EF%BC%89%EF%BC%9AKafka%E9%AB%98%E6%80%A7%E8%83%BD%E6%9E%B6%E6%9E%84%E4%B9%8B%E9%81%93&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="摘要上一篇文章《Kafka设计解析（五）- Kafka性能测试方法及Benchmark报告》从测试角度说明了Kafka的性能。本文从宏观架构层面和具体实现层面分析了Kafka如何实现高性能。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;1b75b-kafka-consumer.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;a13dd-kafka-replication.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;43fc3-kafka_IO.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;7fe8b-BIO.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;9601c-NIO.png">
+<meta property="og:updated_time" content="2020-01-08T05:11:07.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;1b75b-kafka-consumer.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/Kafka%E8%AE%BE%E8%AE%A1%E8%A7%A3%E6%9E%90%EF%BC%886%EF%BC%89%EF%BC%9AKafka%E9%AB%98%E6%80%A7%E8%83%BD%E6%9E%B6%E6%9E%84%E4%B9%8B%E9%81%93/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Kafka设计解析（6）：Kafka高性能架构之道 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/Kafka%E8%AE%BE%E8%AE%A1%E8%A7%A3%E6%9E%90%EF%BC%886%EF%BC%89%EF%BC%9AKafka%E9%AB%98%E6%80%A7%E8%83%BD%E6%9E%B6%E6%9E%84%E4%B9%8B%E9%81%93/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Kafka设计解析（6）：Kafka高性能架构之道
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 13:11:07" itemprop="dateCreated datePublished" datetime="2020-01-08T13:11:07+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">其它技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/%E6%B6%88%E6%81%AF%E9%98%9F%E5%88%97/" itemprop="url" rel="index">
+                    <span itemprop="name">消息队列</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="摘要"><a href="#摘要" class="headerlink" title="摘要"></a>摘要</h1><p>上一篇文章《<a href="http://www.jasongj.com/2015/12/31/KafkaColumn5_kafka_benchmark/" target="_blank" rel="noopener">Kafka设计解析（五）- Kafka性能测试方法及Benchmark报告</a>》从测试角度说明了Kafka的性能。本文从宏观架构层面和具体实现层面分析了Kafka如何实现高性能。</p>
+<a id="more"></a>
+
+<h1 id="宏观架构层面"><a href="#宏观架构层面" class="headerlink" title="宏观架构层面"></a>宏观架构层面</h1><h2 id="利用Partition实现并行处理"><a href="#利用Partition实现并行处理" class="headerlink" title="利用Partition实现并行处理"></a>利用Partition实现并行处理</h2><h3 id="Partition提供并行处理的能力"><a href="#Partition提供并行处理的能力" class="headerlink" title="Partition提供并行处理的能力"></a>Partition提供并行处理的能力</h3><p>Kafka是一个Pub-Sub的消息系统，无论是发布还是订阅，都须指定Topic。如《<a href="http://www.jasongj.com/2015/03/10/KafkaColumn1" target="_blank" rel="noopener">Kafka设计解析（一）- Kafka背景及架构介绍</a>》一文所述，Topic只是一个逻辑的概念。每个Topic都包含一个或多个Partition，不同Partition可位于不同节点。同时Partition在物理上对应一个本地文件夹，每个Partition包含一个或多个Segment，每个Segment包含一个数据文件和一个与之对应的索引文件。在逻辑上，可以把一个Partition当作一个非常长的数组，可通过这个“数组”的索引（offset）去访问其数据。<br>一方面，由于不同Partition可位于不同机器，因此可以充分利用集群优势，实现机器间的并行处理。另一方面，由于Partition在物理上对应一个文件夹，即使多个Partition位于同一个节点，也可通过配置让同一节点上的不同Partition置于不同的disk drive上，从而实现磁盘间的并行处理，充分发挥多磁盘的优势。<br>利用多磁盘的具体方法是，将不同磁盘mount到不同目录，然后在server.properties中，将<code>log.dirs</code>设置为多目录（用逗号分隔）。Kafka会自动将所有Partition尽可能均匀分配到不同目录也即不同目录（也即不同disk）上。<br>注：虽然物理上最小单位是Segment，但Kafka并不提供同一Partition内不同Segment间的并行处理。因为对于写而言，每次只会写Partition内的一个Segment，而对于读而言，也只会顺序读取同一Partition内的不同Segment。</p>
+<h3 id="Partition是最小并发粒度"><a href="#Partition是最小并发粒度" class="headerlink" title="Partition是最小并发粒度"></a>Partition是最小并发粒度</h3><p>如同《<a href="http://www.jasongj.com/2015/08/09/KafkaColumn4" target="_blank" rel="noopener">Kafka设计解析（四）- Kafka Consumer设计解析</a>》一文所述，多Consumer消费同一个Topic时，同一条消息只会被同一Consumer Group内的一个Consumer所消费。而数据并非按消息为单位分配，而是以Partition为单位分配，也即同一个Partition的数据只会被一个Consumer所消费（在不考虑Rebalance的前提下）。<br>如果Consumer的个数多于Partition的个数，那么会有部分Consumer无法消费该Topic的任何数据，也即当Consumer个数超过Partition后，增加Consumer并不能增加并行度。<br>简而言之，Partition个数决定了可能的最大并行度。如下图所示，由于Topic 2只包含3个Partition，故group2中的Consumer 3、Consumer 4、Consumer 5 可分别消费1个Partition的数据，而Consumer 6消费不到Topic 2的任何数据。<br><a href="http://image.winrains.cn/2019/10/1b75b-kafka-consumer.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/1b75b-kafka-consumer.png" alt="Kafka Consumer"></a><br>以Spark消费Kafka数据为例，如果所消费的Topic的Partition数为N，则有效的Spark最大并行度也为N。即使将Spark的Executor数设置为N+M，最多也只有N个Executor可同时处理该Topic的数据。</p>
+<h2 id="ISR实现可用性与数据一致性的动态平衡"><a href="#ISR实现可用性与数据一致性的动态平衡" class="headerlink" title="ISR实现可用性与数据一致性的动态平衡"></a>ISR实现可用性与数据一致性的动态平衡</h2><h3 id="CAP理论"><a href="#CAP理论" class="headerlink" title="CAP理论"></a>CAP理论</h3><p>CAP理论是指，分布式系统中，一致性、可用性和分区容忍性最多只能同时满足两个。<br><strong><em>一致性\</em></strong></p>
+<ul>
+<li>通过某个节点的写操作结果对后面通过其它节点的读操作可见</li>
+<li>如果更新数据后，并发访问情况下后续读操作可立即感知该更新，称为强一致性</li>
+<li>如果允许之后部分或者全部感知不到该更新，称为弱一致性</li>
+<li>若在之后的一段时间（通常该时间不固定）后，一定可以感知到该更新，称为最终一致性</li>
+</ul>
+<p><strong><em>可用性\</em></strong></p>
+<ul>
+<li>任何一个没有发生故障的节点必须在有限的时间内返回合理的结果</li>
+</ul>
+<p><strong><em>分区容忍性\</em></strong></p>
+<ul>
+<li>部分节点宕机或者无法与其它节点通信时，各分区间还可保持分布式系统的功能</li>
+</ul>
+<p>一般而言，都要求保证分区容忍性。所以在CAP理论下，更多的是需要在可用性和一致性之间做权衡。</p>
+<h3 id="常用数据复制及一致性方案"><a href="#常用数据复制及一致性方案" class="headerlink" title="常用数据复制及一致性方案"></a>常用数据复制及一致性方案</h3><p><strong><em>Master-Slave\</em></strong></p>
+<ul>
+<li>RDBMS的读写分离即为典型的Master-Slave方案</li>
+<li>同步复制可保证强一致性但会影响可用性</li>
+<li>异步复制可提供高可用性但会降低一致性</li>
+</ul>
+<p><strong><em>WNR\</em></strong></p>
+<ul>
+<li>主要用于去中心化的分布式系统中。DynamoDB与Cassandra即采用此方案或其变种</li>
+<li>N代表总副本数，W代表每次写操作要保证的最少写成功的副本数，R代表每次读至少要读取的副本数</li>
+<li>当W+R&gt;N时，可保证每次读取的数据至少有一个副本拥有最新的数据</li>
+<li>多个写操作的顺序难以保证，可能导致多副本间的写操作顺序不一致。Dynamo通过向量时钟保证最终一致性</li>
+</ul>
+<p><strong><em>Paxos及其变种\</em></strong></p>
+<ul>
+<li>Google的Chubby，Zookeeper的原子广播协议（Zab），RAFT等</li>
+</ul>
+<p><strong><em>基于ISR的数据复制方案\</em></strong><br>如《<a href="http://www.jasongj.com/2015/04/24/KafkaColumn2/#ACK前需要保证有多少个备份" target="_blank" rel="noopener"> Kafka High Availability（上）</a>》一文所述，Kafka的数据复制是以Partition为单位的。而多个备份间的数据复制，通过Follower向Leader拉取数据完成。从一这点来讲，Kafka的数据复制方案接近于上文所讲的Master-Slave方案。不同的是，Kafka既不是完全的同步复制，也不是完全的异步复制，而是基于ISR的动态复制方案。<br>ISR，也即In-sync Replica。每个Partition的Leader都会维护这样一个列表，该列表中，包含了所有与之同步的Replica（包含Leader自己）。每次数据写入时，只有ISR中的所有Replica都复制完，Leader才会将其置为Commit，它才能被Consumer所消费。<br>这种方案，与同步复制非常接近。但不同的是，这个ISR是由Leader动态维护的。如果Follower不能紧“跟上”Leader，它将被Leader从ISR中移除，待它又重新“跟上”Leader后，会被Leader再次加加ISR中。每次改变ISR后，Leader都会将最新的ISR持久化到Zookeeper中。<br>至于如何判断某个Follower是否“跟上”Leader，不同版本的Kafka的策略稍微有些区别。</p>
+<ul>
+<li>对于0.8.*版本，如果Follower在<code>replica.lag.time.max.ms</code>时间内未向Leader发送Fetch请求（也即数据复制请求），则Leader会将其从ISR中移除。如果某Follower持续向Leader发送Fetch请求，但是它与Leader的数据差距在<code>replica.lag.max.messages</code>以上，也会被Leader从ISR中移除。</li>
+<li>从0.9.0.0版本开始，<code>replica.lag.max.messages</code>被移除，故Leader不再考虑Follower落后的消息条数。另外，Leader不仅会判断Follower是否在<code>replica.lag.time.max.ms</code>时间内向其发送Fetch请求，同时还会考虑Follower是否在该时间内与之保持同步。</li>
+<li>0.10.* 版本的策略与0.9.*版一致</li>
+</ul>
+<p>对于0.8.<em>版本的<code>replica.lag.max.messages</code>参数，很多读者曾留言提问，既然只有ISR中的所有Replica复制完后的消息才被认为Commit，那为何会出现Follower与Leader差距过大的情况。原因在于，Leader并不需要等到前一条消息被Commit才接收后一条消息。事实上，Leader可以按顺序接收大量消息，最新的一条消息的Offset被记为LEO（Log end offset）。而只有被ISR中所有Follower都复制过去的消息才会被Commit，Consumer只能消费被Commit的消息，最新被Commit的Offset被记为High watermark。换句话说，LEO 标记的是Leader所保存的最新消息的offset，而High watermark标记的是最新的可被消费的（已同步到ISR中的Follower）消息。而Leader对数据的接收与Follower对数据的复制是异步进行的，因此会出现Hight watermark与LEO存在一定差距的情况。0.8.</em>版本中<code>replica.lag.max.messages</code>限定了Leader允许的该差距的最大值。<br>Kafka基于ISR的数据复制方案原理如下图所示。<br><a href="http://image.winrains.cn/2019/10/a13dd-kafka-replication.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/a13dd-kafka-replication.png" alt="Kafka Replication"></a><br>如上图所示，在第一步中，Leader A总共收到3条消息，故其high watermark为3，但由于ISR中的Follower只同步了第1条消息（m1），故只有m1被Commit，也即只有m1可被Consumer消费。此时Follower B与Leader A的差距是1，而Follower C与Leader A的差距是2，均未超过默认的<code>replica.lag.max.messages</code>，故得以保留在ISR中。在第二步中，由于旧的Leader A宕机，新的Leader B在<code>replica.lag.time.max.ms</code>时间内未收到来自A的Fetch请求，故将A从ISR中移除，此时ISR={B，C}。同时，由于此时新的Leader B中只有2条消息，并未包含m3（m3从未被任何Leader所Commit），所以m3无法被Consumer消费。第四步中，Follower A恢复正常，它先将宕机前未Commit的所有消息全部删除，然后从最后Commit过的消息的下一条消息开始追赶新的Leader B，直到它“赶上”新的Leader，才被重新加入新的ISR中。</p>
+<h3 id="使用ISR方案的原因"><a href="#使用ISR方案的原因" class="headerlink" title="使用ISR方案的原因"></a>使用ISR方案的原因</h3><ul>
+<li>由于Leader可移除不能及时与之同步的Follower，故与同步复制相比可避免最慢的Follower拖慢整体速度，也即ISR提高了系统可用性。</li>
+<li>ISR中的所有Follower都包含了所有Commit过的消息，而只有Commit过的消息才会被Consumer消费，故从Consumer的角度而言，ISR中的所有Replica都始终处于同步状态，从而与异步复制方案相比提高了数据一致性。</li>
+<li>ISR可动态调整，极限情况下，可以只包含Leader，极大提高了可容忍的宕机的Follower的数量。与<code>Majority Quorum</code>方案相比，容忍相同个数的节点失败，所要求的总节点数少了近一半。</li>
+</ul>
+<h3 id="ISR相关配置说明"><a href="#ISR相关配置说明" class="headerlink" title="ISR相关配置说明"></a>ISR相关配置说明</h3><ul>
+<li>Broker的<code>min.insync.replicas</code>参数指定了Broker所要求的ISR最小长度，默认值为1。也即极限情况下ISR可以只包含Leader。但此时如果Leader宕机，则该Partition不可用，可用性得不到保证。</li>
+<li>只有被ISR中所有Replica同步的消息才被Commit，但Producer发布数据时，Leader并不需要ISR中的所有Replica同步该数据才确认收到数据。Producer可以通过<code>acks</code>参数指定最少需要多少个Replica确认收到该消息才视为该消息发送成功。<code>acks</code>的默认值是1，即Leader收到该消息后立即告诉Producer收到该消息，此时如果在ISR中的消息复制完该消息前Leader宕机，那该条消息会丢失。而如果将该值设置为0，则Producer发送完数据后，立即认为该数据发送成功，不作任何等待，而实际上该数据可能发送失败，并且Producer的Retry机制将不生效。更推荐的做法是，将<code>acks</code>设置为<code>all</code>或者<code>-1</code>，此时只有ISR中的所有Replica都收到该数据（也即该消息被Commit），Leader才会告诉Producer该消息发送成功，从而保证不会有未知的数据丢失。</li>
+</ul>
+<h1 id="具体实现层面"><a href="#具体实现层面" class="headerlink" title="具体实现层面"></a>具体实现层面</h1><h2 id="高效使用磁盘"><a href="#高效使用磁盘" class="headerlink" title="高效使用磁盘"></a>高效使用磁盘</h2><h3 id="顺序写磁盘"><a href="#顺序写磁盘" class="headerlink" title="顺序写磁盘"></a>顺序写磁盘</h3><p>根据《<a href="http://deliveryimages.acm.org/10.1145/1570000/1563874/jacobs3.jpg" target="_blank" rel="noopener">一些场景下顺序写磁盘快于随机写内存</a>》所述，将写磁盘的过程变为顺序写，可极大提高对磁盘的利用率。<br>Kafka的整个设计中，Partition相当于一个非常长的数组，而Broker接收到的所有消息顺序写入这个大数组中。同时Consumer通过Offset顺序消费这些数据，并且不删除已经消费的数据，从而避免了随机写磁盘的过程。<br>由于磁盘有限，不可能保存所有数据，实际上作为消息系统Kafka也没必要保存所有数据，需要删除旧的数据。而这个删除过程，并非通过使用“读-写”模式去修改文件，而是将Partition分为多个Segment，每个Segment对应一个物理文件，通过删除整个文件的方式去删除Partition内的数据。这种方式清除旧数据的方式，也避免了对文件的随机写操作。<br>通过如下代码可知，Kafka删除Segment的方式，是直接删除Segment对应的整个log文件和整个index文件而非删除文件中的部分内容。</p>
+<figure class="highlight vim"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">/**</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"> * Delete this <span class="built_in">log</span> segment from the filesystem.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"> *</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"> * @throws KafkaStorageException <span class="keyword">if</span> the <span class="keyword">delete</span> fails.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"> */</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">def <span class="keyword">delete</span>() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    val deletedLog = <span class="built_in">log</span>.<span class="keyword">delete</span>()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    val deletedIndex = <span class="built_in">index</span>.<span class="keyword">delete</span>()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    val deletedTimeIndex = timeIndex.<span class="keyword">delete</span>()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span>(!deletedLog &amp;&amp; <span class="built_in">log</span>.<span class="keyword">file</span>.<span class="built_in">exists</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> KafkaStorageException(<span class="string">"Delete of log "</span> + <span class="built_in">log</span>.<span class="keyword">file</span>.getName + <span class="string">" failed."</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span>(!deletedIndex &amp;&amp; <span class="built_in">index</span>.<span class="keyword">file</span>.<span class="built_in">exists</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> KafkaStorageException(<span class="string">"Delete of index "</span> + <span class="built_in">index</span>.<span class="keyword">file</span>.getName + <span class="string">" failed."</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span>(!deletedTimeIndex &amp;&amp; timeIndex.<span class="keyword">file</span>.<span class="built_in">exists</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> KafkaStorageException(<span class="string">"Delete of time index "</span> + timeIndex.<span class="keyword">file</span>.getName + <span class="string">" failed."</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h3 id="充分利用Page-Cache"><a href="#充分利用Page-Cache" class="headerlink" title="充分利用Page Cache"></a>充分利用Page Cache</h3><p>使用Page Cache的好处如下</p>
+<ul>
+<li>I/O Scheduler会将连续的小块写组装成大块的物理写从而提高性能</li>
+<li>I/O Scheduler会尝试将一些写操作重新按顺序排好，从而减少磁盘头的移动时间</li>
+<li>充分利用所有空闲内存（非JVM内存）。如果使用应用层Cache（即JVM堆内存），会增加GC负担</li>
+<li>读操作可直接在Page Cache内进行。如果消费和生产速度相当，甚至不需要通过物理磁盘（直接通过Page Cache）交换数据</li>
+<li>如果进程重启，JVM内的Cache会失效，但Page Cache仍然可用</li>
+</ul>
+<p>Broker收到数据后，写磁盘时只是将数据写入Page Cache，并不保证数据一定完全写入磁盘。从这一点看，可能会造成机器宕机时，Page Cache内的数据未写入磁盘从而造成数据丢失。但是这种丢失只发生在机器断电等造成操作系统不工作的场景，而这种场景完全可以由Kafka层面的Replication机制去解决。如果为了保证这种情况下数据不丢失而强制将Page Cache中的数据Flush到磁盘，反而会降低性能。也正因如此，Kafka虽然提供了<code>flush.messages</code>和<code>flush.ms</code>两个参数将Page Cache中的数据强制Flush到磁盘，但是Kafka并不建议使用。<br>如果数据消费速度与生产速度相当，甚至不需要通过物理磁盘交换数据，而是直接通过Page Cache交换数据。同时，Follower从Leader Fetch数据时，也可通过Page Cache完成。下图为某Partition的Leader节点的网络/磁盘读写信息。<br><a href="http://image.winrains.cn/2019/10/43fc3-kafka_IO.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/43fc3-kafka_IO.png" alt="Kafka I/O page cache"></a><br>从上图可以看到，该Broker每秒通过网络从Producer接收约35MB数据，虽然有Follower从该Broker Fetch数据，但是该Broker基本无读磁盘。这是因为该Broker直接从Page Cache中将数据取出返回给了Follower。</p>
+<h3 id="支持多Disk-Drive"><a href="#支持多Disk-Drive" class="headerlink" title="支持多Disk Drive"></a>支持多Disk Drive</h3><p>Broker的<code>log.dirs</code>配置项，允许配置多个文件夹。如果机器上有多个Disk Drive，可将不同的Disk挂载到不同的目录，然后将这些目录都配置到<code>log.dirs</code>里。Kafka会尽可能将不同的Partition分配到不同的目录，也即不同的Disk上，从而充分利用了多Disk的优势。</p>
+<h2 id="零拷贝"><a href="#零拷贝" class="headerlink" title="零拷贝"></a>零拷贝</h2><p>Kafka中存在大量的网络数据持久化到磁盘（Producer到Broker）和磁盘文件通过网络发送（Broker到Consumer）的过程。这一过程的性能直接影响Kafka的整体吞吐量。</p>
+<h3 id="传统模式下的四次拷贝与四次上下文切换"><a href="#传统模式下的四次拷贝与四次上下文切换" class="headerlink" title="传统模式下的四次拷贝与四次上下文切换"></a>传统模式下的四次拷贝与四次上下文切换</h3><p>以将磁盘文件通过网络发送为例。传统模式下，一般使用如下伪代码所示的方法先将文件数据读入内存，然后通过Socket将内存中的数据发送出去。</p>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="built_in">buffer</span> = <span class="built_in">File</span>.<span class="built_in">read</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">Socket.send(<span class="built_in">buffer</span>)</span></pre></td></tr></table></figure>
+
+<p>这一过程实际上发生了四次数据拷贝。首先通过系统调用将文件数据读入到内核态Buffer（DMA拷贝），然后应用程序将内存态Buffer数据读入到用户态Buffer（CPU拷贝），接着用户程序通过Socket发送数据时将用户态Buffer数据拷贝到内核态Buffer（CPU拷贝），最后通过DMA拷贝将数据拷贝到NIC Buffer。同时，还伴随着四次上下文切换，如下图所示。<br><a href="http://image.winrains.cn/2019/10/7fe8b-BIO.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/7fe8b-BIO.png" alt="BIO 四次拷贝 四次上下文切换"></a></p>
+<h3 id="sendfile和transferTo实现零拷贝"><a href="#sendfile和transferTo实现零拷贝" class="headerlink" title="sendfile和transferTo实现零拷贝"></a>sendfile和transferTo实现零拷贝</h3><p>Linux 2.4+内核通过<code>sendfile</code>系统调用，提供了零拷贝。数据通过DMA拷贝到内核态Buffer后，直接通过DMA拷贝到NIC Buffer，无需CPU拷贝。这也是零拷贝这一说法的来源。除了减少数据拷贝外，因为整个读文件-网络发送由一个<code>sendfile</code>调用完成，整个过程只有两次上下文切换，因此大大提高了性能。零拷贝过程如下图所示。<br><a href="http://image.winrains.cn/2019/10/9601c-NIO.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/9601c-NIO.png" alt="BIO 零拷贝 两次上下文切换"></a><br>从具体实现来看，Kafka的数据传输通过TransportLayer来完成，其子类<code>PlaintextTransportLayer</code>通过<a href="http://www.jasongj.com/java/nio_reactor/" target="_blank" rel="noopener">Java NIO</a>的FileChannel的<code>transferTo</code>和<code>transferFrom</code>方法实现零拷贝，如下所示。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">@Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">public long transfer<span class="constructor">From(FileChannel <span class="params">fileChannel</span>, <span class="params">long</span> <span class="params">position</span>, <span class="params">long</span> <span class="params">count</span>)</span> throws IOException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    return fileChannel.transfer<span class="constructor">To(<span class="params">position</span>, <span class="params">count</span>, <span class="params">socketChannel</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p><strong>注：</strong> <code>transferTo</code>和<code>transferFrom</code>并不保证一定能使用零拷贝。实际上是否能使用零拷贝与操作系统相关，如果操作系统提供<code>sendfile</code>这样的零拷贝系统调用，则这两个方法会通过这样的系统调用充分利用零拷贝的优势，否则并不能通过这两个方法本身实现零拷贝。</p>
+<h2 id="减少网络开销"><a href="#减少网络开销" class="headerlink" title="减少网络开销"></a>减少网络开销</h2><h3 id="批处理"><a href="#批处理" class="headerlink" title="批处理"></a>批处理</h3><p>批处理是一种常用的用于提高I/O性能的方式。对Kafka而言，批处理既减少了网络传输的Overhead，又提高了写磁盘的效率。<br>Kafka 0.8.1及以前的Producer区分同步Producer和异步Producer。同步Producer的send方法主要分两种形式。一种是接受一个KeyedMessage作为参数，一次发送一条消息。另一种是接受一批KeyedMessage作为参数，一次性发送多条消息。而对于异步发送而言，无论是使用哪个send方法，实现上都不会立即将消息发送给Broker，而是先存到内部的队列中，直到消息条数达到阈值或者达到指定的Timeout才真正的将消息发送出去，从而实现了消息的批量发送。<br>Kafka 0.8.2开始支持新的Producer API，将同步Producer和异步Producer结合。虽然从send接口来看，一次只能发送一个ProducerRecord，而不能像之前版本的send方法一样接受消息列表，但是send方法并非立即将消息发送出去，而是通过<code>batch.size</code>和<code>linger.ms</code>控制实际发送频率，从而实现批量发送。<br>由于每次网络传输，除了传输消息本身以外，还要传输非常多的网络协议本身的一些内容（称为Overhead），所以将多条消息合并到一起传输，可有效减少网络传输的Overhead，进而提高了传输效率。<br>从<a href="http://image.winrains.cn/2019/10/43fc3-kafka_IO.png" target="_blank" rel="noopener">零拷贝章节的图</a>中可以看到，虽然Broker持续从网络接收数据，但是写磁盘并非每秒都在发生，而是间隔一段时间写一次磁盘，并且每次写磁盘的数据量都非常大（最高达到718MB/S）。</p>
+<h3 id="数据压缩降低网络负载"><a href="#数据压缩降低网络负载" class="headerlink" title="数据压缩降低网络负载"></a>数据压缩降低网络负载</h3><p>Kafka从0.7开始，即支持将数据压缩后再传输给Broker。除了可以将每条消息单独压缩然后传输外，Kafka还支持在批量发送时，将整个Batch的消息一起压缩后传输。数据压缩的一个基本原理是，重复数据越多压缩效果越好。因此将整个Batch的数据一起压缩能更大幅度减小数据量，从而更大程度提高网络传输效率。<br>Broker接收消息后，并不直接解压缩，而是直接将消息以压缩后的形式持久化到磁盘。Consumer Fetch到数据后再解压缩。因此Kafka的压缩不仅减少了Producer到Broker的网络传输负载，同时也降低了Broker磁盘操作的负载，也降低了Consumer与Broker间的网络传输量，从而极大得提高了传输效率，提高了吞吐量。</p>
+<h3 id="高效的序列化方式"><a href="#高效的序列化方式" class="headerlink" title="高效的序列化方式"></a>高效的序列化方式</h3><p>Kafka消息的Key和Payload（或者说Value）的类型可自定义，只需同时提供相应的序列化器和反序列化器即可。因此用户可以通过使用快速且紧凑的序列化-反序列化方式（如Avro，Protocal Buffer）来减少实际网络传输和磁盘存储的数据规模，从而提高吞吐率。这里要注意，如果使用的序列化方法太慢，即使压缩比非常高，最终的效率也不一定高。</p>
+<h1 id="Kafka系列文章"><a href="#Kafka系列文章" class="headerlink" title="Kafka系列文章"></a>Kafka系列文章</h1><ul>
+<li><a href="http://www.jasongj.com/2015/03/10/KafkaColumn1/" target="_blank" rel="noopener">Kafka设计解析（一）- Kafka背景及架构介绍</a></li>
+<li><a href="http://www.jasongj.com/2015/04/24/KafkaColumn2/" target="_blank" rel="noopener">Kafka设计解析（二）- Kafka High Availability （上）</a></li>
+<li><a href="http://www.jasongj.com/2015/06/08/KafkaColumn3/" target="_blank" rel="noopener">Kafka设计解析（三）- Kafka High Availability （下）</a></li>
+<li><a href="http://www.jasongj.com/2015/08/09/KafkaColumn4/" target="_blank" rel="noopener">Kafka设计解析（四）- Kafka Consumer设计解析</a></li>
+<li><a href="http://www.jasongj.com/2015/12/31/KafkaColumn5_kafka_benchmark/" target="_blank" rel="noopener">Kafka设计解析（五）- Kafka性能测试方法及Benchmark报告</a></li>
+<li><a href="http://www.jasongj.com/kafka/high_throughput/" target="_blank" rel="noopener">Kafka设计解析（六）- Kafka高性能架构之道</a></li>
+</ul>
+<blockquote>
+<p>作者：郭俊</p>
+<p>来源：<a href="http://www.jasongj.com/kafka/high_throughput/" target="_blank" rel="noopener">http://www.jasongj.com/kafka/high_throughput/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/kafka/" rel="tag"># kafka</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/%E6%B7%B1%E5%85%A5%E6%B5%85%E5%87%BAZookeeper%EF%BC%882%EF%BC%89%EF%BC%9A%E5%9F%BA%E4%BA%8EZookeeper%E7%9A%84%E5%88%86%E5%B8%83%E5%BC%8F%E9%94%81%E4%B8%8E%E9%A2%86%E5%AF%BC%E9%80%89%E4%B8%BE/" rel="prev" title="深入浅出Zookeeper（2）：基于Zookeeper的分布式锁与领导选举">
+      <i class="fa fa-chevron-left"></i> 深入浅出Zookeeper（2）：基于Zookeeper的分布式锁与领导选举
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Kafka%E8%AE%BE%E8%AE%A1%E8%A7%A3%E6%9E%90%EF%BC%887%EF%BC%89%EF%BC%9AKafka-Stream/" rel="next" title="Kafka设计解析（7）：Kafka Stream">
+      Kafka设计解析（7）：Kafka Stream <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#摘要"><span class="nav-number">1.</span> <span class="nav-text">摘要</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#宏观架构层面"><span class="nav-number">2.</span> <span class="nav-text">宏观架构层面</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#利用Partition实现并行处理"><span class="nav-number">2.1.</span> <span class="nav-text">利用Partition实现并行处理</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#Partition提供并行处理的能力"><span class="nav-number">2.1.1.</span> <span class="nav-text">Partition提供并行处理的能力</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Partition是最小并发粒度"><span class="nav-number">2.1.2.</span> <span class="nav-text">Partition是最小并发粒度</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#ISR实现可用性与数据一致性的动态平衡"><span class="nav-number">2.2.</span> <span class="nav-text">ISR实现可用性与数据一致性的动态平衡</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#CAP理论"><span class="nav-number">2.2.1.</span> <span class="nav-text">CAP理论</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#常用数据复制及一致性方案"><span class="nav-number">2.2.2.</span> <span class="nav-text">常用数据复制及一致性方案</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#使用ISR方案的原因"><span class="nav-number">2.2.3.</span> <span class="nav-text">使用ISR方案的原因</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#ISR相关配置说明"><span class="nav-number">2.2.4.</span> <span class="nav-text">ISR相关配置说明</span></a></li></ol></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#具体实现层面"><span class="nav-number">3.</span> <span class="nav-text">具体实现层面</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#高效使用磁盘"><span class="nav-number">3.1.</span> <span class="nav-text">高效使用磁盘</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#顺序写磁盘"><span class="nav-number">3.1.1.</span> <span class="nav-text">顺序写磁盘</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#充分利用Page-Cache"><span class="nav-number">3.1.2.</span> <span class="nav-text">充分利用Page Cache</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#支持多Disk-Drive"><span class="nav-number">3.1.3.</span> <span class="nav-text">支持多Disk Drive</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#零拷贝"><span class="nav-number">3.2.</span> <span class="nav-text">零拷贝</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#传统模式下的四次拷贝与四次上下文切换"><span class="nav-number">3.2.1.</span> <span class="nav-text">传统模式下的四次拷贝与四次上下文切换</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#sendfile和transferTo实现零拷贝"><span class="nav-number">3.2.2.</span> <span class="nav-text">sendfile和transferTo实现零拷贝</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#减少网络开销"><span class="nav-number">3.3.</span> <span class="nav-text">减少网络开销</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#批处理"><span class="nav-number">3.3.1.</span> <span class="nav-text">批处理</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#数据压缩降低网络负载"><span class="nav-number">3.3.2.</span> <span class="nav-text">数据压缩降低网络负载</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#高效的序列化方式"><span class="nav-number">3.3.3.</span> <span class="nav-text">高效的序列化方式</span></a></li></ol></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#Kafka系列文章"><span class="nav-number">4.</span> <span class="nav-text">Kafka系列文章</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

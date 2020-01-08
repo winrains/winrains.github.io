@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="Java I&#x2F;O模型同步 vs. 异步同步I&#x2F;O\　每个请求必须逐个地被处理，一个请求的处理会导致整个流程的暂时等待，这些事件无法并发地执行。用户线程发起I&#x2F;O请求后需要等待或者轮询内核I&#x2F;O操作完成后才能继续执行。异步I&#x2F;O\　多个请求可以并发地执行，一个请求或者任务的执行不会导致整个流程的暂时等待。用户线程发起I&#x2F;O请求后仍然继续执行，当内核I&#x2F;O操作完成后会通知用户线程，或者调用用户线程注册">
+<meta name="keywords" content="I&#x2F;O模型">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Java I&#x2F;O模型从BIO到NIO和Reactor模式">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;Java-I-O%E6%A8%A1%E5%9E%8B%E4%BB%8EBIO%E5%88%B0NIO%E5%92%8CReactor%E6%A8%A1%E5%BC%8F&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="Java I&#x2F;O模型同步 vs. 异步同步I&#x2F;O\　每个请求必须逐个地被处理，一个请求的处理会导致整个流程的暂时等待，这些事件无法并发地执行。用户线程发起I&#x2F;O请求后需要等待或者轮询内核I&#x2F;O操作完成后才能继续执行。异步I&#x2F;O\　多个请求可以并发地执行，一个请求或者任务的执行不会导致整个流程的暂时等待。用户线程发起I&#x2F;O请求后仍然继续执行，当内核I&#x2F;O操作完成后会通知用户线程，或者调用用户线程注册">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;3eb02-IO_multithread.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;cbda6-classic_reactor.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;54f60-multithread_reactor.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;a5bda-multi_reactor.png">
+<meta property="og:updated_time" content="2020-01-08T05:07:32.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;3eb02-IO_multithread.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/Java-I-O%E6%A8%A1%E5%9E%8B%E4%BB%8EBIO%E5%88%B0NIO%E5%92%8CReactor%E6%A8%A1%E5%BC%8F/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Java I/O模型从BIO到NIO和Reactor模式 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/Java-I-O%E6%A8%A1%E5%9E%8B%E4%BB%8EBIO%E5%88%B0NIO%E5%92%8CReactor%E6%A8%A1%E5%BC%8F/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Java I/O模型从BIO到NIO和Reactor模式
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 13:07:32" itemprop="dateCreated datePublished" datetime="2020-01-08T13:07:32+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="Java-I-O模型"><a href="#Java-I-O模型" class="headerlink" title="Java I/O模型"></a>Java I/O模型</h1><h2 id="同步-vs-异步"><a href="#同步-vs-异步" class="headerlink" title="同步 vs. 异步"></a>同步 vs. 异步</h2><p><strong><em>同步I/O\</em></strong>　每个请求必须逐个地被处理，一个请求的处理会导致整个流程的暂时等待，这些事件无法并发地执行。用户线程发起I/O请求后需要等待或者轮询内核I/O操作完成后才能继续执行。<br><strong><em>异步I/O\</em></strong>　多个请求可以并发地执行，一个请求或者任务的执行不会导致整个流程的暂时等待。用户线程发起I/O请求后仍然继续执行，当内核I/O操作完成后会通知用户线程，或者调用用户线程注册的回调函数。</p>
+<a id="more"></a>
+
+<h2 id="阻塞-vs-非阻塞"><a href="#阻塞-vs-非阻塞" class="headerlink" title="阻塞 vs. 非阻塞"></a>阻塞 vs. 非阻塞</h2><p><strong><em>阻塞\</em></strong>　某个请求发出后，由于该请求操作需要的条件不满足，请求操作一直阻塞，不会返回，直到条件满足。<br><strong><em>非阻塞\</em></strong>　请求发出后，若该请求需要的条件不满足，则立即返回一个标志信息告知条件不满足，而不会一直等待。一般需要通过循环判断请求条件是否满足来获取请求结果。<br>需要注意的是，阻塞并不等价于同步，而非阻塞并非等价于异步。事实上这两组概念描述的是I/O模型中的两个不同维度。<br>同步和异步着重点在于多个任务执行过程中，后发起的任务是否必须等先发起的任务完成之后再进行。而不管先发起的任务请求是阻塞等待完成，还是立即返回通过循环等待请求成功。<br>而阻塞和非阻塞重点在于请求的方法是否立即返回（或者说是否在条件不满足时被阻塞）。</p>
+<h2 id="Unix下五种I-O模型"><a href="#Unix下五种I-O模型" class="headerlink" title="Unix下五种I/O模型"></a>Unix下五种I/O模型</h2><p>Unix 下共有五种 I/O 模型：</p>
+<ul>
+<li>阻塞 I/O</li>
+<li>非阻塞 I/O</li>
+<li>I/O 多路复用（select和poll）</li>
+<li>信号驱动 I/O（SIGIO）</li>
+<li>异步 I/O（Posix.1的aio_系列函数）</li>
+</ul>
+<h3 id="阻塞I-O"><a href="#阻塞I-O" class="headerlink" title="阻塞I/O"></a>阻塞I/O</h3><p>如上文所述，阻塞I/O下请求无法立即完成则保持阻塞。阻塞I/O分为如下两个阶段。</p>
+<ul>
+<li>阶段1：等待数据就绪。网络 I/O 的情况就是等待远端数据陆续抵达；磁盘I/O的情况就是等待磁盘数据从磁盘上读取到内核态内存中。</li>
+<li>阶段2：数据拷贝。出于系统安全，用户态的程序没有权限直接读取内核态内存，因此内核负责把内核态内存中的数据拷贝一份到用户态内存中。</li>
+</ul>
+<h3 id="非阻塞I-O"><a href="#非阻塞I-O" class="headerlink" title="非阻塞I/O"></a>非阻塞I/O</h3><p>非阻塞I/O请求包含如下三个阶段</p>
+<ul>
+<li>socket设置为 NONBLOCK（非阻塞）就是告诉内核，当所请求的I/O操作无法完成时，不要将线程睡眠，而是返回一个错误码(EWOULDBLOCK) ，这样请求就不会阻塞。</li>
+<li>I/O操作函数将不断的测试数据是否已经准备好，如果没有准备好，继续测试，直到数据准备好为止。整个I/O 请求的过程中，虽然用户线程每次发起I/O请求后可以立即返回，但是为了等到数据，仍需要不断地轮询、重复请求，消耗了大量的 CPU 的资源。</li>
+<li>数据准备好了，从内核拷贝到用户空间。</li>
+</ul>
+<p>一般很少直接使用这种模型，而是在其他I/O模型中使用非阻塞I/O 这一特性。这种方式对单个I/O 请求意义不大，但给I/O多路复用提供了条件。</p>
+<h3 id="I-O多路复用"><a href="#I-O多路复用" class="headerlink" title="I/O多路复用"></a>I/O多路复用</h3><p>I/O多路复用会用到select或者poll函数，这两个函数也会使线程阻塞，但是和阻塞I/O所不同的是，这两个函数可以同时阻塞多个I/O操作。而且可以同时对多个读操作，多个写操作的I/O函数进行检测，直到有数据可读或可写时，才真正调用I/O操作函数。<br>从流程上来看，使用select函数进行I/O请求和同步阻塞模型没有太大的区别，甚至还多了添加监视Channel，以及调用select函数的额外操作，增加了额外工作。但是，使用 select以后最大的优势是用户可以在一个线程内同时处理多个Channel的I/O请求。用户可以注册多个Channel，然后不断地调用select读取被激活的Channel，即可达到在同一个线程内同时处理多个I/O请求的目的。而在同步阻塞模型中，必须通过多线程的方式才能达到这个目的。<br>调用select/poll该方法由一个用户态线程负责轮询多个Channel，直到某个阶段1的数据就绪，再通知实际的用户线程执行阶段2的拷贝。 通过一个专职的用户态线程执行非阻塞I/O轮询，模拟实现了阶段一的异步化。</p>
+<h3 id="信号驱动I-O（SIGIO）"><a href="#信号驱动I-O（SIGIO）" class="headerlink" title="信号驱动I/O（SIGIO）"></a>信号驱动I/O（SIGIO）</h3><p>首先我们允许socket进行信号驱动I/O，并安装一个信号处理函数，线程继续运行并不阻塞。当数据准备好时，线程会收到一个SIGIO 信号，可以在信号处理函数中调用I/O操作函数处理数据。</p>
+<h3 id="异步I-O"><a href="#异步I-O" class="headerlink" title="异步I/O"></a>异步I/O</h3><p>调用aio_read 函数，告诉内核描述字，缓冲区指针，缓冲区大小，文件偏移以及通知的方式，然后立即返回。当内核将数据拷贝到缓冲区后，再通知应用程序。所以异步I/O模式下，阶段1和阶段2全部由内核完成，完成不需要用户线程的参与。</p>
+<h3 id="几种I-O模型对比"><a href="#几种I-O模型对比" class="headerlink" title="几种I/O模型对比"></a>几种I/O模型对比</h3><p>除异步I/O外，其它四种模型的阶段2基本相同，都是从内核态拷贝数据到用户态。区别在于阶段1不同。前四种都属于同步I/O。</p>
+<h2 id="Java中四种I-O模型"><a href="#Java中四种I-O模型" class="headerlink" title="Java中四种I/O模型"></a>Java中四种I/O模型</h2><p>上一章所述Unix中的五种I/O模型，除信号驱动I/O外，Java对其它四种I/O模型都有所支持。其中Java最早提供的blocking I/O即是阻塞I/O，而NIO即是非阻塞I/O，同时通过NIO实现的Reactor模式即是I/O复用模型的实现，通过AIO实现的Proactor模式即是异步I/O模型的实现。</p>
+<h1 id="从IO到NIO"><a href="#从IO到NIO" class="headerlink" title="从IO到NIO"></a>从IO到NIO</h1><h2 id="面向流-vs-面向缓冲"><a href="#面向流-vs-面向缓冲" class="headerlink" title="面向流 vs. 面向缓冲"></a>面向流 vs. 面向缓冲</h2><p>Java IO是面向流的，每次从流（InputStream/OutputStream）中读一个或多个字节，直到读取完所有字节，它们没有被缓存在任何地方。另外，它不能前后移动流中的数据，如需前后移动处理，需要先将其缓存至一个缓冲区。<br>Java NIO面向缓冲，数据会被读取到一个缓冲区，需要时可以在缓冲区中前后移动处理，这增加了处理过程的灵活性。但与此同时在处理缓冲区前需要检查该缓冲区中是否包含有所需要处理的数据，并需要确保更多数据读入缓冲区时，不会覆盖缓冲区内尚未处理的数据。</p>
+<h2 id="阻塞-vs-非阻塞-1"><a href="#阻塞-vs-非阻塞-1" class="headerlink" title="阻塞 vs. 非阻塞"></a>阻塞 vs. 非阻塞</h2><p>Java IO的各种流是阻塞的。当某个线程调用read()或write()方法时，该线程被阻塞，直到有数据被读取到或者数据完全写入。阻塞期间该线程无法处理任何其它事情。<br>Java NIO为非阻塞模式。读写请求并不会阻塞当前线程，在数据可读/写前当前线程可以继续做其它事情，所以一个单独的线程可以管理多个输入和输出通道。</p>
+<h2 id="选择器（Selector）"><a href="#选择器（Selector）" class="headerlink" title="选择器（Selector）"></a>选择器（Selector）</h2><p>Java NIO的选择器允许一个单独的线程同时监视多个通道，可以注册多个通道到同一个选择器上，然后使用一个单独的线程来“选择”已经就绪的通道。这种“选择”机制为一个单独线程管理多个通道提供了可能。</p>
+<h2 id="零拷贝"><a href="#零拷贝" class="headerlink" title="零拷贝"></a>零拷贝</h2><p>Java NIO中提供的FileChannel拥有transferTo和transferFrom两个方法，可直接把FileChannel中的数据拷贝到另外一个Channel，或者直接把另外一个Channel中的数据拷贝到FileChannel。该接口常被用于高效的网络/文件的数据传输和大文件拷贝。在操作系统支持的情况下，通过该方法传输数据并不需要将源数据从内核态拷贝到用户态，再从用户态拷贝到目标通道的内核态，同时也避免了两次用户态和内核态间的上下文切换，也即使用了“零拷贝”，所以其性能一般高于Java IO中提供的方法。<br>使用FileChannel的零拷贝将本地文件内容传输到网络的示例代码如下所示。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> NIOClient &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    public static void main(String<span class="literal">[]</span> args) throws IOException, InterruptedException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        SocketChannel socketChannel = <span class="module-access"><span class="module"><span class="identifier">SocketChannel</span>.</span></span><span class="keyword">open</span><span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        InetSocketAddress address = <span class="keyword">new</span> <span class="constructor">InetSocketAddress(1234)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        socketChannel.connect(address);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        RandomAccessFile file = <span class="keyword">new</span> <span class="constructor">RandomAccessFile(NIOClient.<span class="params">class</span>.<span class="params">getClassLoader</span>()</span>.get<span class="constructor">Resource(<span class="string">"test.txt"</span>)</span>.get<span class="constructor">File()</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">                <span class="string">"rw"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        FileChannel channel = file.get<span class="constructor">Channel()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        channel.transfer<span class="constructor">To(0, <span class="params">channel</span>.<span class="params">size</span>()</span>, socketChannel);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        channel.close<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        file.close<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        socketChannel.close<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h1 id="阻塞I-O下的服务器实现"><a href="#阻塞I-O下的服务器实现" class="headerlink" title="阻塞I/O下的服务器实现"></a>阻塞I/O下的服务器实现</h1><h2 id="单线程逐个处理所有请求"><a href="#单线程逐个处理所有请求" class="headerlink" title="单线程逐个处理所有请求"></a>单线程逐个处理所有请求</h2><p>使用阻塞I/O的服务器，一般使用循环，逐个接受连接请求并读取数据，然后处理下一个请求。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> IOServer &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> static final Logger LOGGER = <span class="module-access"><span class="module"><span class="identifier">LoggerFactory</span>.</span></span>get<span class="constructor">Logger(IOServer.<span class="params">class</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    public static void main(String<span class="literal">[]</span> args) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        ServerSocket serverSocket = null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            serverSocket = <span class="keyword">new</span> <span class="constructor">ServerSocket()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            serverSocket.bind(<span class="keyword">new</span> <span class="constructor">InetSocketAddress(2345)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        &#125; catch (IOException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>error(<span class="string">"Listen failed"</span>, ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            return;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">while</span> (<span class="literal">true</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">                Socket socket = serverSocket.accept<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">                InputStream inputstream = socket.get<span class="constructor">InputStream()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">                <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>info(<span class="string">"Received message &#123;&#125;"</span>, <span class="module-access"><span class="module"><span class="identifier">IOUtils</span>.</span></span><span class="keyword">to</span><span class="constructor">String(<span class="params">inputstream</span>)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">                <span class="module-access"><span class="module"><span class="identifier">IOUtils</span>.</span></span>close<span class="constructor">Quietly(<span class="params">inputstream</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        &#125; catch (IOException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">IOUtils</span>.</span></span>close<span class="constructor">Quietly(<span class="params">serverSocket</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>error(<span class="string">"Read message failed"</span>, ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h2 id="为每个请求创建一个线程"><a href="#为每个请求创建一个线程" class="headerlink" title="为每个请求创建一个线程"></a>为每个请求创建一个线程</h2><p>上例使用单线程逐个处理所有请求，同一时间只能处理一个请求，等待I/O的过程浪费大量CPU资源，同时无法充分使用多CPU的优势。下面是使用多线程对阻塞I/O模型的改进。一个连接建立成功后，创建一个单独的线程处理其I/O操作。<br><a href="http://image.winrains.cn/2019/10/3eb02-IO_multithread.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/3eb02-IO_multithread.png" alt="阻塞I/O 多线程"></a></p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> IOServerMultiThread &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> static final Logger LOGGER = <span class="module-access"><span class="module"><span class="identifier">LoggerFactory</span>.</span></span>get<span class="constructor">Logger(IOServerMultiThread.<span class="params">class</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    public static void main(String<span class="literal">[]</span> args) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        ServerSocket serverSocket = null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            serverSocket = <span class="keyword">new</span> <span class="constructor">ServerSocket()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            serverSocket.bind(<span class="keyword">new</span> <span class="constructor">InetSocketAddress(2345)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        &#125; catch (IOException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>error(<span class="string">"Listen failed"</span>, ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            return;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">while</span> (<span class="literal">true</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">                Socket socket = serverSocket.accept<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">new</span> <span class="constructor">Thread(()</span> -&gt; &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">                        InputStream inputstream = socket.get<span class="constructor">InputStream()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">                        <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>info(<span class="string">"Received message &#123;&#125;"</span>, <span class="module-access"><span class="module"><span class="identifier">IOUtils</span>.</span></span><span class="keyword">to</span><span class="constructor">String(<span class="params">inputstream</span>)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">                        <span class="module-access"><span class="module"><span class="identifier">IOUtils</span>.</span></span>close<span class="constructor">Quietly(<span class="params">inputstream</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">                    &#125; catch (IOException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">                        <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>error(<span class="string">"Read message failed"</span>, ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">                    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">                &#125;).start<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">        &#125; catch (IOException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">IOUtils</span>.</span></span>close<span class="constructor">Quietly(<span class="params">serverSocket</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>error(<span class="string">"Accept connection failed"</span>, ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h2 id="使用线程池处理请求"><a href="#使用线程池处理请求" class="headerlink" title="使用线程池处理请求"></a>使用线程池处理请求</h2><p>为了防止连接请求过多，导致服务器创建的线程数过多，造成过多线程上下文切换的开销。可以通过线程池来限制创建的线程数，如下所示。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> IOServerThreadPool &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> static final Logger LOGGER = <span class="module-access"><span class="module"><span class="identifier">LoggerFactory</span>.</span></span>get<span class="constructor">Logger(IOServerThreadPool.<span class="params">class</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    public static void main(String<span class="literal">[]</span> args) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        ExecutorService executorService = <span class="module-access"><span class="module"><span class="identifier">Executors</span>.</span></span><span class="keyword">new</span><span class="constructor">FixedThreadPool(Runtime.<span class="params">getRuntime</span>()</span>.available<span class="constructor">Processors()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        ServerSocket serverSocket = null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            serverSocket = <span class="keyword">new</span> <span class="constructor">ServerSocket()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">            serverSocket.bind(<span class="keyword">new</span> <span class="constructor">InetSocketAddress(2345)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        &#125; catch (IOException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>error(<span class="string">"Listen failed"</span>, ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">            return;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">while</span> (<span class="literal">true</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">                Socket socket = serverSocket.accept<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">                executorService.submit(<span class="literal">()</span> -&gt; &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">                        InputStream inputstream = socket.get<span class="constructor">InputStream()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">                        <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>info(<span class="string">"Received message &#123;&#125;"</span>, <span class="module-access"><span class="module"><span class="identifier">IOUtils</span>.</span></span><span class="keyword">to</span><span class="constructor">String(<span class="params">new</span> InputStreamReader(<span class="params">inputstream</span>)</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">                    &#125; catch (IOException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">                        <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>error(<span class="string">"Read message failed"</span>, ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">                    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">                &#125;);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">        &#125; catch (IOException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">                serverSocket.close<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">            &#125; catch (IOException e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>error(<span class="string">"Accept connection failed"</span>, ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h1 id="Reactor模式"><a href="#Reactor模式" class="headerlink" title="Reactor模式"></a>Reactor模式</h1><h2 id="精典Reactor模式"><a href="#精典Reactor模式" class="headerlink" title="精典Reactor模式"></a>精典Reactor模式</h2><p>精典的Reactor模式示意图如下所示。<br><a href="http://image.winrains.cn/2019/10/cbda6-classic_reactor.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/cbda6-classic_reactor.png" alt="精典Reactor"></a><br>在Reactor模式中，包含如下角色</p>
+<ul>
+<li><strong><em>Reactor\</em></strong> 将I/O事件发派给对应的Handler</li>
+<li><strong><em>Acceptor\</em></strong> 处理客户端连接请求</li>
+<li><strong><em>Handlers\</em></strong> 执行非阻塞读/写</li>
+</ul>
+<p>最简单的Reactor模式实现代码如下所示。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> NIOServer &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> static final Logger LOGGER = <span class="module-access"><span class="module"><span class="identifier">LoggerFactory</span>.</span></span>get<span class="constructor">Logger(NIOServer.<span class="params">class</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    public static void main(String<span class="literal">[]</span> args) throws IOException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        Selector selector = <span class="module-access"><span class="module"><span class="identifier">Selector</span>.</span></span><span class="keyword">open</span><span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        ServerSocketChannel serverSocketChannel = <span class="module-access"><span class="module"><span class="identifier">ServerSocketChannel</span>.</span></span><span class="keyword">open</span><span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        serverSocketChannel.configure<span class="constructor">Blocking(<span class="params">false</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        serverSocketChannel.bind(<span class="keyword">new</span> <span class="constructor">InetSocketAddress(1234)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">while</span> (selector.select<span class="literal">()</span> &gt; <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            Set&lt;SelectionKey&gt; keys = selector.selected<span class="constructor">Keys()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">            Iterator&lt;SelectionKey&gt; iterator = keys.iterator<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">while</span> (iterator.has<span class="constructor">Next()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">                SelectionKey key = iterator.next<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">                iterator.remove<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (key.is<span class="constructor">Acceptable()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">                    ServerSocketChannel acceptServerSocketChannel = (ServerSocketChannel) key.channel<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">                    SocketChannel socketChannel = acceptServerSocketChannel.accept<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">                    socketChannel.configure<span class="constructor">Blocking(<span class="params">false</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">                    <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>info(<span class="string">"Accept request from &#123;&#125;"</span>, socketChannel.get<span class="constructor">RemoteAddress()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">                    socketChannel.register(selector, SelectionKey.OP_READ);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">                &#125; <span class="keyword">else</span> <span class="keyword">if</span> (key.is<span class="constructor">Readable()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">                    SocketChannel socketChannel = (SocketChannel) key.channel<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">                    ByteBuffer buffer = <span class="module-access"><span class="module"><span class="identifier">ByteBuffer</span>.</span></span>allocate(<span class="number">1024</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">                    <span class="built_in">int</span> count = socketChannel.read(buffer);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">if</span> (count &lt;= <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">                        socketChannel.close<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">                        key.cancel<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">                        <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>info(<span class="string">"Received invalide data, close the connection"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">                        continue;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">                    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">                    <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>info(<span class="string">"Received message &#123;&#125;"</span>, <span class="keyword">new</span> <span class="constructor">String(<span class="params">buffer</span>.<span class="params">array</span>()</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">                keys.remove(key);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>为了方便阅读，上示代码将Reactor模式中的所有角色放在了一个类中。<br>从上示代码中可以看到，多个Channel可以注册到同一个Selector对象上，实现了一个线程同时监控多个请求状态（Channel）。同时注册时需要指定它所关注的事件，例如上示代码中<em>socketServerChannel</em>对象只注册了<em>OP_ACCEPT</em>事件，而<em>socketChannel</em>对象只注册了<em>OP_READ</em>事件。<br><code>selector.select()</code>是阻塞的，当有至少一个通道可用时该方法返回可用通道个数。同时该方法只捕获Channel注册时指定的所关注的事件。</p>
+<h2 id="多工作线程Reactor模式"><a href="#多工作线程Reactor模式" class="headerlink" title="多工作线程Reactor模式"></a>多工作线程Reactor模式</h2><p>经典Reactor模式中，尽管一个线程可同时监控多个请求（Channel），但是所有读/写请求以及对新连接请求的处理都在同一个线程中处理，无法充分利用多CPU的优势，同时读/写操作也会阻塞对新连接请求的处理。因此可以引入多线程，并行处理多个读/写操作，如下图所示。<br><a href="http://image.winrains.cn/2019/10/54f60-multithread_reactor.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/54f60-multithread_reactor.png" alt="多线程Reactor"></a><br>多线程Reactor模式示例代码如下所示。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> NIOServer &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> static final Logger LOGGER = <span class="module-access"><span class="module"><span class="identifier">LoggerFactory</span>.</span></span>get<span class="constructor">Logger(NIOServer.<span class="params">class</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    public static void main(String<span class="literal">[]</span> args) throws IOException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        Selector selector = <span class="module-access"><span class="module"><span class="identifier">Selector</span>.</span></span><span class="keyword">open</span><span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        ServerSocketChannel serverSocketChannel = <span class="module-access"><span class="module"><span class="identifier">ServerSocketChannel</span>.</span></span><span class="keyword">open</span><span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        serverSocketChannel.configure<span class="constructor">Blocking(<span class="params">false</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        serverSocketChannel.bind(<span class="keyword">new</span> <span class="constructor">InetSocketAddress(1234)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">while</span> (<span class="literal">true</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (selector.select<span class="constructor">Now()</span> &lt; <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">                continue;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            Set&lt;SelectionKey&gt; keys = selector.selected<span class="constructor">Keys()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">            Iterator&lt;SelectionKey&gt; iterator = keys.iterator<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">while</span> (iterator.has<span class="constructor">Next()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">                SelectionKey key = iterator.next<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">                iterator.remove<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (key.is<span class="constructor">Acceptable()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">                    ServerSocketChannel acceptServerSocketChannel = (ServerSocketChannel) key.channel<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">                    SocketChannel socketChannel = acceptServerSocketChannel.accept<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">                    socketChannel.configure<span class="constructor">Blocking(<span class="params">false</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">                    <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>info(<span class="string">"Accept request from &#123;&#125;"</span>, socketChannel.get<span class="constructor">RemoteAddress()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">                    SelectionKey readKey = socketChannel.register(selector, SelectionKey.OP_READ);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">                    readKey.attach(<span class="keyword">new</span> <span class="constructor">Processor()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">                &#125; <span class="keyword">else</span> <span class="keyword">if</span> (key.is<span class="constructor">Readable()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">                    Processor processor = (Processor) key.attachment<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">                    processor.process(key);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>从上示代码中可以看到，注册完SocketChannel的<em>OP_READ</em>事件后，可以对相应的SelectionKey attach一个对象（本例中attach了一个Processor对象，该对象处理读请求），并且在获取到可读事件后，可以取出该对象。<br>注：attach对象及取出该对象是NIO提供的一种操作，但该操作并非Reactor模式的必要操作，本文使用它，只是为了方便演示NIO的接口。<br>具体的读请求处理在如下所示的Processor类中。该类中设置了一个静态的线程池处理所有请求。而<em>process</em>方法并不直接处理I/O请求，而是把该I/O操作提交给上述线程池去处理，这样就充分利用了多线程的优势，同时将对新连接的处理和读/写操作的处理放在了不同的线程中，读/写操作不再阻塞对新连接请求的处理。</p>
+<figure class="highlight livescript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public <span class="class"><span class="keyword">class</span> <span class="title">Processor</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    private static final Logger LOGGER = LoggerFactory.getLogger(Processor<span class="class">.<span class="keyword">class</span>);</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    private static final ExecutorService service = Executors.newFixedThreadPool(<span class="number">16</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    public <span class="literal">void</span> process(SelectionKey selectionKey) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        service.submit<span class="function"><span class="params">(() -&gt; &#123;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">            ByteBuffer buffer = ByteBuffer.allocate(<span class="number">1024</span>);</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">            SocketChannel socketChannel = (SocketChannel) selectionKey.channel();</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">            int count = socketChannel.read(buffer);</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">            <span class="keyword">if</span> (count &lt; <span class="number">0</span>) &#123;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                socketChannel.close();</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                selectionKey.cancel();</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                LOGGER.info(<span class="string">"&#123;&#125;\t Read ended"</span>, socketChannel);</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                <span class="keyword">return</span> <span class="literal">null</span>;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">            &#125; <span class="keyword">else</span> <span class="keyword">if</span> (count == <span class="number">0</span>) &#123;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                <span class="keyword">return</span> <span class="literal">null</span>;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">            &#125;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">            LOGGER.info(<span class="string">"&#123;&#125;\t Read message &#123;&#125;"</span>, socketChannel, <span class="keyword">new</span> String(buffer.array()));</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">            <span class="keyword">return</span> <span class="literal">null</span>;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">        &#125;)</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="function">    &#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="function">&#125;</span></span></pre></td></tr></table></figure>
+
+<h2 id="多Reactor"><a href="#多Reactor" class="headerlink" title="多Reactor"></a>多Reactor</h2><p>Netty中使用的Reactor模式，引入了多Reactor，也即一个主Reactor负责监控所有的连接请求，多个子Reactor负责监控并处理读/写请求，减轻了主Reactor的压力，降低了主Reactor压力太大而造成的延迟。<br>并且每个子Reactor分别属于一个独立的线程，每个成功连接后的Channel的所有操作由同一个线程处理。这样保证了同一请求的所有状态和上下文在同一个线程中，避免了不必要的上下文切换，同时也方便了监控请求响应状态。<br>多Reactor模式示意图如下所示。<br><a href="http://image.winrains.cn/2019/10/a5bda-multi_reactor.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/a5bda-multi_reactor.png" alt="多Reactor"></a><br>多Reactor示例代码如下所示。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> NIOServer &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> static final Logger LOGGER = <span class="module-access"><span class="module"><span class="identifier">LoggerFactory</span>.</span></span>get<span class="constructor">Logger(NIOServer.<span class="params">class</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    public static void main(String<span class="literal">[]</span> args) throws IOException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        Selector selector = <span class="module-access"><span class="module"><span class="identifier">Selector</span>.</span></span><span class="keyword">open</span><span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        ServerSocketChannel serverSocketChannel = <span class="module-access"><span class="module"><span class="identifier">ServerSocketChannel</span>.</span></span><span class="keyword">open</span><span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        serverSocketChannel.configure<span class="constructor">Blocking(<span class="params">false</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        serverSocketChannel.bind(<span class="keyword">new</span> <span class="constructor">InetSocketAddress(1234)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">int</span> coreNum = <span class="module-access"><span class="module"><span class="identifier">Runtime</span>.</span></span>get<span class="constructor">Runtime()</span>.available<span class="constructor">Processors()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        Processor<span class="literal">[]</span> processors = <span class="keyword">new</span> Processor<span class="literal">[<span class="number">2</span> <span class="operator">*</span> <span class="identifier">coreNum</span>]</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        for (<span class="built_in">int</span> i = <span class="number">0</span>; i &lt; processors.length; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">            processors<span class="literal">[<span class="identifier">i</span>]</span> = <span class="keyword">new</span> <span class="constructor">Processor()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">int</span> index = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">while</span> (selector.select<span class="literal">()</span> &gt; <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            Set&lt;SelectionKey&gt; keys = selector.selected<span class="constructor">Keys()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">            for (SelectionKey key : keys) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">                keys.remove(key);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (key.is<span class="constructor">Acceptable()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">                    ServerSocketChannel acceptServerSocketChannel = (ServerSocketChannel) key.channel<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">                    SocketChannel socketChannel = acceptServerSocketChannel.accept<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">                    socketChannel.configure<span class="constructor">Blocking(<span class="params">false</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">                    <span class="module-access"><span class="module"><span class="identifier">LOGGER</span>.</span></span>info(<span class="string">"Accept request from &#123;&#125;"</span>, socketChannel.get<span class="constructor">RemoteAddress()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">                    Processor processor = processors<span class="literal">[(<span class="identifier">int</span>) ((<span class="identifier">index</span><span class="operator">++</span>) % <span class="identifier">coreNum</span>)]</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">                    processor.add<span class="constructor">Channel(<span class="params">socketChannel</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">                    processor.wakeup<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>如上代码所示，本文设置的子Reactor个数是当前机器可用核数的两倍（与Netty默认的子Reactor个数一致）。对于每个成功连接的SocketChannel，通过round robin的方式交给不同的子Reactor。<br>子Reactor对SocketChannel的处理如下所示。</p>
+<figure class="highlight livescript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public <span class="class"><span class="keyword">class</span> <span class="title">Processor</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    private static final Logger LOGGER = LoggerFactory.getLogger(Processor<span class="class">.<span class="keyword">class</span>);</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    private static final ExecutorService service = Executors</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">            .newFixedThreadPool(<span class="number">2</span> * Runtime.getRuntime().availableProcessors());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    private Selector selector;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    public Processor() throws IOException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">this</span>.selector = SelectorProvider.provider().openSelector();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        start();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    public <span class="literal">void</span> addChannel(SocketChannel socketChannel) throws ClosedChannelException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        socketChannel.register(<span class="keyword">this</span>.selector, SelectionKey.OP_READ);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    public <span class="literal">void</span> wakeup() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">this</span>.selector.wakeup();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    public <span class="literal">void</span> start() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        service.submit<span class="function"><span class="params">(() -&gt; &#123;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">            <span class="keyword">while</span> (<span class="literal">true</span>) &#123;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                <span class="keyword">if</span> (selector.select(<span class="number">500</span>) &lt;= <span class="number">0</span>) &#123;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                    <span class="keyword">continue</span>;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                &#125;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                Set&lt;SelectionKey&gt; keys = selector.selectedKeys();</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                Iterator&lt;SelectionKey&gt; iterator = keys.iterator();</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                <span class="keyword">while</span> (iterator.hasNext()) &#123;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                    SelectionKey key = iterator.next();</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                    iterator.remove();</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                    <span class="keyword">if</span> (key.isReadable()) &#123;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                        ByteBuffer buffer = ByteBuffer.allocate(<span class="number">1024</span>);</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                        SocketChannel socketChannel = (SocketChannel) key.channel();</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                        int count = socketChannel.read(buffer);</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                        <span class="keyword">if</span> (count &lt; <span class="number">0</span>) &#123;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                            socketChannel.close();</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                            key.cancel();</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                            LOGGER.info(<span class="string">"&#123;&#125;\t Read ended"</span>, socketChannel);</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                            <span class="keyword">continue</span>;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                        &#125; <span class="keyword">else</span> <span class="keyword">if</span> (count == <span class="number">0</span>) &#123;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                            LOGGER.info(<span class="string">"&#123;&#125;\t Message size is 0"</span>, socketChannel);</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                            <span class="keyword">continue</span>;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                        &#125; <span class="keyword">else</span> &#123;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                            LOGGER.info(<span class="string">"&#123;&#125;\t Read message &#123;&#125;"</span>, socketChannel, <span class="keyword">new</span> String(buffer.array()));</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                        &#125;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                    &#125;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">                &#125;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">            &#125;</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">        &#125;)</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line"><span class="function">    &#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line"><span class="function">&#125;</span></span></pre></td></tr></table></figure>
+
+<p>在Processor中，同样创建了一个静态的线程池，且线程池的大小为机器核数的两倍。每个Processor实例均包含一个Selector实例。同时每次获取Processor实例时均提交一个任务到该线程池，并且该任务正常情况下一直循环处理，不会停止。而提交给该Processor的SocketChannel通过在其Selector注册事件，加入到相应的任务中。由此实现了每个子Reactor包含一个Selector对象，并由一个独立的线程处理。</p>
+<h1 id="Java进阶系列"><a href="#Java进阶系列" class="headerlink" title="Java进阶系列"></a>Java进阶系列</h1><ul>
+<li><a href="http://www.jasongj.com/2016/01/17/Java1_注解Annotation/" target="_blank" rel="noopener">Java进阶（一）Annotation（注解）</a></li>
+<li><a href="http://www.jasongj.com/java/thread_safe" target="_blank" rel="noopener">Java进阶（二）当我们说线程安全时，到底在说什么</a></li>
+<li><a href="http://www.jasongj.com/java/multi_thread" target="_blank" rel="noopener">Java进阶（三）多线程开发关键技术</a></li>
+<li><a href="http://www.jasongj.com/java/thread_communication" target="_blank" rel="noopener">Java进阶（四）线程间通信方式对比</a></li>
+<li><a href="http://www.jasongj.com/java/nio_reactor/" target="_blank" rel="noopener">Java进阶（五）NIO和Reactor模式进阶</a></li>
+<li><a href="http://www.jasongj.com/java/concurrenthashmap/" target="_blank" rel="noopener">Java进阶（六）从ConcurrentHashMap的演进看Java多线程核心技术</a></li>
+</ul>
+<blockquote>
+<p>作者：郭俊</p>
+<p>来源：<a href="http://www.jasongj.com/java/nio_reactor/" target="_blank" rel="noopener">http://www.jasongj.com/java/nio_reactor/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/I-O%E6%A8%A1%E5%9E%8B/" rel="tag"># I/O模型</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Java-%E7%BA%BF%E7%A8%8B%E9%97%B4%E9%80%9A%E4%BF%A1%E5%89%96%E6%9E%90/" rel="prev" title="Java 线程间通信剖析">
+      <i class="fa fa-chevron-left"></i> Java 线程间通信剖析
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/%E4%BB%8EConcurrentHashMap%E7%9A%84%E6%BC%94%E8%BF%9B%E7%9C%8BJava%E5%A4%9A%E7%BA%BF%E7%A8%8B%E6%A0%B8%E5%BF%83%E6%8A%80%E6%9C%AF/" rel="next" title="从ConcurrentHashMap的演进看Java多线程核心技术">
+      从ConcurrentHashMap的演进看Java多线程核心技术 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#Java-I-O模型"><span class="nav-number">1.</span> <span class="nav-text">Java I/O模型</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#同步-vs-异步"><span class="nav-number">1.1.</span> <span class="nav-text">同步 vs. 异步</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#阻塞-vs-非阻塞"><span class="nav-number">1.2.</span> <span class="nav-text">阻塞 vs. 非阻塞</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Unix下五种I-O模型"><span class="nav-number">1.3.</span> <span class="nav-text">Unix下五种I/O模型</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#阻塞I-O"><span class="nav-number">1.3.1.</span> <span class="nav-text">阻塞I/O</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#非阻塞I-O"><span class="nav-number">1.3.2.</span> <span class="nav-text">非阻塞I/O</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#I-O多路复用"><span class="nav-number">1.3.3.</span> <span class="nav-text">I/O多路复用</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#信号驱动I-O（SIGIO）"><span class="nav-number">1.3.4.</span> <span class="nav-text">信号驱动I/O（SIGIO）</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#异步I-O"><span class="nav-number">1.3.5.</span> <span class="nav-text">异步I/O</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#几种I-O模型对比"><span class="nav-number">1.3.6.</span> <span class="nav-text">几种I/O模型对比</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Java中四种I-O模型"><span class="nav-number">1.4.</span> <span class="nav-text">Java中四种I/O模型</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#从IO到NIO"><span class="nav-number">2.</span> <span class="nav-text">从IO到NIO</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#面向流-vs-面向缓冲"><span class="nav-number">2.1.</span> <span class="nav-text">面向流 vs. 面向缓冲</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#阻塞-vs-非阻塞-1"><span class="nav-number">2.2.</span> <span class="nav-text">阻塞 vs. 非阻塞</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#选择器（Selector）"><span class="nav-number">2.3.</span> <span class="nav-text">选择器（Selector）</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#零拷贝"><span class="nav-number">2.4.</span> <span class="nav-text">零拷贝</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#阻塞I-O下的服务器实现"><span class="nav-number">3.</span> <span class="nav-text">阻塞I/O下的服务器实现</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#单线程逐个处理所有请求"><span class="nav-number">3.1.</span> <span class="nav-text">单线程逐个处理所有请求</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#为每个请求创建一个线程"><span class="nav-number">3.2.</span> <span class="nav-text">为每个请求创建一个线程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#使用线程池处理请求"><span class="nav-number">3.3.</span> <span class="nav-text">使用线程池处理请求</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#Reactor模式"><span class="nav-number">4.</span> <span class="nav-text">Reactor模式</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#精典Reactor模式"><span class="nav-number">4.1.</span> <span class="nav-text">精典Reactor模式</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#多工作线程Reactor模式"><span class="nav-number">4.2.</span> <span class="nav-text">多工作线程Reactor模式</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#多Reactor"><span class="nav-number">4.3.</span> <span class="nav-text">多Reactor</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#Java进阶系列"><span class="nav-number">5.</span> <span class="nav-text">Java进阶系列</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="接着上文《JVM源码分析之堆内存的初始化》，本文对新生代的实现进行分析，在JVM内部提供了多种方式来实现新生代的内存，如DefNewGeneration、ParNewGeneration和ASParNewGeneration等，由虚拟机的启动参数决定最终采用哪种方式进行实现。">
+<meta name="keywords" content="源码">
+<meta property="og:type" content="article">
+<meta property="og:title" content="JVM源码分析（11）：新生代DefNewGeneration的实现">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8811%EF%BC%89%EF%BC%9A%E6%96%B0%E7%94%9F%E4%BB%A3DefNewGeneration%E7%9A%84%E5%AE%9E%E7%8E%B0&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="接着上文《JVM源码分析之堆内存的初始化》，本文对新生代的实现进行分析，在JVM内部提供了多种方式来实现新生代的内存，如DefNewGeneration、ParNewGeneration和ASParNewGeneration等，由虚拟机的启动参数决定最终采用哪种方式进行实现。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171347-7f323.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171348-a3de9.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171348-487d2.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171349-9759b.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171349-23ee9.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171349-eb51c.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171350-d1baa.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171350-8bc46.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171351-affe8.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171352-7025f.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171352-f02b5.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171352-b408c.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171353-dee39.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171353-c87f7.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171354-6382d.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171354-e40d1.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171355-a6606.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171356-37b94.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171356-620ce.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171357-18ca4.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171357-a2b09.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171358-350a6.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171358-9eeb2.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171359-41715.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171359-4d3ae.png">
+<meta property="og:updated_time" content="2020-01-08T03:46:41.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030171347-7f323.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8811%EF%BC%89%EF%BC%9A%E6%96%B0%E7%94%9F%E4%BB%A3DefNewGeneration%E7%9A%84%E5%AE%9E%E7%8E%B0/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>JVM源码分析（11）：新生代DefNewGeneration的实现 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8811%EF%BC%89%EF%BC%9A%E6%96%B0%E7%94%9F%E4%BB%A3DefNewGeneration%E7%9A%84%E5%AE%9E%E7%8E%B0/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          JVM源码分析（11）：新生代DefNewGeneration的实现
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 11:46:41" itemprop="dateCreated datePublished" datetime="2020-01-08T11:46:41+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/" itemprop="url" rel="index">
+                    <span itemprop="name">JVM</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>接着上文<a href="https://www.jianshu.com/p/0f7bed2df952" target="_blank" rel="noopener">《JVM源码分析之堆内存的初始化》</a>，本文对新生代的实现进行分析，在JVM内部提供了多种方式来实现新生代的内存，如<code>DefNewGeneration</code>、<code>ParNewGeneration</code>和<code>ASParNewGeneration</code>等，由虚拟机的启动参数决定最终采用哪种方式进行实现。</p>
+<a id="more"></a>
+
+<h2 id="DefNewGeneration"><a href="#DefNewGeneration" class="headerlink" title="DefNewGeneration"></a>DefNewGeneration</h2><p><code>DefNewGeneration</code>是一个<code>young generation</code>，包含了<code>eden、from and to</code>内存区，当虚拟机启动参数中没有指定垃圾回收算法时，默认使用该方式实现新生代，定义如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171347-7f323.png" alt="img"></p>
+<p>1、<code>_next_gen</code>指向下一个内存代；<br>2、<code>_tenuring_threshold</code>为对象的晋升阀值，如果某个对象经历过<code>_tenuring_threshold</code>次gc后依然存活，则可以晋升到老年代；</p>
+<h3 id="内存初始化实现"><a href="#内存初始化实现" class="headerlink" title="内存初始化实现"></a>内存初始化实现</h3><p>实现位于<code>openjdk\hotspot\src\share\vm\memory\defNewGeneration.cpp</code></p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171348-a3de9.png" alt="img"></p>
+<p>分别通过<code>EdenSpace</code>和<code>ContiguousSpace</code>类实现新生代的<code>eden</code>和<code>from to</code>区域，(其中Contiguous是”连续”的意思，表示一块连续的内存空间)，其中<code>EdenSpace</code>在实现上是继承自<code>ContiguousSpace</code>的。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171348-487d2.png" alt="img"></p>
+<p>1、如果<code>_eden_space、_from_space、_to_space</code>其中任何一个为空，说明新生代分配内存失败，则虚拟机退出；<br>2、根据<code>SurvivorRatio</code>计算<code>from to</code>内存区应该分配的大小；<br>3、剩余的空间大小分配给<code>eden</code>内存区；</p>
+<h3 id="GC过程实现"><a href="#GC过程实现" class="headerlink" title="GC过程实现"></a>GC过程实现</h3><p>基本思路：<br>1、扫描内存堆所有的根对象集T，并把它们复制到新的内存块，一般为新生代的<code>to</code>内存区或老年代；<br>2、分析扫描这些根对象集T的所有引用对象集T1，并把它们复制到新的内存块；<br>3、继续分析对象集T1所引用的对象集T2，一直迭代下去，直到对象集Tn为空；<br>GC过程位于<code>collect()</code>方法中：</p>
+<h4 id="GC检测"><a href="#GC检测" class="headerlink" title="GC检测"></a>GC检测</h4><p><img src="http://image.winrains.cn/2019/10/20191030171349-9759b.png" alt="img"></p>
+<p>1、确保当前是一次<code>FGC</code>，或需要分配的内存大小<code>size</code>大于0，否则不需要执行一次gc操作；<br>2、因为当前是最年轻代的管理器，确保有下一个内存管理器；</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171349-23ee9.png" alt="img"></p>
+<p>3、通过<code>collection_attempt_is_safe()</code>方法判断当前的GC是否安全，实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171349-eb51c.png" alt="img"></p>
+<p>安全的GC必须满足如下条件：<br>1、<code>survivor</code>中的<code>to</code>区为空；<br>2、下一个内存代有足够的内存容纳新生代的所有对象；<br>否则，设置<code>_incremental_collection_failed</code>为<code>false</code>，即当前<code>minor gc</code>不可用，通知内存堆管理器不要再尝试增量式GC了，因为肯定会失败；</p>
+<h4 id="GC开始"><a href="#GC开始" class="headerlink" title="GC开始"></a>GC开始</h4><p><img src="http://image.winrains.cn/2019/10/20191030171350-d1baa.png" alt="img"></p>
+<p>GC准备工作：<br>1、初始化<code>IsAliveClosure</code>和<code>ScanWeakRefClosure</code>；<br>2、清空<code>age_table</code>数据和<code>to</code>区；<br>3、初始化FastScanClosure，负责存活对象的标识和复制；</p>
+<h4 id="根对象的标识复制"><a href="#根对象的标识复制" class="headerlink" title="根对象的标识复制"></a>根对象的标识复制</h4><p>我们都知道和根对象有联系的对象都是活跃对象，那么如何快速确定内存代中所有的活跃对象呢？<br>1、将内存代的跟对象和被其它内存代对象引用的对象复制到<code>to</code>区域，这些对象作为活跃对象，虽然其它内存代的对象可能在下次Full GC成为垃圾对象，但目前的Minor GC不能将这些对象当做垃圾对象进行处理；<br>2、递归遍历这些活跃对象，将其所引用的在该内存代的对象复制到To区域，最终剩下的对象就是垃圾对象了。<br>其中<code>gen_process_strong_roots()</code>负责查找当前代中的根对象和被其它内存代对象引用的对象，并复制到<code>to</code>区域，实现如下：</p>
+<figure class="highlight xl"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (!do_code_roots) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">   SharedHeap::process_strong_roots(activate_scope, collecting_perm_gen, so,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">                                    not_older_gens, NULL, older_gens);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"> &#125; <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">   bool do_code_marking = (activate_scope || nmethod::oops_do_marking_is_active());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">   CodeBlobToOopClosure code_roots(not_older_gens, <span class="comment">/*do_marking=*/</span> do_code_marking);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">   SharedHeap::process_strong_roots(activate_scope, collecting_perm_gen, so,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">                                    not_older_gens, &amp;code_roots, older_gens);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"> &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"> <span class="keyword">if</span> (younger_gens_as_roots) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">   <span class="function"><span class="title">if</span> (!_gen_process_strong_tasks-&gt;</span>is_task_claimed(GCH_PS_younger_gens)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">     <span class="keyword">for</span> (int i = <span class="number">0</span>; i &lt; level; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">       <span class="function"><span class="title">not_older_gens</span>-&gt;</span>set_generation(_gens[i]);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">       _<span class="function"><span class="title">gens</span>[i]-&gt;</span>oop_iterate(not_older_gens);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">     &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">     <span class="function"><span class="title">not_older_gens</span>-&gt;</span>reset_generation();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">   &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"> &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"> <span class="comment">// When collection is parallel, all threads get to cooperate to do</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"> <span class="comment">// older-gen scanning.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"> <span class="keyword">for</span> (int i = level+<span class="number">1</span>; i &lt; _n_gens; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">   <span class="function"><span class="title">older_gens</span>-&gt;</span>set_generation(_gens[i]);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">   <span class="function"><span class="title">rem_set</span>()-&gt;</span>younger_refs_iterate(_gens[i], older_gens);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">   <span class="function"><span class="title">older_gens</span>-&gt;</span>reset_generation();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line"> &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line"> _<span class="function"><span class="title">gen_process_strong_tasks</span>-&gt;</span>all_tasks_completed();</span></pre></td></tr></table></figure>
+
+<p>假设当前内存堆上有如下对象模型(图片出自<a href="https://link.jianshu.com?t=http://www.importnew.com/21063.html" target="_blank" rel="noopener">http://www.importnew.com/21063.html</a> )，其中深色对象为根对象，箭头代表对象的引用关系。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171350-8bc46.png" alt="img"></p>
+<p>根对象的查找过程如下：<br>1、调用<code>SharedHeap::process_strong_roots()</code>方法遍历当前内存代中所有根对象，<code>eden</code>和<code>from</code>区的根对象将被复制到<code>to</code>区，被复制的对象C1使用橙色表示；</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171351-affe8.png" alt="img"></p>
+<p>2、遍历更低内存代和更高内存代对象，如果这些对象有引用当前内存代的对象，如C2和C3分别被高低内存代中L1和H2对象所引用，则把对象C2和C3复制到<code>to</code>区；</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171352-7025f.png" alt="img"></p>
+<h4 id="存活对象的递归标记"><a href="#存活对象的递归标记" class="headerlink" title="存活对象的递归标记"></a>存活对象的递归标记</h4><p><code>FastEvacuateFollowersClosure.do_void()</code>方法实现活跃对象的递归标记，通过广度优先搜索算法遍历扫描活跃对象，算法实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171352-f02b5.png" alt="img"></p>
+<p>当各分代的空闲分配指针不再变化时，说明所有可触及对象都递归标记完成，否则调用<code>oop_since_save_marks_iterate()</code>进行遍历标记。<br>1、循环条件<code>no_allocs_since_save_marks()</code>实现如下：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="built_in">bool</span> GenCollectedHeap::no<span class="constructor">_allocs_since_save_marks(<span class="params">int</span> <span class="params">level</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  for (<span class="built_in">int</span> i = level; i &lt; _n_gens; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (!_gens<span class="literal">[<span class="identifier">i</span>]</span>-&gt;no<span class="constructor">_allocs_since_save_marks()</span>) return <span class="literal">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  return perm<span class="constructor">_gen()</span>-&gt;no<span class="constructor">_allocs_since_save_marks()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>主要检查当前代、更高代以及永久代scanned指针_saved_mark_word是否与当前空闲分配指针位置相同，如<code>DefNewGeneration</code>的实现如下：</p>
+<figure class="highlight livescript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">bool DefNewGeneration::no_allocs_since_save_marks() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  assert<span class="function"><span class="params">(eden()-&gt;saved_mark_at_top(), <span class="string">"Violated spec - alloc in eden"</span>)</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="function">  <span class="title">assert</span><span class="params">(<span class="keyword">from</span>()-&gt;saved_mark_at_top(), <span class="string">"Violated spec - alloc in from"</span>)</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="function">  <span class="title">return</span> <span class="title">to</span><span class="params">()</span>-&gt;</span>saved_mark_at_top();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"> bool saved_mark_at_top() <span class="keyword">const</span> &#123; <span class="keyword">return</span> saved_mark_word() == top(); &#125;</span></pre></td></tr></table></figure>
+
+<p>2、循环处理<code>oop_since_save_marks_iterate()</code>实现如下：</p>
+<figure class="highlight leaf"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">void GenCollectedHeap::</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">oop_since_save_marks_iterate(int level,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">                             OopClosureType* cur,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">                             OopClosureType* older) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  _gens[level]-&gt;oop_since_save_marks_iterate<span class="function"><span class="keyword">##</span><span class="title">nv_suffix</span><span class="params">(<span class="variable">cur</span>)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  for (int i = level+1; i &lt; n_gens(); i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    _gens[i]-&gt;oop_since_save_marks_iterate<span class="function"><span class="keyword">##</span><span class="title">nv_suffix</span><span class="params">(<span class="variable">older</span>)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">  perm_gen()-&gt;oop_since_save_marks_iterate<span class="function"><span class="keyword">##</span><span class="title">nv_suffix</span><span class="params">(<span class="variable">older</span>)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>主要对当前代、更高代以及永久代的对象进行遍历处理，不过为什么要对更高代的对象进行遍历呢？主要为了防止在复制过程中，有些对象可能直接晋升到更高代内存中。<br>其中<code>DefNewGeneration</code>中的实现如下：</p>
+<figure class="highlight leaf"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">void DefNewGeneration::</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">oop_since_save_marks_iterate<span class="function"><span class="keyword">##</span><span class="title">nv_suffix</span><span class="params">(<span class="variable">OopClosureType</span>* <span class="variable">cl</span>)</span></span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  cl-&gt;set_generation(this);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  eden()-&gt;oop_since_save_marks_iterate<span class="function"><span class="keyword">##</span><span class="title">nv_suffix</span><span class="params">(<span class="variable">cl</span>)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  to()-&gt;oop_since_save_marks_iterate<span class="function"><span class="keyword">##</span><span class="title">nv_suffix</span><span class="params">(<span class="variable">cl</span>)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  from()-&gt;oop_since_save_marks_iterate<span class="function"><span class="keyword">##</span><span class="title">nv_suffix</span><span class="params">(<span class="variable">cl</span>)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  cl-&gt;reset_generation();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  save_marks();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>主要调用新生代各个区的同名方法进行处理，实现如下：</p>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">void</span> ContiguousSpace::</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">oop_since_save_marks_iterate##nv_suffix(OopClosureType* blk) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  HeapWord* t;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  HeapWord* p = saved_mark_word();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  assert(p != <span class="literal">NULL</span>, <span class="string">"expected saved mark"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">const</span> intx interval = PrefetchScanIntervalInBytes;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">do</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    t = top();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">while</span> (p &lt; t) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">      Prefetch::<span class="built_in">write</span>(p, interval);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">      debug_only(HeapWord* prev = p);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">      oop m = oop(p);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">      p += m-&gt;oop_iterate(blk);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">  &#125; <span class="keyword">while</span> (t &lt; top());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">  set_saved_mark_word(p);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>因为在scanned指针到空闲分配指针之间的区域是已分配但未扫描的对象，对这块区域的对象调用遍历函数进行处理，标记所引用的对象，并保存新的scanned指针。</p>
+<h3 id="图解过程"><a href="#图解过程" class="headerlink" title="图解过程"></a>图解过程</h3><p>1、递归标记的开始时，Scanned指针为To区域的起点，Top指针指向<code>to</code>区的空闲位置，Scanned到Top之间的对象就是需要进行递归处理的对象；</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171352-b408c.png" alt="img"></p>
+<p>2、第一轮递归标记后，根集对象中C3引用了C5，C5被移动至To区域，Scanned指针指向已处理完的对象，这时C1、C2、C3均已被遍历完毕，现在C5需要被遍历，其中绿色对象代表被移动到To区域的非根集对象；</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171353-dee39.png" alt="img"></p>
+<p>3、第二轮递归标记后，C5引用了C7、C8，这两个对象被移动到了To区域，这时C5已被遍历完毕，现在C7、C8需要被遍历；</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171353-c87f7.png" alt="img"></p>
+<p>4、第三轮标记没有任何引用被发现，Scanned指针追上了Top指针，所有存活对象被遍历完毕；</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171354-6382d.png" alt="img"></p>
+<p>5、假如还有一个C12为C8所引用，但是To区域没有足够的空间，那么C12就会晋升到更高的内存代(老年代)<br><img src="http://image.winrains.cn/2019/10/20191030171354-e40d1.png" alt="img"></p>
+<h4 id="对象的标记和复制实现"><a href="#对象的标记和复制实现" class="headerlink" title="对象的标记和复制实现"></a>对象的标记和复制实现</h4><p>对象的标记和复制过程最终由<code>FastScanClosure</code>的<code>do_oop</code>方法实现，其中<code>do_oop</code>方法又调用了<code>do_oop_work</code>方法，<code>do_oop_work</code>究竟做了什么？</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171355-a6606.png" alt="img"></p>
+<p>使用模板函数解决不同类型的指针(实际oop和压缩过的narrowOop)：<br>1、当该指针对象非空时，通过<code>decode_heap_oop_not_null</code>方法获取对象<code>obj</code>;<br>2、如果该对象<code>obj</code>在遍历区域（_boudary是在<code>FastScanClosure</code>初始化的时候，为初始化时指定代的结束地址，与当前遍历代的起始地址<code>_gen_boundary</code>共同作为对象的访问边界），则通过<code>obj-&gt;is_forwarded()</code>判断该对象是否已经标记过，如果对象没有被标识过，即其标记状态不为marked_value，则通过<code>_g-&gt;copy_to_survivor_space(obj)</code>方法把该对象复制到<code>to</code>区域；<br>3、根据是否使用指针压缩将新的对象地址进行压缩；<br>其中<code>copy_to_survivor_space()</code>方法中对象的复制过程实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171356-37b94.png" alt="img"></p>
+<p>1、如果该对象的<code>age</code>小于<code>_tenuring_threshold</code>（直接晋升到老年代的阈值），则将其分配到<code>to</code>区域，分配成功后，将原对象的数据内容复制到to区域新分配的对象上，并增加该对象的复制计数age和更新ageTable；<br>2、否则通过<code>_next_gen-&gt;promote()</code>尝试将该对象晋升，如果晋升失败，则调用<code>handle_promotion_failure()</code>处理失败的对象；<br>3、最后调用<code>forward_to()</code>设置原对象的对象头为转发指针，表示该对象已被复制，并指明该对象已经被复制到什么位置；</p>
+<h3 id="处理晋升成功"><a href="#处理晋升成功" class="headerlink" title="处理晋升成功"></a>处理晋升成功</h3><p><img src="http://image.winrains.cn/2019/10/20191030171356-620ce.png" alt="img"></p>
+<p>如果GC过程中没有发生对象的晋升失败，则执行如下逻辑：<br>1、既然所有对象都晋升成功了，说明存活对象都转移到了<code>to</code>区域或老年代，则通过<code>clear</code>方法清空<code>eden</code>和<code>from</code>区；<br>2、通过<code>swap_spaces</code>方法交换<code>from</code>和<code>to</code>区域，为下次GC作准备，<code>swap_spaces</code>实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171357-18ca4.png" alt="img"></p>
+<p>通过交换<code>_from_space</code>和<code>_to_space</code>的起始地址实现<code>from</code>和<code>to</code>区的角色互换，并重新设置<code>eden</code>的<code>_next_compaction_space</code>，即<code>eden</code>的下一个内存区域；<br>3、<code>from</code>和<code>to</code>区互换之后，当前的<code>to</code>区应该已经是块空区域了；<br>4、调用<code>ageTable</code>的<code>compute_tenuring_threshold</code>方法对晋升阀值<code>_tenuring_threshold</code>重新设置，实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171357-a2b09.png" alt="img"></p>
+<p>其中<code>survivor_capacity</code>是<code>to</code>区的容量，假设为1G，<code>TargetSurvivorRatio</code>默认为50，计算逻辑大概如下：<br>其中<code>desired_survivor_size</code>默认为<code>survivor_capacity</code>的一半，<code>age_table</code>记录了各个年龄段的对象总大小，按年龄从小到大，累加对象大小，当总大小超过<code>survivor_capacity</code>时，比较当前的<code>age</code>和<code>MaxTenuringThreshold</code>的大小，并返回较小者，其中<code>MaxTenuringThreshold</code>默认为15；</p>
+<h3 id="处理晋升失败"><a href="#处理晋升失败" class="headerlink" title="处理晋升失败"></a>处理晋升失败</h3><p><img src="http://image.winrains.cn/2019/10/20191030171358-350a6.png" alt="img"></p>
+<p>如果GC过程中存在晋升失败，则执行如下逻辑：<br>1、当对象被标记为活跃对象时，其对象头<code>markword</code>指向经过复制后对象的新地址，<code>remove_forwarding_pointers</code>负责恢复晋升失败对象的<code>markOop</code>，实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171358-9eeb2.png" alt="img"></p>
+<p>当对象晋升失败时，对象的<code>oop</code>会被保存在<code>_objs_with_preserved_marks</code>栈中，对应的对象头<code>markOop</code>被保存在<code>_preserved_marks_of_objs</code>栈中，通过这两个栈，可以对晋升失败的对象的对象头进行恢复；<br>2、对<code>from</code>和<code>to</code>区进行互换，并设置<code>from</code>的下一片需要进行压缩的区域为<code>to</code>区，因为当有对象晋升失败时，并不会清空<code>eden</code>和<code>from</code>区，这时对<code>from</code>和<code>to</code>区互换，但<code>to</code>区还有活跃对象，这样在随后触发的<code>FGC</code>能够对<code>from</code>和<code>to</code>进行压缩处理；<br>3、设置新生代的<code>minor gc</code>失败标识，并通知下一个内存代（老年代）发生晋升失败，比如在<code>ConcurrentMarkSweepGeneration</code>会根据参数<code>CMSDumpAtPromotionFailure</code>进行dump输出以供JVM问题诊断，实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030171359-41715.png" alt="img"></p>
+<h4 id="结尾"><a href="#结尾" class="headerlink" title="结尾"></a>结尾</h4><p><img src="http://image.winrains.cn/2019/10/20191030171359-4d3ae.png" alt="img"></p>
+<p>1、设置<code>from</code>和<code>to</code>区域的并发遍历指针时的安全值为碰撞指针所在位置；<br>2、更新堆的最后一次gc的时间。</p>
+<blockquote>
+<p>作者：占小狼</p>
+<p>来源：<a href="https://www.jianshu.com/p/2b64294fa1bd" target="_blank" rel="noopener">https://www.jianshu.com/p/2b64294fa1bd</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E6%BA%90%E7%A0%81/" rel="tag"># 源码</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8810%EF%BC%89%EF%BC%9A%E5%9E%83%E5%9C%BE%E6%94%B6%E9%9B%86%E7%9A%84%E6%89%A7%E8%A1%8C%E8%BF%87%E7%A8%8B/" rel="prev" title="JVM源码分析（10）：垃圾收集的执行过程">
+      <i class="fa fa-chevron-left"></i> JVM源码分析（10）：垃圾收集的执行过程
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8812%EF%BC%89%EF%BC%9A%E8%80%81%E5%B9%B4%E4%BB%A3TenuredGeneration%E7%9A%84%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E7%AE%97%E6%B3%95%E5%AE%9E%E7%8E%B0/" rel="next" title="JVM源码分析（12）：老年代TenuredGeneration的垃圾回收算法实现">
+      JVM源码分析（12）：老年代TenuredGeneration的垃圾回收算法实现 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#DefNewGeneration"><span class="nav-number">1.</span> <span class="nav-text">DefNewGeneration</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#内存初始化实现"><span class="nav-number">1.1.</span> <span class="nav-text">内存初始化实现</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#GC过程实现"><span class="nav-number">1.2.</span> <span class="nav-text">GC过程实现</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#GC检测"><span class="nav-number">1.2.1.</span> <span class="nav-text">GC检测</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#GC开始"><span class="nav-number">1.2.2.</span> <span class="nav-text">GC开始</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#根对象的标识复制"><span class="nav-number">1.2.3.</span> <span class="nav-text">根对象的标识复制</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#存活对象的递归标记"><span class="nav-number">1.2.4.</span> <span class="nav-text">存活对象的递归标记</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#图解过程"><span class="nav-number">1.3.</span> <span class="nav-text">图解过程</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#对象的标记和复制实现"><span class="nav-number">1.3.1.</span> <span class="nav-text">对象的标记和复制实现</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#处理晋升成功"><span class="nav-number">1.4.</span> <span class="nav-text">处理晋升成功</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#处理晋升失败"><span class="nav-number">1.5.</span> <span class="nav-text">处理晋升失败</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#结尾"><span class="nav-number">1.5.1.</span> <span class="nav-text">结尾</span></a></li></ol></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

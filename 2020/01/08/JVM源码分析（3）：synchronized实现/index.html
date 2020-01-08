@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="java内部锁synchronized的出现，为多线程的并发执行提供了一个稳定的环境，有效的防止多个线程同时执行同一个逻辑，其实这篇文章应该写在深入分析Object.wait&#x2F;notify实现机制之前，本文不会讲如何使用synchronized，以HotSpot1.7的虚拟机为例，对synchronized的实现进行深入分析。synchronized的HotSpot实现依赖于对象头的Mark Wo">
+<meta name="keywords" content="源码,synchronized">
+<meta property="og:type" content="article">
+<meta property="og:title" content="JVM源码分析（3）：synchronized实现">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%883%EF%BC%89%EF%BC%9Asynchronized%E5%AE%9E%E7%8E%B0&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="java内部锁synchronized的出现，为多线程的并发执行提供了一个稳定的环境，有效的防止多个线程同时执行同一个逻辑，其实这篇文章应该写在深入分析Object.wait&#x2F;notify实现机制之前，本文不会讲如何使用synchronized，以HotSpot1.7的虚拟机为例，对synchronized的实现进行深入分析。synchronized的HotSpot实现依赖于对象头的Mark Wo">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160131-515be.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160132-97d45.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160132-741e7.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160133-594f6.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160134-6b0fc.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160135-964f6.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160136-4ed34.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160137-ed7de.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160139-6c633.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160140-c4116.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160141-7b14f.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160142-1cdac.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160142-ad74f.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160143-e7a29.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160144-e8ea4.png">
+<meta property="og:updated_time" content="2020-01-08T03:41:21.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030160131-515be.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%883%EF%BC%89%EF%BC%9Asynchronized%E5%AE%9E%E7%8E%B0/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>JVM源码分析（3）：synchronized实现 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%883%EF%BC%89%EF%BC%9Asynchronized%E5%AE%9E%E7%8E%B0/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          JVM源码分析（3）：synchronized实现
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 11:41:21" itemprop="dateCreated datePublished" datetime="2020-01-08T11:41:21+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/" itemprop="url" rel="index">
+                    <span itemprop="name">JVM</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>java内部锁synchronized的出现，为多线程的并发执行提供了一个稳定的环境，有效的防止多个线程同时执行同一个逻辑，其实这篇文章应该写在<a href="https://www.jianshu.com/p/f4454164c017" target="_blank" rel="noopener">深入分析Object.wait/notify实现机制</a>之前，本文不会讲如何使用synchronized，以HotSpot1.7的虚拟机为例，对synchronized的实现进行深入分析。<br>synchronized的HotSpot实现依赖于对象头的Mark Word，关于Mark Word的描述可以参考这篇文章<a href="https://www.jianshu.com/p/9c19eb0ea4d8" target="_blank" rel="noopener">《java对象头的HotSpot实现分析》</a></p>
+<a id="more"></a>
+
+<h2 id="synchronized字节码实现"><a href="#synchronized字节码实现" class="headerlink" title="synchronized字节码实现"></a>synchronized字节码实现</h2><p><img src="http://image.winrains.cn/2019/10/20191030160131-515be.png" alt="img"></p>
+<p>通过javap命令生成的字节码中包含 ** monitorenter ** 和 ** monitorexit **指令。<br><img src="http://image.winrains.cn/2019/10/20191030160132-97d45.png" alt="img"><br>synchronized关键字基于上述两个指令实现了锁的获取和释放过程，解释器执行monitorenter时会进入到<code>InterpreterRuntime.cpp</code>的<code>InterpreterRuntime::monitorenter</code>函数，具体实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030160132-741e7.png" alt="img"></p>
+<p>1、JavaThread thread指向java中的当前线程；<br>2、BasicObjectLock类型的elem对象包含一个BasicLock类型_lock对象和一个指向Object对象的指针_obj;</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> <span class="symbol">BasicObjectLock</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  BasicLock _lock;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// object holds the lock;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  oop  _obj;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>3、BasicLock类型_lock对象主要用来保存_obj指向Object对象的对象头数据；</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> <span class="symbol">BasicLock</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    volatile markOop _displaced_header;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>4、<strong>UseBiasedLocking</strong>标识虚拟机是否开启偏向锁功能，如果开启则执行fast_enter逻辑，否则执行slow_enter；</p>
+<h2 id="偏向锁"><a href="#偏向锁" class="headerlink" title="偏向锁"></a>偏向锁</h2><p>引入偏向锁的目的：在没有多线程竞争的情况下，尽量减少不必要的轻量级锁执行路径，轻量级锁的获取及释放依赖多次CAS原子指令，而偏向锁只依赖一次CAS原子指令置换ThreadID，不过一旦出现多个线程竞争时必须撤销偏向锁，所以撤销偏向锁消耗的性能必须小于之前节省下来的CAS原子操作的性能消耗，不然就得不偿失了。JDK 1.6中默认开启偏向锁，可以通过-XX:-UseBiasedLocking来禁用偏向锁。<br>在HotSpot中，偏向锁的入口位于synchronizer.cpp文件的<code>ObjectSynchronizer::fast_enter</code>函数：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030160133-594f6.png" alt="img"></p>
+<h3 id="偏向锁的获取"><a href="#偏向锁的获取" class="headerlink" title="偏向锁的获取"></a>偏向锁的获取</h3><p>偏向锁的获取由<code>BiasedLocking::revoke_and_rebias</code>方法实现，由于实现比较长，就不贴代码了，实现逻辑如下：<br>1、通过<code>markOop mark = obj-&gt;mark()</code>获取对象的markOop数据mark，即对象头的Mark Word；<br>2、判断mark是否为可偏向状态，即mark的偏向锁标志位为 <strong>1</strong>，锁标志位为 <strong>01</strong>；<br>3、判断mark中JavaThread的状态：如果为空，则进入步骤（4）；如果指向当前线程，则执行同步代码块；如果指向其它线程，进入步骤（5）；<br>4、通过CAS原子指令设置mark中JavaThread为当前线程ID，如果执行CAS成功，则执行同步代码块，否则进入步骤（5）；<br>5、如果执行CAS失败，表示当前存在多个线程竞争锁，当达到全局安全点（safepoint），获得偏向锁的线程被挂起，撤销偏向锁，并升级为轻量级，升级完成后被阻塞在安全点的线程继续执行同步代码块；</p>
+<h3 id="偏向锁的撤销"><a href="#偏向锁的撤销" class="headerlink" title="偏向锁的撤销"></a>偏向锁的撤销</h3><p>只有当其它线程尝试竞争偏向锁时，持有偏向锁的线程才会释放锁，偏向锁的撤销由<code>BiasedLocking::revoke_at_safepoint</code>方法实现：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030160134-6b0fc.png" alt="img"></p>
+<p>1、偏向锁的撤销动作必须等待全局安全点；<br>2、暂停拥有偏向锁的线程，判断锁对象是否处于被锁定状态；<br>3、撤销偏向锁，恢复到无锁（标志位为 <strong>01</strong>）或轻量级锁（标志位为 <strong>00</strong>）的状态；<br>偏向锁在Java 1.6之后是默认启用的，但在应用程序启动几秒钟之后才激活，可以使用<code>-XX:BiasedLockingStartupDelay=0</code>参数关闭延迟，如果确定应用程序中所有锁通常情况下处于竞争状态，可以通过<code>XX:-UseBiasedLocking=false</code>参数关闭偏向锁。</p>
+<h2 id="轻量级锁"><a href="#轻量级锁" class="headerlink" title="轻量级锁"></a>轻量级锁</h2><p>引入轻量级锁的目的：在多线程交替执行同步块的情况下，尽量避免重量级锁引起的性能消耗，但是如果多个线程在同一时刻进入临界区，会导致轻量级锁膨胀升级重量级锁，所以轻量级锁的出现并非是要替代重量级锁。</p>
+<h3 id="轻量级锁的获取"><a href="#轻量级锁的获取" class="headerlink" title="轻量级锁的获取"></a>轻量级锁的获取</h3><p>当关闭偏向锁功能，或多个线程竞争偏向锁导致偏向锁升级为轻量级锁，会尝试获取轻量级锁，其入口位于<code>ObjectSynchronizer::slow_enter</code></p>
+<p><img src="http://image.winrains.cn/2019/10/20191030160135-964f6.png" alt="img"></p>
+<p>1、<code>markOop mark = obj-&gt;mark()</code>方法获取对象的markOop数据mark；<br>2、<code>mark-&gt;is_neutral()</code>方法判断mark是否为无锁状态：mark的偏向锁标志位为 <strong>0</strong>，锁标志位为 <strong>01</strong>；<br>3、如果mark处于无锁状态，则进入步骤（4），否则执行步骤（6）；<br>4、把mark保存到BasicLock对象的_displaced_header字段；<br>5、通过CAS尝试将Mark Word更新为指向BasicLock对象的指针，如果更新成功，表示竞争到锁，则执行同步代码，否则执行步骤（6）；<br>6、如果当前mark处于加锁状态，且mark中的ptr指针指向当前线程的栈帧，则执行同步代码，否则说明有多个线程竞争轻量级锁，轻量级锁需要膨胀升级为重量级锁；<br><strong>假设线程A和B同时执行到临界区<code>if (mark-&gt;is_neutral())</code></strong>：<br>1、线程AB都把Mark Word复制到各自的_displaced_header字段，该数据保存在线程的栈帧上，是线程私有的；<br>2、<code>Atomic::cmpxchg_ptr</code>原子操作保证只有一个线程可以把指向栈帧的指针复制到Mark Word，假设此时线程A执行成功，并返回继续执行同步代码块；<br>3、线程B执行失败，退出临界区，通过<code>ObjectSynchronizer::inflate</code>方法开始膨胀锁；</p>
+<h3 id="轻量级锁的释放"><a href="#轻量级锁的释放" class="headerlink" title="轻量级锁的释放"></a>轻量级锁的释放</h3><p>轻量级锁的释放通过<code>ObjectSynchronizer::fast_exit</code>完成。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030160136-4ed34.png" alt="img"></p>
+<p>1、确保处于偏向锁状态时不会执行这段逻辑；<br>2、取出在获取轻量级锁时保存在BasicLock对象的mark数据dhw；<br>3、通过CAS尝试把dhw替换到当前的Mark Word，如果CAS成功，说明成功的释放了锁，否则执行步骤（4）；<br>4、如果CAS失败，说明有其它线程在尝试获取该锁，这时需要将该锁升级为重量级锁，并释放；</p>
+<h2 id="重量级锁"><a href="#重量级锁" class="headerlink" title="重量级锁"></a>重量级锁</h2><p>重量级锁通过对象内部的监视器（monitor）实现，其中monitor的本质是依赖于底层操作系统的Mutex Lock实现，操作系统实现线程之间的切换需要从用户态到内核态的切换，切换成本非常高。</p>
+<h3 id="锁膨胀过程"><a href="#锁膨胀过程" class="headerlink" title="锁膨胀过程"></a>锁膨胀过程</h3><p>锁的膨胀过程通过<code>ObjectSynchronizer::inflate</code>函数实现</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030160137-ed7de.png" alt="img"></p>
+<p>膨胀过程的实现比较复杂，截图中只是一小部分逻辑，完整的方法可以查看<code>synchronized.cpp</code>，大概实现过程如下：<br>1、整个膨胀过程在自旋下完成；<br>2、<code>mark-&gt;has_monitor()</code>方法判断当前是否为重量级锁，即Mark Word的锁标识位为 <strong>10</strong>，如果当前状态为重量级锁，执行步骤（3），否则执行步骤（4）；<br>3、<code>mark-&gt;monitor()</code>方法获取指向ObjectMonitor的指针，并返回，说明膨胀过程已经完成；<br>4、如果当前锁处于膨胀中，说明该锁正在被其它线程执行膨胀操作，则当前线程就进行自旋等待锁膨胀完成，这里需要注意一点，虽然是自旋操作，但不会一直占用cpu资源，每隔一段时间会通过os::NakedYield方法放弃cpu资源，或通过park方法挂起；如果其他线程完成锁的膨胀操作，则退出自旋并返回；<br>5、如果当前是轻量级锁状态，即锁标识位为 <strong>00</strong>，膨胀过程如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030160139-6c633.png" alt="img"></p>
+<p>1、通过omAlloc方法，获取一个可用的ObjectMonitor monitor，并重置monitor数据；<br>2、通过CAS尝试将Mark Word设置为markOopDesc:INFLATING，标识当前锁正在膨胀中，如果CAS失败，说明同一时刻其它线程已经将Mark Word设置为markOopDesc:INFLATING，当前线程进行自旋等待膨胀完成；<br>3、如果CAS成功，设置monitor的各个字段：_header、_owner和_object等，并返回；</p>
+<h3 id="monitor竞争"><a href="#monitor竞争" class="headerlink" title="monitor竞争"></a>monitor竞争</h3><p>当锁膨胀完成并返回对应的monitor时，并不表示该线程竞争到了锁，真正的锁竞争发生在<code>ObjectMonitor::enter</code>方法中。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030160140-c4116.png" alt="img"></p>
+<p>1、通过CAS尝试把monitor的_owner字段设置为当前线程；<br>2、如果设置之前的_owner指向当前线程，说明当前线程再次进入monitor，即重入锁，执行_recursions ++ ，记录重入的次数；<br>3、如果之前的_owner指向的地址在当前线程中，这种描述有点拗口，换一种说法：之前_owner指向的BasicLock在当前线程栈上，说明当前线程是第一次进入该monitor，设置_recursions为1，_owner为当前线程，该线程成功获得锁并返回；<br>4、如果获取锁失败，则等待锁的释放；</p>
+<h3 id="monitor等待"><a href="#monitor等待" class="headerlink" title="monitor等待"></a>monitor等待</h3><p>monitor竞争失败的线程，通过自旋执行<code>ObjectMonitor::EnterI</code>方法等待锁的释放，EnterI方法的部分逻辑实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030160141-7b14f.png" alt="img"></p>
+<p>1、当前线程被封装成ObjectWaiter对象node，状态设置成ObjectWaiter::TS_CXQ；<br>2、在for循环中，通过CAS把node节点push到_cxq列表中，同一时刻可能有多个线程把自己的node节点push到_cxq列表中；<br>3、node节点push到_cxq列表之后，通过自旋尝试获取锁，如果还是没有获取到锁，则通过park将当前线程挂起，等待被唤醒，实现如下：<br><img src="http://image.winrains.cn/2019/10/20191030160142-1cdac.png" alt="img"><br>4、当该线程被唤醒时，会从挂起的点继续执行，通过<code>ObjectMonitor::TryLock</code>尝试获取锁，TryLock方法实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030160142-ad74f.png" alt="img"></p>
+<p>其本质就是通过CAS设置monitor的_owner字段为当前线程，如果CAS成功，则表示该线程获取了锁，跳出自旋操作，执行同步代码，否则继续被挂起；</p>
+<h3 id="monitor释放"><a href="#monitor释放" class="headerlink" title="monitor释放"></a>monitor释放</h3><p>当某个持有锁的线程执行完同步代码块时，会进行锁的释放，给其它线程机会执行同步代码，在HotSpot中，通过退出monitor的方式实现锁的释放，并通知被阻塞的线程，具体实现位于<code>ObjectMonitor::exit</code>方法中。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030160143-e7a29.png" alt="img"></p>
+<p>1、如果是重量级锁的释放，monitor中的_owner指向当前线程，即THREAD == _owner；<br>2、根据不同的策略（由QMode指定），从cxq或EntryList中获取头节点，通过<code>ObjectMonitor::ExitEpilog</code>方法唤醒该节点封装的线程，唤醒操作最终由unpark完成，实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030160144-e8ea4.png" alt="img"></p>
+<p>3、被唤醒的线程，继续执行monitor的竞争；<br>希望本文的分析可以让大家对synchronized关键字有更加深刻的理解。</p>
+<blockquote>
+<p>作者：占小狼</p>
+<p>来源：<a href="https://www.jianshu.com/p/c5058b6fe8e5" target="_blank" rel="noopener">https://www.jianshu.com/p/c5058b6fe8e5</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E6%BA%90%E7%A0%81/" rel="tag"># 源码</a>
+              <a href="/tags/synchronized/" rel="tag"># synchronized</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%882%EF%BC%89%EF%BC%9Ajava%E5%AF%B9%E8%B1%A1%E5%A4%B4%E5%AE%9E%E7%8E%B0/" rel="prev" title="JVM源码分析（2）：java对象头实现">
+      <i class="fa fa-chevron-left"></i> JVM源码分析（2）：java对象头实现
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%884%EF%BC%89%EF%BC%9AJava%E7%B1%BB%E7%9A%84%E5%8A%A0%E8%BD%BD%E8%BF%87%E7%A8%8B/" rel="next" title="JVM源码分析（4）：Java类的加载过程">
+      JVM源码分析（4）：Java类的加载过程 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#synchronized字节码实现"><span class="nav-number">1.</span> <span class="nav-text">synchronized字节码实现</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#偏向锁"><span class="nav-number">2.</span> <span class="nav-text">偏向锁</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#偏向锁的获取"><span class="nav-number">2.1.</span> <span class="nav-text">偏向锁的获取</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#偏向锁的撤销"><span class="nav-number">2.2.</span> <span class="nav-text">偏向锁的撤销</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#轻量级锁"><span class="nav-number">3.</span> <span class="nav-text">轻量级锁</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#轻量级锁的获取"><span class="nav-number">3.1.</span> <span class="nav-text">轻量级锁的获取</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#轻量级锁的释放"><span class="nav-number">3.2.</span> <span class="nav-text">轻量级锁的释放</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#重量级锁"><span class="nav-number">4.</span> <span class="nav-text">重量级锁</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#锁膨胀过程"><span class="nav-number">4.1.</span> <span class="nav-text">锁膨胀过程</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#monitor竞争"><span class="nav-number">4.2.</span> <span class="nav-text">monitor竞争</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#monitor等待"><span class="nav-number">4.3.</span> <span class="nav-text">monitor等待</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#monitor释放"><span class="nav-number">4.4.</span> <span class="nav-text">monitor释放</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

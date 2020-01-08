@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="缓存穿透缓存系统，一般流程都是按照key去查询缓存，如果不存在对应的value，就去后端系统（例如：持久层数据库）查找。如果key对应的value是一定不存在的，并且对该key并发请求量很大，就会对后端系统造成很大的压力，这就叫做缓存穿透。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="快速了解缓存穿透与缓存雪崩">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;%E5%BF%AB%E9%80%9F%E4%BA%86%E8%A7%A3%E7%BC%93%E5%AD%98%E7%A9%BF%E9%80%8F%E4%B8%8E%E7%BC%93%E5%AD%98%E9%9B%AA%E5%B4%A9&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="缓存穿透缓存系统，一般流程都是按照key去查询缓存，如果不存在对应的value，就去后端系统（例如：持久层数据库）查找。如果key对应的value是一定不存在的，并且对该key并发请求量很大，就会对后端系统造成很大的压力，这就叫做缓存穿透。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109151604-ba9c1.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109151604-55c7f.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109151605-507b4.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109151605-6fa0c.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109151606-314b8.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109151606-b08cd.png">
+<meta property="og:updated_time" content="2020-01-08T11:15:34.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109151604-ba9c1.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/%E5%BF%AB%E9%80%9F%E4%BA%86%E8%A7%A3%E7%BC%93%E5%AD%98%E7%A9%BF%E9%80%8F%E4%B8%8E%E7%BC%93%E5%AD%98%E9%9B%AA%E5%B4%A9/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>快速了解缓存穿透与缓存雪崩 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/%E5%BF%AB%E9%80%9F%E4%BA%86%E8%A7%A3%E7%BC%93%E5%AD%98%E7%A9%BF%E9%80%8F%E4%B8%8E%E7%BC%93%E5%AD%98%E9%9B%AA%E5%B4%A9/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          快速了解缓存穿透与缓存雪崩
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 19:15:34" itemprop="dateCreated datePublished" datetime="2020-01-08T19:15:34+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/Redis/" itemprop="url" rel="index">
+                    <span itemprop="name">Redis</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="缓存穿透"><a href="#缓存穿透" class="headerlink" title="缓存穿透"></a>缓存穿透</h1><p>缓存系统，一般流程都是按照key去查询缓存，如果不存在对应的value，就去后端系统（例如：持久层数据库）查找。如果key对应的value是一定不存在的，并且对该key并发请求量很大，就会对后端系统造成很大的压力，这就叫做缓存穿透。</p>
+<a id="more"></a>
+
+<p>正常请求：</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109151604-ba9c1.png" alt="img"></p>
+<p>正常请求</p>
+<p>缓存击穿时：</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109151604-55c7f.png" alt="img"></p>
+<p>缓存击穿</p>
+<h2 id="如何避免"><a href="#如何避免" class="headerlink" title="如何避免"></a>如何避免</h2><h3 id="1-缓存空结果"><a href="#1-缓存空结果" class="headerlink" title="1. 缓存空结果"></a>1. 缓存空结果</h3><p>对查询结果为空的情况进行缓存，缓存时间设置短一点，或者该key对应的数据insert了之后清理缓存。</p>
+<h3 id="2-布隆过滤器"><a href="#2-布隆过滤器" class="headerlink" title="2. 布隆过滤器"></a>2. 布隆过滤器</h3><p>采用布隆过滤器，guava有实现api，或者使用redis的bitmap。将所有可能存在的数据哈希到一个足够大的bitmap中，一个一定不存在的数据会被这个bitmap拦截掉，从而避免了对底层存储系统的查询压力。布隆过滤器对于固定的数据可以起到很好的效果，但是对于频繁更新的数据，布隆过滤器的构建会面临很多问题。另外布隆过滤器是有判断误差的，网上有很多详细的介绍，请读者自行搜索即可。</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109151605-507b4.png" alt="img"></p>
+<p>布隆过滤器</p>
+<h1 id="缓存雪崩"><a href="#缓存雪崩" class="headerlink" title="缓存雪崩"></a>缓存雪崩</h1><p>当缓存服务器重启或者大量缓存集中在某一个时间段失效，这样在失效的时候，也会给后端系统(比如DB)带来很大压力。</p>
+<h2 id="如何避免-1"><a href="#如何避免-1" class="headerlink" title="如何避免"></a>如何避免</h2><h3 id="1-互斥锁"><a href="#1-互斥锁" class="headerlink" title="1. 互斥锁"></a>1. 互斥锁</h3><p>在缓存失效后，通过加锁或者队列来控制读数据库写缓存的线程数量。比如对某个key只允许一个线程查询数据和写缓存，其他线程等待。</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109151605-6fa0c.png" alt="img"></p>
+<p>互斥锁</p>
+<p>如果是单机，可以用synchronized或者lock来处理，如果是分布式环境就需要使用分布式锁。<br>使用互斥锁，代码如下，仅适用redis2.6.1以后支持setnx的版本。在缓存失效的时候(判断拿出来的值为空)，不是立即去load db，而是先使用redis的setnx操作去set一个mutex key。当操作返回成功时，再进行load db的操作并回设缓存，否则，就重试整个get缓存的方法。</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109151606-314b8.jpeg" alt="img"></p>
+<p>互斥锁</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public String get(key) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">      List&lt;String&gt; resultList = (List&lt;String&gt;)redisTemplate.ops<span class="constructor">ForValue()</span>.get(key);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span>(<span class="module-access"><span class="module"><span class="identifier">CollectionUtils</span>.</span></span>is<span class="constructor">Empty(<span class="params">resultList</span>)</span>)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        final String mutexKey = key + <span class="string">"_lock"</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        boolean isLock = (Boolean) redisTemplate.execute(<span class="keyword">new</span> <span class="constructor">RedisCallback()</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            @Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            public Object <span class="keyword">do</span><span class="constructor">InRedis(RedisConnection <span class="params">connection</span>)</span> throws DataAccessException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">//只在键key不存在的情况下，将键key的值设置为value,若键key已经存在，则 SETNX 命令不做任何动作</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">//命令在设置成功时返回 1 ， 设置失败时返回 0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">                return connection.set<span class="constructor">NX(<span class="params">mutexKey</span>.<span class="params">getBytes</span>()</span>,<span class="string">"1"</span>.get<span class="constructor">Bytes()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        &#125;);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span>(isLock)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">//设置成1秒过期</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            redisTemplate.expire(mutexKey, <span class="number">1000</span>, TimeUnit.MILLISECONDS);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            resultList = get<span class="constructor">ValueBySql(<span class="params">key</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">            redisTemplate.ops<span class="constructor">ForValue()</span>.set(key, resultList, <span class="number">1000</span>, TimeUnit.SECONDS);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">            redisTemplate.delete(mutexKey);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        &#125;<span class="keyword">else</span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">//线程休息50毫秒后重试</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">Thread</span>.</span></span>sleep(<span class="number">50</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">            retryCount--;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"=====进行重试，当前次数:"</span> + retryCount);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span>(retryCount<span class="operator"> == </span><span class="number">0</span>)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">                <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"====这里发邮件或者记录下获取不到数据的日志，并为key设置一个空置防止重复获取"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">                List&lt;String&gt; <span class="built_in">list</span> = <span class="module-access"><span class="module"><span class="identifier">Lists</span>.</span></span><span class="keyword">new</span><span class="constructor">ArrayList(<span class="string">"no find"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">                redisTemplate.ops<span class="constructor">ForValue()</span>.set(key, <span class="built_in">list</span>, <span class="number">1000</span>, TimeUnit.SECONDS);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">                return <span class="built_in">list</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">            return get<span class="constructor">CacheSave2(<span class="params">key</span>,<span class="params">retryCount</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">    return resultList;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h3 id="2-设置随机过期时间"><a href="#2-设置随机过期时间" class="headerlink" title="2. 设置随机过期时间"></a>2. 设置随机过期时间</h3><p>不同的key，设置不同的过期时间，让缓存失效时间分散开，比如可以在原有的失效时间基础上增加一个随机值，比如1-5分钟随机，这样每一个缓存的过期时间的重复率就会降低。</p>
+<h3 id="3-设置二级缓存"><a href="#3-设置二级缓存" class="headerlink" title="3. 设置二级缓存"></a>3. 设置二级缓存</h3><p>做二级缓存，A1为原始缓存，A2为拷贝缓存，A1失效时，可以访问A2，A1缓存失效时间设置为短期，A2设置为长期</p>
+<h3 id="4-“永远不过期”"><a href="#4-“永远不过期”" class="headerlink" title="4. “永远不过期”"></a>4. “永远不过期”</h3><p>“永远不过期”包含两层意思：</p>
+<ol>
+<li>从redis上看，确实没有设置过期时间，这就保证了，不会出现热点key过期问题，也就是“物理”不过期。</li>
+<li>从功能上看，把过期时间存在key对应的value里，如果发现要过期了，通过一个后台的异步线程进行缓存的构建，也就是“逻辑”过期。</li>
+</ol>
+<p><img src="http://image.winrains.cn/2019/11/20191109151606-b08cd.png" alt="img"></p>
+<p>“永远不过期”</p>
+<p>这种方法对于性能非常友好，唯一不足的就是构建缓存时候，其余线程(非构建缓存的线程)可能访问的是老数据，但是对于一般的互联网功能来说这个还是可以忍受。</p>
+<h2 id="缓存预热"><a href="#缓存预热" class="headerlink" title="缓存预热"></a>缓存预热</h2><p>有效应对缓存的击穿和雪崩的一种方式是缓存预热。<br>缓存预热就是系统上线前，将相关的缓存数据直接加载到缓存系统。这样就可以避免在用户请求的时候，先查询数据库，然后再将数据缓存的问题，用户直接查询事先被预热的缓存数据。</p>
+<h3 id="解决思路"><a href="#解决思路" class="headerlink" title="解决思路"></a>解决思路</h3><ol>
+<li>直接写个缓存刷新页面，上线时手工操作下。</li>
+<li>数据量不大，可以在项目启动的时候自动进行加载。</li>
+<li>定时刷新缓存。</li>
+</ol>
+<h2 id="限流"><a href="#限流" class="headerlink" title="限流"></a>限流</h2><p>有效应对缓存的击穿和雪崩的另一种方式是限流。<br>在缓存失效后，通过队列来控制读数据库写缓存的线程数量。比如对某个key只允许一个线程查询数据和写缓存，其他线程等待。</p>
+<h3 id="常见的限流算法"><a href="#常见的限流算法" class="headerlink" title="常见的限流算法"></a>常见的限流算法</h3><ol>
+<li>固定时间窗口算法（计数器）</li>
+<li>滑动时间窗口算法</li>
+<li>令牌桶算法</li>
+<li>漏桶算法</li>
+</ol>
+<p>有关限流算法的详细介绍，请点击查看</p>
+<h3 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h3><p>缓存穿透、击穿和雪崩是以预防为主、补救为辅，而在应对缓存的问题其实也没有一个完全完美的方案，只有最适合自己业务系统的方案。</p>
+<blockquote>
+<p>作者：全菜工程师小辉</p>
+<p>来源：<a href="https://www.jianshu.com/p/096987e074e7" target="_blank" rel="noopener">https://www.jianshu.com/p/096987e074e7</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/NIO%E6%95%88%E7%8E%87%E9%AB%98%E7%9A%84%E5%8E%9F%E7%90%86%E4%B9%8B%E9%9B%B6%E6%8B%B7%E8%B4%9D%E4%B8%8E%E7%9B%B4%E6%8E%A5%E5%86%85%E5%AD%98%E6%98%A0%E5%B0%84/" rel="prev" title="NIO效率高的原理之零拷贝与直接内存映射">
+      <i class="fa fa-chevron-left"></i> NIO效率高的原理之零拷贝与直接内存映射
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/%E6%94%AF%E6%92%91%E7%99%BE%E4%B8%87%E5%B9%B6%E5%8F%91%E7%9A%84%E9%9B%B6%E6%8B%B7%E8%B4%9D%E6%8A%80%E6%9C%AF/" rel="next" title="支撑百万并发的零拷贝技术">
+      支撑百万并发的零拷贝技术 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#缓存穿透"><span class="nav-number">1.</span> <span class="nav-text">缓存穿透</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#如何避免"><span class="nav-number">1.1.</span> <span class="nav-text">如何避免</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1-缓存空结果"><span class="nav-number">1.1.1.</span> <span class="nav-text">1. 缓存空结果</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-布隆过滤器"><span class="nav-number">1.1.2.</span> <span class="nav-text">2. 布隆过滤器</span></a></li></ol></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#缓存雪崩"><span class="nav-number">2.</span> <span class="nav-text">缓存雪崩</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#如何避免-1"><span class="nav-number">2.1.</span> <span class="nav-text">如何避免</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1-互斥锁"><span class="nav-number">2.1.1.</span> <span class="nav-text">1. 互斥锁</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-设置随机过期时间"><span class="nav-number">2.1.2.</span> <span class="nav-text">2. 设置随机过期时间</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#3-设置二级缓存"><span class="nav-number">2.1.3.</span> <span class="nav-text">3. 设置二级缓存</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#4-“永远不过期”"><span class="nav-number">2.1.4.</span> <span class="nav-text">4. “永远不过期”</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#缓存预热"><span class="nav-number">2.2.</span> <span class="nav-text">缓存预热</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#解决思路"><span class="nav-number">2.2.1.</span> <span class="nav-text">解决思路</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#限流"><span class="nav-number">2.3.</span> <span class="nav-text">限流</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#常见的限流算法"><span class="nav-number">2.3.1.</span> <span class="nav-text">常见的限流算法</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#总结"><span class="nav-number">2.3.2.</span> <span class="nav-text">总结</span></a></li></ol></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

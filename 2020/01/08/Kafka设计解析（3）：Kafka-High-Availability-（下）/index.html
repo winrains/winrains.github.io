@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="摘要本文在上篇文章基础上，更加深入讲解了Kafka的HA机制，主要阐述了HA相关各种场景，如Broker failover，Controller failover，Topic创建&#x2F;删除，Broker启动，Follower从Leader fetch数据等详细处理过程。同时介绍了Kafka提供的与Replication相关的工具，如重新分配Partition等。">
+<meta name="keywords" content="kafka">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Kafka设计解析（3）：Kafka High Availability （下）">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;Kafka%E8%AE%BE%E8%AE%A1%E8%A7%A3%E6%9E%90%EF%BC%883%EF%BC%89%EF%BC%9AKafka-High-Availability-%EF%BC%88%E4%B8%8B%EF%BC%89&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="摘要本文在上篇文章基础上，更加深入讲解了Kafka的HA机制，主要阐述了HA相关各种场景，如Broker failover，Controller failover，Topic创建&#x2F;删除，Broker启动，Follower从Leader fetch数据等详细处理过程。同时介绍了Kafka提供的与Replication相关的工具，如重新分配Partition等。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;7f248-kafka_broker_failover.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;4cc7d-LeaderAndIsrRequest.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;84080-LeaderAndIsrResponse.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;6d618-kafka_create_topic.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;687fb-Acceptor_run.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;a7642-LeaderAndIsrRequest_Flow_Chart.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;26534-UpdateMetadataRequest.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;ec2c6-FetchRequest.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;8fa01-FetchResponse.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;b5bee-preferred_topic_test_1.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;4bd2f-preferred_topic_test_2.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;3117d-preferred_topic_test_3.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;f19f4-preferred_topic_test_4.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;43350-preferred_topic_test_5.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;b463f-reassign_1.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;e3487-reassign_2.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;91148-reassign_3.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;83f72-reassign_4.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;71ba3-reassign_5.png">
+<meta property="og:updated_time" content="2020-01-08T03:51:53.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;7f248-kafka_broker_failover.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/Kafka%E8%AE%BE%E8%AE%A1%E8%A7%A3%E6%9E%90%EF%BC%883%EF%BC%89%EF%BC%9AKafka-High-Availability-%EF%BC%88%E4%B8%8B%EF%BC%89/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Kafka设计解析（3）：Kafka High Availability （下） | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/Kafka%E8%AE%BE%E8%AE%A1%E8%A7%A3%E6%9E%90%EF%BC%883%EF%BC%89%EF%BC%9AKafka-High-Availability-%EF%BC%88%E4%B8%8B%EF%BC%89/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Kafka设计解析（3）：Kafka High Availability （下）
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 11:51:53" itemprop="dateCreated datePublished" datetime="2020-01-08T11:51:53+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">其它技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/%E6%B6%88%E6%81%AF%E9%98%9F%E5%88%97/" itemprop="url" rel="index">
+                    <span itemprop="name">消息队列</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="摘要"><a href="#摘要" class="headerlink" title="摘要"></a>摘要</h1><p>本文在上篇文章基础上，更加深入讲解了Kafka的HA机制，主要阐述了HA相关各种场景，如Broker failover，Controller failover，Topic创建/删除，Broker启动，Follower从Leader fetch数据等详细处理过程。同时介绍了Kafka提供的与Replication相关的工具，如重新分配Partition等。</p>
+<a id="more"></a>
+
+<h1 id="Broker-Failover过程"><a href="#Broker-Failover过程" class="headerlink" title="Broker Failover过程"></a>Broker Failover过程</h1><h2 id="Controller对Broker-failure的处理过程"><a href="#Controller对Broker-failure的处理过程" class="headerlink" title="Controller对Broker failure的处理过程"></a>Controller对Broker failure的处理过程</h2><ol>
+<li>Controller在Zookeeper的<code>/brokers/ids</code>节点上注册Watch。一旦有Broker宕机（本文用宕机代表任何让Kafka认为其Broker die的情景，包括但不限于机器断电，网络不可用，GC导致的Stop The World，进程crash等），其在Zookeeper对应的Znode会自动被删除，Zookeeper会fire Controller注册的Watch，Controller即可获取最新的幸存的Broker列表。</li>
+<li>Controller决定set_p，该集合包含了宕机的所有Broker上的所有Partition。</li>
+<li>对set_p中的每一个Partition：<br>3.1 从<code>/brokers/topics/[topic]/partitions/[partition]/state</code>读取该Partition当前的ISR。<br>3.2 决定该Partition的新Leader。如果当前ISR中有至少一个Replica还幸存，则选择其中一个作为新Leader，新的ISR则包含当前ISR中所有幸存的Replica。否则选择该Partition中任意一个幸存的Replica作为新的Leader以及ISR（该场景下可能会有潜在的数据丢失）。如果该Partition的所有Replica都宕机了，则将新的Leader设置为-1。<br>3.3 将新的Leader，ISR和新的<code>leader_epoch</code>及<code>controller_epoch</code>写入<code>/brokers/topics/[topic]/partitions/[partition]/state</code>。注意，该操作只有Controller版本在3.1至3.3的过程中无变化时才会执行，否则跳转到3.1。</li>
+<li>直接通过RPC向set_p相关的Broker发送LeaderAndISRRequest命令。Controller可以在一个RPC操作中发送多个命令从而提高效率。<br>Broker failover顺序图如下所示。<br><a href="http://image.winrains.cn/2019/10/7f248-kafka_broker_failover.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/7f248-kafka_broker_failover.png" alt="broker failover sequence diagram "></a></li>
+</ol>
+<p>LeaderAndIsrRequest结构如下<br><a href="http://image.winrains.cn/2019/10/4cc7d-LeaderAndIsrRequest.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/4cc7d-LeaderAndIsrRequest.png" alt="LeaderAndIsrRequest"></a><br>LeaderAndIsrResponse结构如下<br><a href="http://image.winrains.cn/2019/10/84080-LeaderAndIsrResponse.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/84080-LeaderAndIsrResponse.png" alt="LeaderAndIsrResponse"></a></p>
+<h2 id="创建-删除Topic"><a href="#创建-删除Topic" class="headerlink" title="创建/删除Topic"></a>创建/删除Topic</h2><ol>
+<li>Controller在Zookeeper的<code>/brokers/topics</code>节点上注册Watch，一旦某个Topic被创建或删除，则Controller会通过Watch得到新创建/删除的Topic的Partition/Replica分配。</li>
+<li>对于删除Topic操作，Topic工具会将该Topic名字存于<code>/admin/delete_topics</code>。若<code>delete.topic.enable</code>为true，则Controller注册在<code>/admin/delete_topics</code>上的Watch被fire，Controller通过回调向对应的Broker发送StopReplicaRequest；若为false则Controller不会在<code>/admin/delete_topics</code>上注册Watch，也就不会对该事件作出反应，此时Topic操作只被记录而不会被执行。</li>
+<li>对于创建Topic操作，Controller从<code>/brokers/ids</code>读取当前所有可用的Broker列表，对于set_p中的每一个Partition：<br>3.1 从分配给该Partition的所有Replica（称为AR）中任选一个可用的Broker作为新的Leader，并将AR设置为新的ISR（因为该Topic是新创建的，所以AR中所有的Replica都没有数据，可认为它们都是同步的，也即都在ISR中，任意一个Replica都可作为Leader）<br>3.2 将新的Leader和ISR写入<code>/brokers/topics/[topic]/partitions/[partition]</code></li>
+<li>直接通过RPC向相关的Broker发送LeaderAndISRRequest。<br>创建Topic顺序图如下所示。<br><a href="http://image.winrains.cn/2019/10/6d618-kafka_create_topic.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/6d618-kafka_create_topic.png" alt="create topic sequence diagram"></a></li>
+</ol>
+<h2 id="Broker响应请求流程"><a href="#Broker响应请求流程" class="headerlink" title="Broker响应请求流程"></a>Broker响应请求流程</h2><p>Broker通过<code>kafka.network.SocketServer</code>及相关模块接受各种请求并作出响应。整个网络通信模块基于Java NIO开发，并采用Reactor模式，其中包含1个Acceptor负责接受客户请求，N个Processor负责读写数据，M个Handler处理业务逻辑。<br>Acceptor的主要职责是监听并接受客户端（请求发起方，包括但不限于Producer，Consumer，Controller，Admin Tool）的连接请求，并建立和客户端的数据传输通道，然后为该客户端指定一个Processor，至此它对该客户端该次请求的任务就结束了，它可以去响应下一个客户端的连接请求了。其核心代码如下。<br><a href="http://image.winrains.cn/2019/10/687fb-Acceptor_run.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/687fb-Acceptor_run.png" alt="Kafka SocketServer Acceptor_run"></a><br>Processor主要负责从客户端读取数据并将响应返回给客户端，它本身并不处理具体的业务逻辑，并且其内部维护了一个队列来保存分配给它的所有SocketChannel。Processor的run方法会循环从队列中取出新的SocketChannel并将其<code>SelectionKey.OP_READ</code>注册到selector上，然后循环处理已就绪的读（请求）和写（响应）。Processor读取完数据后，将其封装成Request对象并将其交给RequestChannel。<br>RequestChannel是Processor和KafkaRequestHandler交换数据的地方，它包含一个队列requestQueue用来存放Processor加入的Request，KafkaRequestHandler会从里面取出Request来处理；同时它还包含一个respondQueue，用来存放KafkaRequestHandler处理完Request后返还给客户端的Response。<br>Processor会通过processNewResponses方法依次将requestChannel中responseQueue保存的Response取出，并将对应的<code>SelectionKey.OP_WRITE</code>事件注册到selector上。当selector的select方法返回时，对检测到的可写通道，调用write方法将Response返回给客户端。<br>KafkaRequestHandler循环从RequestChannel中取Request并交给<code>kafka.server.KafkaApis</code>处理具体的业务逻辑。</p>
+<h2 id="LeaderAndIsrRequest响应过程"><a href="#LeaderAndIsrRequest响应过程" class="headerlink" title="LeaderAndIsrRequest响应过程"></a>LeaderAndIsrRequest响应过程</h2><p>对于收到的LeaderAndIsrRequest，Broker主要通过ReplicaManager的becomeLeaderOrFollower处理，流程如下：</p>
+<ol>
+<li>若请求中controllerEpoch小于当前最新的controllerEpoch，则直接返回ErrorMapping.StaleControllerEpochCode。</li>
+<li>对于请求中partitionStateInfos中的每一个元素，即（(topic, partitionId), partitionStateInfo)：<br>2.1 若partitionStateInfo中的leader epoch大于当前ReplicManager中存储的(topic, partitionId)对应的partition的leader epoch，则：<br>2.1.1 若当前brokerid（或者说replica id）在partitionStateInfo中，则将该partition及partitionStateInfo存入一个名为partitionState的HashMap中<br>2.1.2否则说明该Broker不在该Partition分配的Replica list中，将该信息记录于log中<br>2.2否则将相应的Error code（ErrorMapping.StaleLeaderEpochCode）存入Response中</li>
+<li>筛选出partitionState中Leader与当前Broker ID相等的所有记录存入partitionsTobeLeader中，其它记录存入partitionsToBeFollower中。</li>
+<li>若partitionsTobeLeader不为空，则对其执行makeLeaders方。</li>
+<li>若partitionsToBeFollower不为空，则对其执行makeFollowers方法。</li>
+<li>若highwatermak线程还未启动，则将其启动，并将hwThreadInitialized设为true。</li>
+<li>关闭所有Idle状态的Fetcher。</li>
+</ol>
+<p>LeaderAndIsrRequest处理过程如下图所示<br><a href="http://image.winrains.cn/2019/10/a7642-LeaderAndIsrRequest_Flow_Chart.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/a7642-LeaderAndIsrRequest_Flow_Chart.png" alt="LeaderAndIsrRequest Flow Chart"></a></p>
+<h2 id="Broker启动过程"><a href="#Broker启动过程" class="headerlink" title="Broker启动过程"></a>Broker启动过程</h2><p>Broker启动后首先根据其ID在Zookeeper的<code>/brokers/ids</code>zonde下创建临时子节点（<a href="http://zookeeper.apache.org/doc/trunk/zookeeperOver.html#Nodes+and+ephemeral+nodes" target="_blank" rel="noopener">Ephemeral node</a>），创建成功后Controller的ReplicaStateMachine注册其上的Broker Change Watch会被fire，从而通过回调KafkaController.onBrokerStartup方法完成以下步骤：</p>
+<ol>
+<li>向所有新启动的Broker发送UpdateMetadataRequest，其定义如下。<br><a href="http://image.winrains.cn/2019/10/26534-UpdateMetadataRequest.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/26534-UpdateMetadataRequest.png" alt="UpdateMetadataRequest"></a></li>
+<li>将新启动的Broker上的所有Replica设置为OnlineReplica状态，同时这些Broker会为这些Partition启动high watermark线程。</li>
+<li>通过partitionStateMachine触发OnlinePartitionStateChange。</li>
+</ol>
+<h2 id="Controller-Failover"><a href="#Controller-Failover" class="headerlink" title="Controller Failover"></a>Controller Failover</h2><p>Controller也需要Failover。每个Broker都会在Controller Path (<code>/controller</code>)上注册一个Watch。当前Controller失败时，对应的Controller Path会自动消失（因为它是Ephemeral Node），此时该Watch被fire，所有“活”着的Broker都会去竞选成为新的Controller（创建新的Controller Path），但是只会有一个竞选成功（这点由Zookeeper保证）。竞选成功者即为新的Leader，竞选失败者则重新在新的Controller Path上注册Watch。因为<a href="http://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#ch_zkWatches" target="_blank" rel="noopener">Zookeeper的Watch是一次性的，被fire一次之后即失效</a>，所以需要重新注册。<br>Broker成功竞选为新Controller后会触发KafkaController.onControllerFailover方法，并在该方法中完成如下操作：</p>
+<ol>
+<li>读取并增加Controller Epoch。</li>
+<li>在ReassignedPartitions Path(<code>/admin/reassign_partitions</code>)上注册Watch。</li>
+<li>在PreferredReplicaElection Path(<code>/admin/preferred_replica_election</code>)上注册Watch。</li>
+<li>通过partitionStateMachine在Broker Topics Patch(<code>/brokers/topics</code>)上注册Watch。</li>
+<li>若<code>delete.topic.enable</code>设置为true（默认值是false），则partitionStateMachine在Delete Topic Patch(<code>/admin/delete_topics</code>)上注册Watch。</li>
+<li>通过replicaStateMachine在Broker Ids Patch(<code>/brokers/ids</code>)上注册Watch。</li>
+<li>初始化ControllerContext对象，设置当前所有Topic，“活”着的Broker列表，所有Partition的Leader及ISR等。</li>
+<li>启动replicaStateMachine和partitionStateMachine。</li>
+<li>将brokerState状态设置为RunningAsController。</li>
+<li>将每个Partition的Leadership信息发送给所有“活”着的Broker。</li>
+<li>若<code>auto.leader.rebalance.enable</code>配置为true（默认值是true），则启动partition-rebalance线程。</li>
+<li>若<code>delete.topic.enable</code>设置为true且Delete Topic Patch(<code>/admin/delete_topics</code>)中有值，则删除相应的Topic。</li>
+</ol>
+<h2 id="Partition重新分配"><a href="#Partition重新分配" class="headerlink" title="Partition重新分配"></a>Partition重新分配</h2><p>管理工具发出重新分配Partition请求后，会将相应信息写到<code>/admin/reassign_partitions</code>上，而该操作会触发ReassignedPartitionsIsrChangeListener，从而通过执行回调函数KafkaController.onPartitionReassignment来完成以下操作：</p>
+<ol>
+<li>将Zookeeper中的AR（Current Assigned Replicas）更新为OAR（Original list of replicas for partition） + RAR（Reassigned replicas）。</li>
+<li>强制更新Zookeeper中的leader epoch，向AR中的每个Replica发送LeaderAndIsrRequest。</li>
+<li>将RAR - OAR中的Replica设置为NewReplica状态。</li>
+<li>等待直到RAR中所有的Replica都与其Leader同步。</li>
+<li>将RAR中所有的Replica都设置为OnlineReplica状态。</li>
+<li>将Cache中的AR设置为RAR。</li>
+<li>若Leader不在RAR中，则从RAR中重新选举出一个新的Leader并发送LeaderAndIsrRequest。若新的Leader不是从RAR中选举而出，则还要增加Zookeeper中的leader epoch。</li>
+<li>将OAR - RAR中的所有Replica设置为OfflineReplica状态，该过程包含两部分。第一，将Zookeeper上ISR中的OAR - RAR移除并向Leader发送LeaderAndIsrRequest从而通知这些Replica已经从ISR中移除；第二，向OAR - RAR中的Replica发送StopReplicaRequest从而停止不再分配给该Partition的Replica。</li>
+<li>将OAR - RAR中的所有Replica设置为NonExistentReplica状态从而将其从磁盘上删除。</li>
+<li>将Zookeeper中的AR设置为RAR。</li>
+<li>删除<code>/admin/reassign_partition</code>。<br><strong><em>注意\</em></strong>：最后一步才将Zookeeper中的AR更新，因为这是唯一一个持久存储AR的地方，如果Controller在这一步之前crash，新的Controller仍然能够继续完成该过程。<br>以下是Partition重新分配的案例，OAR = ｛1，2，3｝，RAR = ｛4，5，6｝，Partition重新分配过程中Zookeeper中的AR和Leader/ISR路径如下</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>AR</th>
+<th>leader/isr</th>
+<th>Step</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>{1,2,3}</td>
+<td>1/{1,2,3}</td>
+<td>(initial state)</td>
+</tr>
+<tr>
+<td>{1,2,3,4,5,6}</td>
+<td>1/{1,2,3}</td>
+<td>(step 2)</td>
+</tr>
+<tr>
+<td>{1,2,3,4,5,6}</td>
+<td>1/{1,2,3,4,5,6}</td>
+<td>(step 4)</td>
+</tr>
+<tr>
+<td>{1,2,3,4,5,6}</td>
+<td>4/{1,2,3,4,5,6}</td>
+<td>(step 7)</td>
+</tr>
+<tr>
+<td>{1,2,3,4,5,6}</td>
+<td>4/{4,5,6}</td>
+<td>(step 8)</td>
+</tr>
+<tr>
+<td>{4,5,6}</td>
+<td>4/{4,5,6}</td>
+<td>(step 10)</td>
+</tr>
+</tbody></table>
+<h2 id="Follower从Leader-Fetch数据"><a href="#Follower从Leader-Fetch数据" class="headerlink" title="Follower从Leader Fetch数据"></a>Follower从Leader Fetch数据</h2><p>Follower通过向Leader发送FetchRequest获取消息，FetchRequest结构如下<br><a href="http://image.winrains.cn/2019/10/ec2c6-FetchRequest.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/ec2c6-FetchRequest.png" alt="FetchRequest"></a><br>从FetchRequest的结构可以看出，每个Fetch请求都要指定最大等待时间和最小获取字节数，以及由TopicAndPartition和PartitionFetchInfo构成的Map。实际上，Follower从Leader数据和Consumer从Broker Fetch数据，都是通过FetchRequest请求完成，所以在FetchRequest结构中，其中一个字段是clientID，并且其默认值是ConsumerConfig.DefaultClientId。<br>Leader收到Fetch请求后，Kafka通过KafkaApis.handleFetchRequest响应该请求，响应过程如下：</p>
+<ol>
+<li>replicaManager根据请求读出数据存入dataRead中。</li>
+<li>如果该请求来自Follower则更新其相应的LEO（log end offset）以及相应Partition的High Watermark</li>
+<li>根据dataRead算出可读消息长度（单位为字节）并存入bytesReadable中。</li>
+<li>满足下面4个条件中的1个，则立即将相应的数据返回</li>
+</ol>
+<ul>
+<li>Fetch请求不希望等待，即fetchRequest.macWait &lt;= 0</li>
+<li>Fetch请求不要求一定能取到消息，即fetchRequest.numPartitions &lt;= 0，也即requestInfo为空</li>
+<li>有足够的数据可供返回，即bytesReadable &gt;= fetchRequest.minBytes</li>
+<li>读取数据时发生异常</li>
+</ul>
+<ol>
+<li>若不满足以上4个条件，FetchRequest将不会立即返回，并将该请求封装成DelayedFetch。检查该DeplayedFetch是否满足，若满足则返回请求，否则将该请求加入Watch列表</li>
+</ol>
+<p>Leader通过以FetchResponse的形式将消息返回给Follower，FetchResponse结构如下<br><a href="http://image.winrains.cn/2019/10/8fa01-FetchResponse.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/8fa01-FetchResponse.png" alt="FetchResponse"></a><br>#Replication工具</p>
+<h2 id="Topic-Tool"><a href="#Topic-Tool" class="headerlink" title="Topic Tool"></a>Topic Tool</h2><p><code>$KAFKA_HOME/bin/kafka-topics.sh</code>，该工具可用于创建、删除、修改、查看某个Topic，也可用于列出所有Topic。另外，该工具还可修改以下配置。</p>
+<figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">unclean</span><span class="selector-class">.leader</span><span class="selector-class">.election</span><span class="selector-class">.enable</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">delete</span><span class="selector-class">.retention</span><span class="selector-class">.ms</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">segment</span><span class="selector-class">.jitter</span><span class="selector-class">.ms</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">retention</span><span class="selector-class">.ms</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">flush</span><span class="selector-class">.ms</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">segment</span><span class="selector-class">.bytes</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">flush</span><span class="selector-class">.messages</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">segment</span><span class="selector-class">.ms</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">retention</span><span class="selector-class">.bytes</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">cleanup</span><span class="selector-class">.policy</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">segment</span><span class="selector-class">.index</span><span class="selector-class">.bytes</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">min</span><span class="selector-class">.cleanable</span><span class="selector-class">.dirty</span><span class="selector-class">.ratio</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">max</span><span class="selector-class">.message</span><span class="selector-class">.bytes</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">file</span><span class="selector-class">.delete</span><span class="selector-class">.delay</span><span class="selector-class">.ms</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">min</span><span class="selector-class">.insync</span><span class="selector-class">.replicas</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">index</span><span class="selector-class">.interval</span><span class="selector-class">.bytes</span></span></pre></td></tr></table></figure>
+
+<h2 id="Replica-Verification-Tool"><a href="#Replica-Verification-Tool" class="headerlink" title="Replica Verification Tool"></a>Replica Verification Tool</h2><p><code>$KAFKA_HOME/bin/kafka-replica-verification.sh</code>，该工具用来验证所指定的一个或多个Topic下每个Partition对应的所有Replica是否都同步。可通过<code>topic-white-list</code>这一参数指定所需要验证的所有Topic，支持正则表达式。</p>
+<h2 id="Preferred-Replica-Leader-Election-Tool"><a href="#Preferred-Replica-Leader-Election-Tool" class="headerlink" title="Preferred Replica Leader Election Tool"></a>Preferred Replica Leader Election Tool</h2><p><strong><em>用途\</em></strong><br>有了Replication机制后，每个Partition可能有多个备份。某个Partition的Replica列表叫作AR（Assigned Replicas），AR中的第一个Replica即为“Preferred Replica”。创建一个新的Topic或者给已有Topic增加Partition时，Kafka保证Preferred Replica被均匀分布到集群中的所有Broker上。理想情况下，Preferred Replica会被选为Leader。以上两点保证了所有Partition的Leader被均匀分布到了集群当中，这一点非常重要，因为所有的读写操作都由Leader完成，若Leader分布过于集中，会造成集群负载不均衡。但是，随着集群的运行，该平衡可能会因为Broker的宕机而被打破，该工具就是用来帮助恢复Leader分配的平衡。<br>事实上，每个Topic从失败中恢复过来后，它默认会被设置为Follower角色，除非某个Partition的Replica全部宕机，而当前Broker是该Partition的AR中第一个恢复回来的Replica。因此，某个Partition的Leader（Preferred Replica）宕机并恢复后，它很可能不再是该Partition的Leader，但仍然是Preferred Replica。<br><strong><em>原理\</em></strong></p>
+<ol>
+<li>在Zookeeper上创建<code>/admin/preferred_replica_election</code>节点，并存入需要调整Preferred Replica的Partition信息。</li>
+<li>Controller一直Watch该节点，一旦该节点被创建，Controller会收到通知，并获取该内容。</li>
+<li>Controller读取Preferred Replica，如果发现该Replica当前并非是Leader并且它在该Partition的ISR中，Controller向该Replica发送LeaderAndIsrRequest，使该Replica成为Leader。如果该Replica当前并非是Leader，且不在ISR中，Controller为了保证没有数据丢失，并不会将其设置为Leader。</li>
+</ol>
+<p><strong><em>用法\</em></strong><br><code>$KAFKA_HOME/bin/kafka-preferred-replica-election.sh --zookeeper localhost:2181</code><br>在包含8个Broker的Kafka集群上，创建1个名为topic1，replication-factor为3，Partition数为8的Topic，使用<code>$KAFKA_HOME/bin/kafka-topics.sh --describe --topic topic1 --zookeeper localhost:2181</code>命令查看其Partition/Replica分布。<br>查询结果如下图所示，从图中可以看到，Kafka将所有Replica均匀分布到了整个集群，并且Leader也均匀分布。<br><a href="http://image.winrains.cn/2019/10/b5bee-preferred_topic_test_1.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/b5bee-preferred_topic_test_1.png" alt="preferred_topic_test_1"></a><br>手动停止部分Broker，topic1的Partition/Replica分布如下图所示。从图中可以看到，由于Broker 1/2/4都被停止，Partition 0的Leader由原来的1变为3，Partition 1的Leader由原来的2变为5，Partition 2的Leader由原来的3变为6，Partition 3的Leader由原来的4变为7。<br><a href="http://image.winrains.cn/2019/10/4bd2f-preferred_topic_test_2.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/4bd2f-preferred_topic_test_2.png" alt="preferred_topic_test_2"></a><br>再重新启动ID为1的Broker，topic1的Partition/Replica分布如下。可以看到，虽然Broker 1已经启动（Partition 0和Partition5的ISR中有1），但是1并不是任何一个Parititon的Leader，而Broker 5/6/7都是2个Partition的Leader，即Leader的分布不均衡——一个Broker最多是2个Partition的Leader，而最少是0个Partition的Leader。<br><a href="http://image.winrains.cn/2019/10/3117d-preferred_topic_test_3.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/3117d-preferred_topic_test_3.png" alt="preferred_topic_test_3"></a><br>运行该工具后，topic1的Partition/Replica分布如下图所示。由图可见，除了Partition 1和Partition 3由于Broker 2和Broker 4还未启动，所以其Leader不是其Preferred Repliac外，其它所有Partition的Leader都是其Preferred Replica。同时，与运行该工具前相比，Leader的分配更均匀——一个Broker最多是2个Parittion的Leader，最少是1个Partition的Leader。<br><a href="http://image.winrains.cn/2019/10/f19f4-preferred_topic_test_4.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/f19f4-preferred_topic_test_4.png" alt="preferred_topic_test_4"></a><br>启动Broker 2和Broker 4，Leader分布与上一步相比并未变化，如下图所示。<br><a href="http://image.winrains.cn/2019/10/43350-preferred_topic_test_5.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/43350-preferred_topic_test_5.png" alt="preferred_topic_test_5"></a><br>再次运行该工具，所有Partition的Leader都由其Preferred Replica承担，Leader分布更均匀——每个Broker承担1个Partition的Leader角色。<br>除了手动运行该工具使Leader分配均匀外，Kafka还提供了自动平衡Leader分配的功能，该功能可通过将<code>auto.leader.rebalance.enable</code>设置为true开启，它将周期性检查Leader分配是否平衡，若不平衡度超过一定阈值则自动由Controller尝试将各Partition的Leader设置为其Preferred Replica。检查周期由<code>leader.imbalance.check.interval.seconds</code>指定，不平衡度阈值由<code>leader.imbalance.per.broker.percentage</code>指定。</p>
+<h2 id="Kafka-Reassign-Partitions-Tool"><a href="#Kafka-Reassign-Partitions-Tool" class="headerlink" title="Kafka Reassign Partitions Tool"></a>Kafka Reassign Partitions Tool</h2><p><strong><em>用途\</em></strong><br>该工具的设计目标与Preferred Replica Leader Election Tool有些类似，都旨在促进Kafka集群的负载均衡。不同的是，Preferred Replica Leader Election只能在Partition的AR范围内调整其Leader，使Leader分布均匀，而该工具还可以调整Partition的AR。<br>Follower需要从Leader Fetch数据以保持与Leader同步，所以仅仅保持Leader分布的平衡对整个集群的负载均衡来说是不够的。另外，生产环境下，随着负载的增大，可能需要给Kafka集群扩容。向Kafka集群中增加Broker非常简单方便，但是对于已有的Topic，并不会自动将其Partition迁移到新加入的Broker上，此时可用该工具达到此目的。某些场景下，实际负载可能远小于最初预期负载，此时可用该工具将分布在整个集群上的Partition重装分配到某些机器上，然后可以停止不需要的Broker从而实现节约资源的目的。<br>需要说明的是，该工具不仅可以调整Partition的AR位置，还可调整其AR数量，即改变该Topic的replication factor。<br><strong><em>原理\</em></strong><br>该工具只负责将所需信息存入Zookeeper中相应节点，然后退出，不负责相关的具体操作，所有调整都由Controller完成。</p>
+<ol>
+<li>在Zookeeper上创建<code>/admin/reassign_partitions</code>节点，并存入目标Partition列表及其对应的目标AR列表。</li>
+<li>Controller注册在<code>/admin/reassign_partitions</code>上的Watch被fire，Controller获取该列表。</li>
+<li>对列表中的所有Partition，Controller会做如下操作：</li>
+</ol>
+<ul>
+<li>启动<code>RAR - AR</code>中的Replica，即新分配的Replica。（RAR = Reassigned Replicas， AR = Assigned Replicas）</li>
+<li>等待新的Replica与Leader同步</li>
+<li>如果Leader不在RAR中，从RAR中选出新的Leader</li>
+<li>停止并删除<code>AR - RAR</code>中的Replica，即不再需要的Replica</li>
+<li>删除<code>/admin/reassign_partitions</code>节点</li>
+</ul>
+<p><strong><em>用法\</em></strong><br>该工具有三种使用模式</p>
+<ul>
+<li>generate模式，给定需要重新分配的Topic，自动生成reassign plan（并不执行）</li>
+<li>execute模式，根据指定的reassign plan重新分配Partition</li>
+<li>verify模式，验证重新分配Partition是否成功</li>
+</ul>
+<p>下面这个例子将使用该工具将Topic的所有Partition重新分配到Broker 4/5/6/7上，步骤如下：</p>
+<ol>
+<li><p>使用generate模式，生成reassign plan。指定需要重新分配的Topic （{“topics”:[{“topic”:”topic1”}],”version”:1}），并存入</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">/tmp/topics-<span class="keyword">to</span>-<span class="keyword">move</span>.json</span></pre></td></tr></table></figure>
+
+<p>文件中，然后执行</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"> </span></pre></td></tr></table></figure>
+
+<figure class="highlight vim"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">$KAFKA_HOME/bin/kafka-reassign-partitions.<span class="keyword">sh</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  --zookeeper localhos<span class="variable">t:2181</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  --topics-<span class="keyword">to</span>-<span class="keyword">move</span>-json-<span class="keyword">file</span> /tmp/topics-<span class="keyword">to</span>-<span class="keyword">move</span>.json</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  --broker-<span class="keyword">list</span> <span class="string">"4,5,6,7"</span> --generate</span></pre></td></tr></table></figure>
+
+<p>结果如下图所示</p>
+</li>
+</ol>
+<p><a href="http://image.winrains.cn/2019/10/b463f-reassign_1.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/b463f-reassign_1.png" alt="reassign_1"></a><br>2.　使用execute模式，执行reassign plan<br>将上一步生成的reassignment plan存入<code>/tmp/reassign-plan.json</code>文件中，并执行</p>
+<figure class="highlight jboss-cli"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">$KAFKA_HOME/bin/kafka-reassign-partitions.sh</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="params">--zookeeper</span> localhost<span class="function">:2181</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="params">--reassignment-json-file</span> <span class="string">/tmp/reassign-plan.json</span> <span class="params">--execute</span></span></pre></td></tr></table></figure>
+
+<p><a href="http://image.winrains.cn/2019/10/e3487-reassign_2.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/e3487-reassign_2.png" alt="reassign_2"></a><br>此时，Zookeeper上<code>/admin/reassign_partitions</code>节点被创建，且其值与<code>/tmp/reassign-plan.json</code>文件的内容一致。<br><a href="http://image.winrains.cn/2019/10/91148-reassign_3.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/91148-reassign_3.png" alt="reassign_3"></a><br>3.　使用verify模式，验证reassign是否完成。执行verify命令</p>
+<figure class="highlight jboss-cli"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">$KAFKA_HOME/bin/kafka-reassign-partitions.sh</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="params">--zookeeper</span> localhost<span class="function">:2181</span> <span class="params">--verify</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="params">--reassignment-json-file</span> <span class="string">/tmp/reassign-plan.json</span></span></pre></td></tr></table></figure>
+
+<p>结果如下所示，从图中可看出topic1的所有Partititon都重新分配成功。<br><a href="http://image.winrains.cn/2019/10/83f72-reassign_4.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/83f72-reassign_4.png" alt="reassign_4"></a><br>接下来用Topic Tool再次验证。</p>
+<figure class="highlight brainfuck"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">bin/kafka</span><span class="literal">-</span><span class="comment">topics</span><span class="string">.</span><span class="comment">sh</span> --<span class="comment">zookeeper</span> <span class="comment">localhost:2181</span> --<span class="comment">describe</span> --<span class="comment">topic</span> <span class="comment">topic1</span></span></pre></td></tr></table></figure>
+
+<p>结果如下图所示，从图中可看出topic1的所有Partition都被重新分配到Broker 4/5/6/7，且每个Partition的AR与reassign plan一致。<br><a href="http://image.winrains.cn/2019/10/71ba3-reassign_5.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/71ba3-reassign_5.png" alt="reassign_5"></a><br>需要说明的是，在使用execute之前，并不一定要使用generate模式自动生成reassign plan，使用generate模式只是为了方便。事实上，某些场景下，generate模式生成的reassign plan并不一定能满足需求，此时用户可以自己设置reassign plan。</p>
+<h2 id="State-Change-Log-Merge-Tool"><a href="#State-Change-Log-Merge-Tool" class="headerlink" title="State Change Log Merge Tool"></a>State Change Log Merge Tool</h2><p><strong><em>用途\</em></strong><br>该工具旨在从整个集群的Broker上收集状态改变日志，并生成一个集中的格式化的日志以帮助诊断状态改变相关的故障。每个Broker都会将其收到的状态改变相关的的指令存于名为<code>state-change.log</code>的日志文件中。某些情况下，Partition的Leader Election可能会出现问题，此时我们需要对整个集群的状态改变有个全局的了解从而诊断故障并解决问题。该工具将集群中相关的<code>state-change.log</code>日志按时间顺序合并，同时支持用户输入时间范围和目标Topic及Partition作为过滤条件，最终将格式化的结果输出。<br><strong><em>用法\</em></strong></p>
+<figure class="highlight lsl"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">bin/kafka-run-class.sh kafka.tools.StateChangeLogMerger</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  --logs /opt/kafka_2<span class="number">.11</span><span class="number">-0.8</span><span class="number">.2</span><span class="number">.1</span>/logs/<span class="section">state</span>-change.log</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  --topic topic1 --partitions <span class="number">0</span>,<span class="number">1</span>,<span class="number">2</span>,<span class="number">3</span>,<span class="number">4</span>,<span class="number">5</span>,<span class="number">6</span>,<span class="number">7</span></span></pre></td></tr></table></figure>
+
+<h1 id="Kafka系列文章"><a href="#Kafka系列文章" class="headerlink" title="Kafka系列文章"></a>Kafka系列文章</h1><ul>
+<li><a href="http://www.jasongj.com/2015/03/10/KafkaColumn1/" target="_blank" rel="noopener">Kafka设计解析（一）- Kafka背景及架构介绍</a></li>
+<li><a href="http://www.jasongj.com/2015/04/24/KafkaColumn2/" target="_blank" rel="noopener">Kafka设计解析（二）- Kafka High Availability （上）</a></li>
+<li><a href="http://www.jasongj.com/2015/06/08/KafkaColumn3/" target="_blank" rel="noopener">Kafka设计解析（三）- Kafka High Availability （下）</a></li>
+<li><a href="http://www.jasongj.com/2015/08/09/KafkaColumn4/" target="_blank" rel="noopener">Kafka设计解析（四）- Kafka Consumer设计解析</a></li>
+<li><a href="http://www.jasongj.com/2015/12/31/KafkaColumn5_kafka_benchmark/" target="_blank" rel="noopener">Kafka设计解析（五）- Kafka性能测试方法及Benchmark报告</a></li>
+</ul>
+<blockquote>
+<p>作者：郭俊</p>
+<p>来源：<a href="http://www.jasongj.com/2015/06/08/KafkaColumn3/" target="_blank" rel="noopener">http://www.jasongj.com/2015/06/08/KafkaColumn3/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/kafka/" rel="tag"># kafka</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Kafka%E8%AE%BE%E8%AE%A1%E8%A7%A3%E6%9E%90%EF%BC%882%EF%BC%89%EF%BC%9AKafka-High-Availability-%EF%BC%88%E4%B8%8A%EF%BC%89/" rel="prev" title="Kafka设计解析（2）：Kafka High Availability （上）">
+      <i class="fa fa-chevron-left"></i> Kafka设计解析（2）：Kafka High Availability （上）
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Kafka%E8%AE%BE%E8%AE%A1%E8%A7%A3%E6%9E%90%EF%BC%884%EF%BC%89%EF%BC%9AKafka-Consumer%E8%AE%BE%E8%AE%A1%E8%A7%A3%E6%9E%90/" rel="next" title="Kafka设计解析（4）：Kafka Consumer设计解析">
+      Kafka设计解析（4）：Kafka Consumer设计解析 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#摘要"><span class="nav-number">1.</span> <span class="nav-text">摘要</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#Broker-Failover过程"><span class="nav-number">2.</span> <span class="nav-text">Broker Failover过程</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#Controller对Broker-failure的处理过程"><span class="nav-number">2.1.</span> <span class="nav-text">Controller对Broker failure的处理过程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#创建-删除Topic"><span class="nav-number">2.2.</span> <span class="nav-text">创建/删除Topic</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Broker响应请求流程"><span class="nav-number">2.3.</span> <span class="nav-text">Broker响应请求流程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#LeaderAndIsrRequest响应过程"><span class="nav-number">2.4.</span> <span class="nav-text">LeaderAndIsrRequest响应过程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Broker启动过程"><span class="nav-number">2.5.</span> <span class="nav-text">Broker启动过程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Controller-Failover"><span class="nav-number">2.6.</span> <span class="nav-text">Controller Failover</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Partition重新分配"><span class="nav-number">2.7.</span> <span class="nav-text">Partition重新分配</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Follower从Leader-Fetch数据"><span class="nav-number">2.8.</span> <span class="nav-text">Follower从Leader Fetch数据</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Topic-Tool"><span class="nav-number">2.9.</span> <span class="nav-text">Topic Tool</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Replica-Verification-Tool"><span class="nav-number">2.10.</span> <span class="nav-text">Replica Verification Tool</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Preferred-Replica-Leader-Election-Tool"><span class="nav-number">2.11.</span> <span class="nav-text">Preferred Replica Leader Election Tool</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Kafka-Reassign-Partitions-Tool"><span class="nav-number">2.12.</span> <span class="nav-text">Kafka Reassign Partitions Tool</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#State-Change-Log-Merge-Tool"><span class="nav-number">2.13.</span> <span class="nav-text">State Change Log Merge Tool</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#Kafka系列文章"><span class="nav-number">3.</span> <span class="nav-text">Kafka系列文章</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

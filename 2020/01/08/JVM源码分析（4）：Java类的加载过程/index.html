@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="背景最近对Java细节的底层实现比较感兴趣，比如Java类文件是如何加载到虚拟机的，类对象和方法是以什么数据结构存在于虚拟机中？虚方法、实例方法和静态方法是如何调用的？本文基于openjdk-7的OpenJDK实现Java类在HotSpot的内部实现进行分析。">
+<meta name="keywords" content="源码">
+<meta property="og:type" content="article">
+<meta property="og:title" content="JVM源码分析（4）：Java类的加载过程">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%884%EF%BC%89%EF%BC%9AJava%E7%B1%BB%E7%9A%84%E5%8A%A0%E8%BD%BD%E8%BF%87%E7%A8%8B&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="背景最近对Java细节的底层实现比较感兴趣，比如Java类文件是如何加载到虚拟机的，类对象和方法是以什么数据结构存在于虚拟机中？虚方法、实例方法和静态方法是如何调用的？本文基于openjdk-7的OpenJDK实现Java类在HotSpot的内部实现进行分析。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161102-5fb04.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161102-a81ce.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161103-38284.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161103-440d6.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161104-ac854.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161106-79a70.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161106-458de.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161108-88027.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161109-6aba0.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161110-c3b13.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161110-3caa7.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161112-6296e.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161112-af383.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161113-cd26b.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161113-3eff3.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161114-1cb18.png">
+<meta property="og:updated_time" content="2020-01-08T03:42:04.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030161102-5fb04.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%884%EF%BC%89%EF%BC%9AJava%E7%B1%BB%E7%9A%84%E5%8A%A0%E8%BD%BD%E8%BF%87%E7%A8%8B/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>JVM源码分析（4）：Java类的加载过程 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%884%EF%BC%89%EF%BC%9AJava%E7%B1%BB%E7%9A%84%E5%8A%A0%E8%BD%BD%E8%BF%87%E7%A8%8B/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          JVM源码分析（4）：Java类的加载过程
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 11:42:04" itemprop="dateCreated datePublished" datetime="2020-01-08T11:42:04+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/" itemprop="url" rel="index">
+                    <span itemprop="name">JVM</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h2 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h2><p>最近对Java细节的底层实现比较感兴趣，比如Java类文件是如何加载到虚拟机的，类对象和方法是以什么数据结构存在于虚拟机中？虚方法、实例方法和静态方法是如何调用的？本文基于openjdk-7的OpenJDK实现Java类在HotSpot的内部实现进行分析。</p>
+<a id="more"></a>
+
+<h2 id="HotSpot内存划分"><a href="#HotSpot内存划分" class="headerlink" title="HotSpot内存划分"></a>HotSpot内存划分</h2><p>在HotSpot实现中，内存被划分成Java堆、方法区、Java栈、本地方法栈和PC寄存器几个部分：<br>1、Java栈和本地方法栈用于方法之间的调用，进栈出栈的过程；<br>2、Java堆用于存放对象，在Java中，所有对象的创建都在堆上申请内存，并被GC管理；<br>3、方法区分成PermGen和CodeCache：PermGen存放Java类的相关信息，如静态变量、成员方法和抽象方法等；CodeCache存放JIT编译之后的本地代码；<br>更详细的相关内容可以阅读<a href="https://www.jianshu.com/p/eaef248b5a2c" target="_blank" rel="noopener">《JVM内存的那些事》</a></p>
+<h2 id="HotSpot对象模型"><a href="#HotSpot对象模型" class="headerlink" title="HotSpot对象模型"></a>HotSpot对象模型</h2><p>HotSpot JVM并没有根据Java对象直接通过虚拟机映射到新建的C++对象，而是设计了一个oop/klass model，其中oop为Ordinary Object Pointer，用来表示对象的实例信息；klass用来保存描述元数据。</p>
+<h3 id="Klass"><a href="#Klass" class="headerlink" title="Klass"></a>Klass</h3><p><img src="http://image.winrains.cn/2019/10/20191030161102-5fb04.png" alt="img"></p>
+<p>关于为何要设计oop/klass这种二分模型的实现，一个原因是不想让每个对象都包含vtbl(虚方法表)，其中oop中不含有任何虚函数，虚函数表保存于klass中，可以进行method dispatch。</p>
+<h3 id="oop"><a href="#oop" class="headerlink" title="oop"></a>oop</h3><p><img src="http://image.winrains.cn/2019/10/20191030161102-a81ce.png" alt="img"></p>
+<p>oopDesc对象包含两部分数据：_mark 和 _metadata；<br>1、_mark是markOop类型对象，用于存储对象自身的运行时数据，如哈希码（HashCode）、GC分代年龄、锁状态标志、线程持有的锁、偏向线程ID、偏向时间戳等等，占用内存大小与虚拟机位长一致，更具体的实现可以阅读 <a href="https://www.jianshu.com/p/9c19eb0ea4d8" target="_blank" rel="noopener">java对象头的HotSpot实现分析</a>。<br>2、_metadata是一个结构体，wideKlassOop和narrowOop都指向InstanceKlass对象，其中narrowOop指向的是经过压缩的对象；<br>3、_klass字段建立了oop对象与klass对象之间的联系；</p>
+<h2 id="HotSpot如何加载并解析class文件"><a href="#HotSpot如何加载并解析class文件" class="headerlink" title="HotSpot如何加载并解析class文件"></a>HotSpot如何加载并解析class文件</h2><p>class文件在虚拟机的整个生命周期包括加载、验证、准备、解析、初始化、使用和卸载7个阶段，通过<code>ClassLoader.loadClass</code>方法可以手动加载一个Java类到虚拟机中，并返回Class类型的引用。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030161103-38284.png" alt="img"></p>
+<p>这里并没有自定义类加载器，而是利用ClassLoaderCase的类加载器进行加载类AAA。</p>
+<h3 id="loadClass方法实现"><a href="#loadClass方法实现" class="headerlink" title="loadClass方法实现"></a>loadClass方法实现</h3><p><img src="http://image.winrains.cn/2019/10/20191030161103-440d6.png" alt="img"></p>
+<p>1、loadClass方法实现了双亲委派的类加载机制，如果需要自定义类加载器，建议重写内部的findClass方法，而非loadClass方法；<br>2、通过debug，可以发现loadClass方法最终会执行native方法<code>defineClass1</code>进行类的加载，即读取对应class文件的二进制数据到虚拟机中进行解析；</p>
+<h3 id="class文件的解析"><a href="#class文件的解析" class="headerlink" title="class文件的解析"></a>class文件的解析</h3><p>Java中的defineClass1方法是个native方法，说明依赖于底层的实现，在HotSpot中，其实现位于<code>ClassLoader.c</code>文件中，最终调用<code>jvm.cpp</code>中的<code>jvm_define_class_common</code>方法实现，核心的实现逻辑如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030161104-ac854.png" alt="img"></p>
+<p>1、验证全限定类名的长度，最大为<code>(1 &lt;&lt; 16) -1</code>，如果长度超过 <strong>65535</strong>，就会抛出<code>java/lang/NoClassDefFoundError</code>异常，主要原因是constant pool不支持这么长的字符串；<br>2、<code>SystemDictionary::resolve_from_stream</code>处理stream数据流，并生成Klass对象。内部通过<code>ClassFileParser.cpp</code>的parseClassFile方法对class文件的数据流进行解析，代码实在实在实在实在太长，有兴趣的同学可以阅读完整的实现，大概的过程如下：<br>1、验证当前magic为<code>0xCAFEBABE</code>;<br>2、获取class文件的minor_version、major_version，并判断当前虚拟机是否支持该版本；<br>3、通过<code>parse_constant_pool</code>方法解析当前class的常量池；<br>4、解析当前class的access_flags；<br>5、解析当前class的父类；<br>6、解析当前class的接口；<br>7、….<br>好吧，我得承认这块逻辑很复杂…<br>class数据流解析完成后，通过<code>oopFactory::new_instanceKlass</code>创建一个与之对应的instanceKlass对象，new_instanceKlass实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030161106-79a70.png" alt="img"></p>
+<p>1、其中<code>instanceKlassKlass::allocate_instance_klass</code>方法会初始化一个空instanceKlass对象，并由后续逻辑进行数据的填充；<br>2、但是发现该方法的返回类型并非是instanceKlass，而是klassOop类型；<br>3、allocate_instance_klass方法的实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030161106-458de.png" alt="img"></p>
+<p>1、base_create_klass方法最终通过<code>Klass::base_create_klass_oop</code>方法创建Klass对象，这里是instanceKlass对象，并返回对应的klassOop；<br>2、<code>k()-&gt;klass_part()</code>获取对应的Klass对象，并强制转换成instanceKlass类型的对象；<br>3、设置instanceKlass对象的默认值；</p>
+<h3 id="Klass对象如何创建？"><a href="#Klass对象如何创建？" class="headerlink" title="Klass对象如何创建？"></a>Klass对象如何创建？</h3><p>上述的instanceKlass对象由<code>Klass::base_create_klass_oop</code>方法进行创建，实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030161108-88027.png" alt="img"></p>
+<p>1、<code>allocate_permanent</code>方法默认在PermGen分配内存，instanceKlass对象保存在永久代区域；<br>2、Klass的as_klassOop方法可以获取对应的klassOop，那klassOop到底是什么？</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030161109-6aba0.png" alt="img"></p>
+<p>klassOop相当于Java中的class，一个klassOop对象包含header、klass_field和Klass。</p>
+<h3 id="instanceKlass"><a href="#instanceKlass" class="headerlink" title="instanceKlass"></a>instanceKlass</h3><p><img src="http://image.winrains.cn/2019/10/20191030161110-c3b13.png" alt="img"></p>
+<p>可以发现，每个instanceKlass对象都有一个ClassState状态，用来标识当前class的加载进度，另外instanceKlass对象中包含了如下字段，描述class文件的信息。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030161110-3caa7.png" alt="img"></p>
+<h3 id="instanceKlassKlass"><a href="#instanceKlassKlass" class="headerlink" title="instanceKlassKlass"></a>instanceKlassKlass</h3><p>instanceKlassKlass在实现上继承了klassKlass类</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030161112-6296e.png" alt="img"></p>
+<p>全局只存在一个instanceKlassKlass对象，虚拟机启动时，会在<code>Universe::genesis</code>方法中初始化。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030161112-af383.png" alt="img"></p>
+<p>虚拟机中所有instanceKlass对象的_klass字段都指向该instanceKlassKlass对象，其初始化过程如下：<br><img src="http://image.winrains.cn/2019/10/20191030161113-cd26b.png" alt="img"><br>1、方法<code>Universe::klassKlassObj()</code>获取klassKlass对象；<br>2、方法<code>base_create_klass</code>负责创建instanceKlassKlass对象，并返回对应的klassOop；<br>3、方法<code>java_lang_Class::create_mirror</code>分配mirror，类似于一个镜像，在java层面可以访问到；</p>
+<h3 id="klassKlass"><a href="#klassKlass" class="headerlink" title="klassKlass"></a>klassKlass</h3><p>klassKlass在实现上继承了Klass类</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030161113-3eff3.png" alt="img"></p>
+<p>和instanceKlassKlass一样，klassKlass对象也是全局唯一的，虚拟机启动时，会在<code>Universe::genesis</code>方法中初始化，其初始化过程如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030161114-1cb18.png" alt="img"></p>
+<p>1、通过<code>base_create_klass</code>创建klassKlass对象，并返回对应的klassOop；<br>2、set_klass方法把自身设置成_klass。</p>
+<blockquote>
+<p>作者：占小狼</p>
+<p>来源：<a href="https://www.jianshu.com/p/252e27863822" target="_blank" rel="noopener">https://www.jianshu.com/p/252e27863822</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E6%BA%90%E7%A0%81/" rel="tag"># 源码</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%883%EF%BC%89%EF%BC%9Asynchronized%E5%AE%9E%E7%8E%B0/" rel="prev" title="JVM源码分析（3）：synchronized实现">
+      <i class="fa fa-chevron-left"></i> JVM源码分析（3）：synchronized实现
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%885%EF%BC%89%EF%BC%9AJava%E5%AF%B9%E8%B1%A1%E7%9A%84%E5%88%9B%E5%BB%BA%E8%BF%87%E7%A8%8B/" rel="next" title="JVM源码分析（5）：Java对象的创建过程">
+      JVM源码分析（5）：Java对象的创建过程 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#背景"><span class="nav-number">1.</span> <span class="nav-text">背景</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#HotSpot内存划分"><span class="nav-number">2.</span> <span class="nav-text">HotSpot内存划分</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#HotSpot对象模型"><span class="nav-number">3.</span> <span class="nav-text">HotSpot对象模型</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#Klass"><span class="nav-number">3.1.</span> <span class="nav-text">Klass</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#oop"><span class="nav-number">3.2.</span> <span class="nav-text">oop</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#HotSpot如何加载并解析class文件"><span class="nav-number">4.</span> <span class="nav-text">HotSpot如何加载并解析class文件</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#loadClass方法实现"><span class="nav-number">4.1.</span> <span class="nav-text">loadClass方法实现</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#class文件的解析"><span class="nav-number">4.2.</span> <span class="nav-text">class文件的解析</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Klass对象如何创建？"><span class="nav-number">4.3.</span> <span class="nav-text">Klass对象如何创建？</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#instanceKlass"><span class="nav-number">4.4.</span> <span class="nav-text">instanceKlass</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#instanceKlassKlass"><span class="nav-number">4.5.</span> <span class="nav-text">instanceKlassKlass</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#klassKlass"><span class="nav-number">4.6.</span> <span class="nav-text">klassKlass</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

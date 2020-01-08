@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="最简单的东西，往往包含了最复杂的实现，因为需要为上层的存在提供一个稳定的基础，Object作为java中所有对象的基类，其存在的价值不言而喻，其中wait和notify方法的实现多线程协作提供了保证。">
+<meta name="keywords" content="源码">
+<meta property="og:type" content="article">
+<meta property="og:title" content="JVM源码分析（1）：Object.wait&#x2F;notify实现">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%881%EF%BC%89%EF%BC%9AObject-wait-notify%E5%AE%9E%E7%8E%B0&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="最简单的东西，往往包含了最复杂的实现，因为需要为上层的存在提供一个稳定的基础，Object作为java中所有对象的基类，其存在的价值不言而喻，其中wait和notify方法的实现多线程协作提供了保证。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030154906-962d5.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030154906-996a6.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030154906-b501c.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030154907-5dc41.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030154907-84a58.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030154909-1f6d7.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030154909-39159.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030154910-a5a62.png">
+<meta property="og:updated_time" content="2020-01-08T03:40:01.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030154906-962d5.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%881%EF%BC%89%EF%BC%9AObject-wait-notify%E5%AE%9E%E7%8E%B0/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>JVM源码分析（1）：Object.wait/notify实现 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%881%EF%BC%89%EF%BC%9AObject-wait-notify%E5%AE%9E%E7%8E%B0/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          JVM源码分析（1）：Object.wait/notify实现
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 11:40:01" itemprop="dateCreated datePublished" datetime="2020-01-08T11:40:01+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/" itemprop="url" rel="index">
+                    <span itemprop="name">JVM</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>最简单的东西，往往包含了最复杂的实现，因为需要为上层的存在提供一个稳定的基础，Object作为java中所有对象的基类，其存在的价值不言而喻，其中wait和notify方法的实现多线程协作提供了保证。</p>
+<a id="more"></a>
+
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="built_in">public</span> <span class="keyword">class</span> WaitNotifyCase &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">public</span> static <span class="type">void</span> main(String[] args) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        final <span class="keyword">Object</span> <span class="keyword">lock</span> = <span class="built_in">new</span> <span class="keyword">Object</span>();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">new</span> Thread(<span class="built_in">new</span> Runnable() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">            @Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            <span class="built_in">public</span> <span class="type">void</span> run() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">System</span>.<span class="keyword">out</span>.println("thread A is waiting to get lock");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">                synchronized (<span class="keyword">lock</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">                    try &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">                        <span class="keyword">System</span>.<span class="keyword">out</span>.println("thread A get lock");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">                        TimeUnit.SECONDS.sleep(<span class="number">1</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">                        <span class="keyword">System</span>.<span class="keyword">out</span>.println("thread A do wait method");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">                        <span class="keyword">lock</span>.wait();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">                        <span class="keyword">System</span>.<span class="keyword">out</span>.println("wait end");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">                    &#125; catch (InterruptedException e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">                        e.printStackTrace();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">                    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        &#125;).<span class="keyword">start</span>();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">new</span> Thread(<span class="built_in">new</span> Runnable() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">            @Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">            <span class="built_in">public</span> <span class="type">void</span> run() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">System</span>.<span class="keyword">out</span>.println("thread B is waiting to get lock");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">                synchronized (<span class="keyword">lock</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">System</span>.<span class="keyword">out</span>.println("thread B get lock");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">                    try &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">                        TimeUnit.SECONDS.sleep(<span class="number">5</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">                    &#125; catch (InterruptedException e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">                        e.printStackTrace();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">                    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">lock</span>.<span class="keyword">notify</span>();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">System</span>.<span class="keyword">out</span>.println("thread B do notify method");</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">        &#125;).<span class="keyword">start</span>();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>执行结果：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">thread A is waiting to get <span class="keyword">lock</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">thread</span> A <span class="keyword">get</span> <span class="keyword">lock</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">thread</span> B <span class="keyword">is</span> waiting <span class="keyword">to</span> <span class="keyword">get</span> <span class="keyword">lock</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">thread</span> A <span class="keyword">do</span> <span class="keyword">wait</span> method</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">thread</span> B <span class="keyword">get</span> <span class="keyword">lock</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">thread</span> B <span class="keyword">do</span> notify method</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">wait</span> <span class="keyword">end</span></span></pre></td></tr></table></figure>
+
+<p><strong>前提</strong>：由同一个lock对象调用wait、notify方法。<br>1、当线程A执行wait方法时，该线程会被挂起；<br>2、当线程B执行notify方法时，会唤醒一个被挂起的线程A；<br>lock对象、线程A和线程B三者是一种什么关系？根据上面的结论，可以想象一个场景：<br>1、lock对象维护了一个等待队列list；<br>2、线程A中执行lock的wait方法，把线程A保存到list中；<br>3、线程B中执行lock的notify方法，从等待队列中取出线程A继续执行；<br>当然了，Hotspot实现不可能这么简单。<br>上述代码中，存在多个疑问：<br>1、进入wait/notify方法之前，为什么要获取synchronized锁？<br>2、线程A获取了synchronized锁，执行wait方法并挂起，线程B又如何再次获取锁？</p>
+<h2 id="为什么要使用synchronized"><a href="#为什么要使用synchronized" class="headerlink" title="为什么要使用synchronized?"></a>为什么要使用synchronized?</h2><figure class="highlight smali"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">static void Sort(int [] array) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    // synchronize this operation so that some other thread can't</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    // manipulate the<span class="built_in"> array </span>while we are sorting it. This assumes that other</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    // threads also synchronize their accesses to the array.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    synchronized(array) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        // now sort elements in array</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>synchronized代码块通过javap生成的字节码中包含 ** monitorenter ** 和 ** monitorexit **指令。<br><img src="http://image.winrains.cn/2019/10/20191030154906-962d5.png" alt="img"><br>执行monitorenter指令可以获取对象的monitor，而lock.wait()方法通过调用native方法wait(0)实现，其中接口注释中有这么一句：</p>
+<blockquote>
+<p>The current thread must own this object’s monitor.</p>
+</blockquote>
+<p>表示线程执行lock.wait()方法时，必须持有该lock对象的monitor，如果wait方法在synchronized代码中执行，该线程很显然已经持有了monitor。</p>
+<h2 id="代码执行过程分析"><a href="#代码执行过程分析" class="headerlink" title="代码执行过程分析"></a>代码执行过程分析</h2><p>1、在多核环境下，线程A和B有可能同时执行monitorenter指令，并获取lock对象关联的monitor，只有一个线程可以和monitor建立关联，假设线程A执行加锁成功；<br>2、线程B竞争加锁失败，进入等待队列进行等待；<br>3、线程A继续执行，当执行到wait方法时，会发生什么？wait接口注释：</p>
+<blockquote>
+<p>This method causes the current thread to place itself in the wait set for this object and then to relinquish any and all synchronization claims on this object.</p>
+</blockquote>
+<p>wait方法会将当前线程放入wait set，等待被唤醒，并放弃lock对象上的所有同步声明，意味着线程A释放了锁，线程B可以重新执行加锁操作，不过又有一个疑问：在线程A的wait方法释放锁，到线程B获取锁，这期间发生了什么？线程B是如何知道线程A已经释放了锁？好迷茫….<br>4、线程B执行加锁操作成功，对于notify方法，JDK注释：notify方法会选择wait set中任意一个线程进行唤醒；</p>
+<blockquote>
+<p>Wakes up a single thread that is waiting on this object’s monitor. If any threads are waiting on this object, one of them is chosen to be awakened. The choice is arbitrary and occurs at the discretion of the implementation</p>
+</blockquote>
+<p>notifyAll方法的注释：notifyAll方法会唤醒monitor的wait set中所有线程。</p>
+<blockquote>
+<p>Wakes up all threads that are waiting on this object’s monitor.</p>
+</blockquote>
+<p>5、执行完notify方法，并不会立马唤醒等待线程，在notify方法后面加一段sleep代码就可以看到效果，如果线程B执行完notify方法之后sleep 5s，在这段时间内，线程B依旧持有monitor，线程A只能继续等待；<br><strong>那么wait set的线程什么时候会被唤醒？</strong></p>
+<blockquote>
+<p>想要解答这些疑问， 需要分析jvm的相关实现，本文以HotSpot虚拟机1.7版本为例</p>
+</blockquote>
+<h2 id="什么是monitor？"><a href="#什么是monitor？" class="headerlink" title="什么是monitor？"></a>什么是monitor？</h2><p>在HotSpot虚拟机中，monitor采用ObjectMonitor实现。<br><img src="http://image.winrains.cn/2019/10/20191030154906-996a6.png" alt="img"><br>每个线程都有两个ObjectMonitor对象列表，分别为free和used列表，如果当前free列表为空，线程将向全局global list请求分配ObjectMonitor。<br>ObjectMonitor对象中有两个队列：_WaitSet 和 _EntryList，用来保存ObjectWaiter对象列表；_owner指向获得ObjectMonitor对象的线程。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030154906-b501c.png" alt="img"></p>
+<p><strong>_WaitSet ** ：处于wait状态的线程，会被加入到wait set；<br>**_EntryList</strong>：处于等待锁block状态的线程，会被加入到entry set；</p>
+<h3 id="ObjectWaiter"><a href="#ObjectWaiter" class="headerlink" title="ObjectWaiter"></a>ObjectWaiter</h3><p><img src="http://image.winrains.cn/2019/10/20191030154907-5dc41.png" alt="img"></p>
+<p>ObjectWaiter对象是双向链表结构，保存了_thread（当前线程）以及当前的状态TState等数据， 每个等待锁的线程都会被封装成ObjectWaiter对象。</p>
+<h3 id="wait方法实现"><a href="#wait方法实现" class="headerlink" title="wait方法实现"></a>wait方法实现</h3><p><code>lock.wait()</code>方法最终通过ObjectMonitor的<code>void wait(jlong millis, bool interruptable, TRAPS);</code>实现：<br>1、将当前线程封装成ObjectWaiter对象node；</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030154907-84a58.png" alt="img"></p>
+<p>2、通过<code>ObjectMonitor::AddWaiter</code>方法将node添加到_WaitSet列表中；</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030154909-1f6d7.png" alt="img"></p>
+<p>3、通过<code>ObjectMonitor::exit</code>方法释放当前的ObjectMonitor对象，这样其它竞争线程就可以获取该ObjectMonitor对象。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030154909-39159.png" alt="img"></p>
+<p>4、最终底层的park方法会挂起线程；</p>
+<h3 id="notify方法实现"><a href="#notify方法实现" class="headerlink" title="notify方法实现"></a>notify方法实现</h3><p><code>lock.notify()</code>方法最终通过ObjectMonitor的<code>void notify(TRAPS)</code>实现：<br>1、如果当前_WaitSet为空，即没有正在等待的线程，则直接返回；<br>2、通过<code>ObjectMonitor::DequeueWaiter</code>方法，获取_WaitSet列表中的第一个ObjectWaiter节点，实现也很简单。<br><strong>这里需要注意的是，在jdk的notify方法注释是随机唤醒一个线程，其实是第一个ObjectWaiter节点</strong></p>
+<p><img src="http://image.winrains.cn/2019/10/20191030154910-a5a62.png" alt="img"></p>
+<p>3、根据不同的策略，将取出来的ObjectWaiter节点，加入到_EntryList或则通过<code>Atomic::cmpxchg_ptr</code>指令进行自旋操作cxq，具体代码实现有点长，这里就不贴了，有兴趣的同学可以看objectMonitor::notify方法；</p>
+<h3 id="notifyAll方法实现"><a href="#notifyAll方法实现" class="headerlink" title="notifyAll方法实现"></a>notifyAll方法实现</h3><p><code>lock.notifyAll()</code>方法最终通过ObjectMonitor的<code>void notifyAll(TRAPS)</code>实现：<br>通过for循环取出_WaitSet的ObjectWaiter节点，并根据不同策略，加入到_EntryList或则进行自旋操作。<br>从JVM的方法实现中，可以发现：notify和notifyAll并不会释放所占有的ObjectMonitor对象，其实真正释放ObjectMonitor对象的时间点是在执行monitorexit指令，一旦释放ObjectMonitor对象了，entry set中ObjectWaiter节点所保存的线程就可以开始竞争ObjectMonitor对象进行加锁操作了。</p>
+<blockquote>
+<p>作者：占小狼</p>
+<p>来源：<a href="https://www.jianshu.com/p/f4454164c017" target="_blank" rel="noopener">https://www.jianshu.com/p/f4454164c017</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E6%BA%90%E7%A0%81/" rel="tag"># 源码</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/%E8%81%8A%E8%81%8A-Spring-Boot-2-0-%E7%9A%84-WebFlux/" rel="prev" title="聊聊 Spring Boot 2.0 的 WebFlux">
+      <i class="fa fa-chevron-left"></i> 聊聊 Spring Boot 2.0 的 WebFlux
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%882%EF%BC%89%EF%BC%9Ajava%E5%AF%B9%E8%B1%A1%E5%A4%B4%E5%AE%9E%E7%8E%B0/" rel="next" title="JVM源码分析（2）：java对象头实现">
+      JVM源码分析（2）：java对象头实现 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#为什么要使用synchronized"><span class="nav-number">1.</span> <span class="nav-text">为什么要使用synchronized?</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#代码执行过程分析"><span class="nav-number">2.</span> <span class="nav-text">代码执行过程分析</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#什么是monitor？"><span class="nav-number">3.</span> <span class="nav-text">什么是monitor？</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#ObjectWaiter"><span class="nav-number">3.1.</span> <span class="nav-text">ObjectWaiter</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#wait方法实现"><span class="nav-number">3.2.</span> <span class="nav-text">wait方法实现</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#notify方法实现"><span class="nav-number">3.3.</span> <span class="nav-text">notify方法实现</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#notifyAll方法实现"><span class="nav-number">3.4.</span> <span class="nav-text">notifyAll方法实现</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

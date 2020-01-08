@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="在上一篇文章中，我们解释了Git的数据模型。在这一篇文章，我们来看看Git另一个重要的方面：index。Index空间，也叫做stage空间，或者cache空间，集中了很多人对Git的误解。在这篇文章里，让我来尝试解开大家关于这方面的疑惑。之前的我也对这部分有不少误解。我曾经以为，当你新checkout一个commit以后，你的index将是一片空白。然后你通过git add往index添加需要更">
+<meta property="og:type" content="article">
+<meta property="og:title" content="简单易懂理解Git的工作原理（2）：Index空间">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;%E7%AE%80%E5%8D%95%E6%98%93%E6%87%82%E7%90%86%E8%A7%A3Git%E7%9A%84%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86%EF%BC%882%EF%BC%89%EF%BC%9AIndex%E7%A9%BA%E9%97%B4&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="在上一篇文章中，我们解释了Git的数据模型。在这一篇文章，我们来看看Git另一个重要的方面：index。Index空间，也叫做stage空间，或者cache空间，集中了很多人对Git的误解。在这篇文章里，让我来尝试解开大家关于这方面的疑惑。之前的我也对这部分有不少误解。我曾经以为，当你新checkout一个commit以后，你的index将是一片空白。然后你通过git add往index添加需要更">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109144410-8d9ad.png">
+<meta property="og:updated_time" content="2020-01-08T11:13:33.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109144410-8d9ad.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/%E7%AE%80%E5%8D%95%E6%98%93%E6%87%82%E7%90%86%E8%A7%A3Git%E7%9A%84%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86%EF%BC%882%EF%BC%89%EF%BC%9AIndex%E7%A9%BA%E9%97%B4/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>简单易懂理解Git的工作原理（2）：Index空间 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/%E7%AE%80%E5%8D%95%E6%98%93%E6%87%82%E7%90%86%E8%A7%A3Git%E7%9A%84%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86%EF%BC%882%EF%BC%89%EF%BC%9AIndex%E7%A9%BA%E9%97%B4/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          简单易懂理解Git的工作原理（2）：Index空间
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 19:13:33" itemprop="dateCreated datePublished" datetime="2020-01-08T19:13:33+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%BC%80%E5%8F%91%E5%B7%A5%E5%85%B7/" itemprop="url" rel="index">
+                    <span itemprop="name">开发工具</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%BC%80%E5%8F%91%E5%B7%A5%E5%85%B7/Git/" itemprop="url" rel="index">
+                    <span itemprop="name">Git</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>在<a href="https://www.jianshu.com/p/ae3f7c954061" target="_blank" rel="noopener">上一篇文章</a>中，我们解释了Git的数据模型。在这一篇文章，我们来看看Git另一个重要的方面：<code>index</code>。<code>Index</code>空间，也叫做<code>stage</code>空间，或者<code>cache</code>空间，集中了很多人对Git的误解。在这篇文章里，让我来尝试解开大家关于这方面的疑惑。<br>之前的我也对这部分有不少误解。我曾经以为，当你新checkout一个commit以后，你的<code>index</code>将是一片空白。然后你通过<code>git add</code>往<code>index</code>添加需要更新的文件。当你commit以后，你的新修改文件会被加入到Git数据库，然后你的<code>index</code>又会回到一片空白的状态。</p>
+<a id="more"></a>
+
+<p>我的理解实际上包含了几个错误的地方：</p>
+<ul>
+<li><code>Index</code>并不是临时存放新文件的地方</li>
+<li>新文件并不是在<code>git commit</code>的时候才被加入到Git的数据库。实际上在<code>git add</code>的时候就已经被加入到数据库里了。</li>
+<li><code>Index</code>包含的并不是当前commit和新commit的diff</li>
+</ul>
+<p>为了纠正这些错误观念，我们就要研究一下<code>index</code>里面到底存放着什么信息。我们可以通过查看<code>./.git/index</code>这个文件来得到答案。让我们继续使用<a href="https://www.jianshu.com/p/ae3f7c954061" target="_blank" rel="noopener">上一篇文章</a>的例子：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">$ git checkout master</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">$ git ls-files --stage</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="number">100644</span> bf97e71de76bcff2bd8aba44710aa5e665eacb99 <span class="number">0</span>       dir/inside.txt</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="number">100644</span> <span class="number">8231f</span>0fdc862f06b2bd7b7bfd2f42082d3086b71 <span class="number">0</span>       index.txt</span></pre></td></tr></table></figure>
+
+<p>上面的命令列出<code>index</code>中存放的信息。其中我们看到，即使我们是新checkout一个branch，<code>index</code>也不是空白的。它目前有两个条目，每个条目分别指向一个<code>blob</code>对象，而且还包含该<code>blob</code>对象所对应的文件的路径（分别是<code>dir/inside.txt</code>和<code>index.txt</code>）。而且这两个<code>blob</code>对象对应的都是当前commit中的文件版本。<br>让我们现在来做点小试验。让我们再次修改<code>index.txt</code>并添加到<code>index</code>中：</p>
+<figure class="highlight vim"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">$ <span class="keyword">echo</span> <span class="string">"version 3"</span> &gt; <span class="built_in">index</span>.txt</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">$ git <span class="built_in">add</span> <span class="built_in">index</span>.txt</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">$ git <span class="keyword">ls</span>-<span class="keyword">files</span> --stage</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="number">100644</span> bf97e71de76bcff2bd8aba44710aa5e665eacb99 <span class="number">0</span>       dir/inside.txt</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="number">100644</span> cd80567970da17e3c5d718e5b3db8700dbf320bf <span class="number">0</span>       <span class="built_in">index</span>.txt</span></pre></td></tr></table></figure>
+
+<p>其实严格来说，“把<code>index.txt</code>添加到<code>index</code>中”这个表述并不准确。因为实际上我们看到的是，当我们执行<code>git add</code>时，新的<code>index.txt</code>已经被作为一个新的<code>blob</code>对象添加到了Git数据库中了，而并不是被添加到index中。Git只是更新了index中这个文件的指针来指向新版本的<code>blob</code>对象。如果我们此时执行<code>git commit</code>，那么，Git将会基于<code>index</code>里面所指向的这些<code>blob</code>对象以及他们对应的路径来生成<code>tree</code>对象，最终生成<code>commit</code>对象（下图）。也就是说，<strong>实际上index空间是新的commit的一个写照（snapshot）</strong>。</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109144410-8d9ad.png" alt="img"></p>
+<p>从index空间生成tree和commit对象</p>
+<p>如果我们真正地明白这一点，那么很多本来觉得不自然的操作都显得理所应当了。例如，如果我们想让Git不再追踪一个文件，那么我们该怎么做呢？每当想到index是新commit的写照，那么我们就应该想到要移除index里面关于这个文件的条目。例如在我们的例子中，如果我想停止跟踪<code>dir/inside.txt</code>：</p>
+<figure class="highlight gams"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">$</span> git rm --cache dir/inside.txt</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">$</span> git ls-<span class="keyword">files</span> --stage</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="number">100644</span> cd80567970da17e3c5d718e5b3db8700dbf320bf <span class="number">0</span>       index.txt</span></pre></td></tr></table></figure>
+
+<p>又例如，我们有如下的历史：<br><code>HEAD</code> → <code>commit 5</code> → <code>commit 4</code> → <code>commit 3</code> → <code>commit 2</code> → <code>commit 1</code><br>如果我们想要合并<code>commit 5</code>, <code>commit 4</code>和<code>commit 3</code>，其中一种简单的方法就是使用<code>git reset --soft</code>如下：</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">$ git <span class="keyword">reset</span> <span class="comment">--soft [commit 2]</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">$ git <span class="keyword">commit</span> -m "commit 6"</span></pre></td></tr></table></figure>
+
+<p>这样会得到以下结果：<br><code>HEAD</code> → <code>commit 6</code> → <code>commit 2</code> → <code>commit 1</code><br>原因就是，<code>git reset --soft</code>只把<code>HEAD</code>移到了<code>commit 2</code>，index并没有变化，所以新执行的commit是基于<code>commit 2</code>的（因为<code>HEAD</code>指向<code>commit 2</code>），但却会保留<code>commit 5</code>的内容。<br>解释了那么多，其实我想说的是，理解index的工作原理有助于我们自主去想解决的办法，而不是生搬硬套网上搜来的解决方法，是提高水平的一大重要途径。</p>
+<blockquote>
+<p>作者：Jo的工作笔记</p>
+<p>来源：<a href="https://www.jianshu.com/p/6bb76450d763" target="_blank" rel="noopener">https://www.jianshu.com/p/6bb76450d763</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/%E7%AE%80%E5%8D%95%E6%98%93%E6%87%82%E7%90%86%E8%A7%A3Git%E7%9A%84%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86%EF%BC%881%EF%BC%89%EF%BC%9AGit%E6%95%B0%E6%8D%AE%E6%A8%A1%E5%9E%8B/" rel="prev" title="简单易懂理解Git的工作原理（1）：Git数据模型">
+      <i class="fa fa-chevron-left"></i> 简单易懂理解Git的工作原理（1）：Git数据模型
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/%E8%AF%A6%E8%A7%A3%E5%B9%B6%E5%8F%91%E4%B8%8B%E7%9A%84HashMap%E4%BB%A5%E5%8F%8AJDK8%E7%9A%84%E4%BC%98%E5%8C%96/" rel="next" title="详解并发下的HashMap以及JDK8的优化">
+      详解并发下的HashMap以及JDK8的优化 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

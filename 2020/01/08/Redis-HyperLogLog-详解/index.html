@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="HyperLogLog 是一种概率数据结构，用来估算数据的基数。数据集可以是网站访客的 IP 地址，E-mail 邮箱或者用户 ID。基数就是指一个集合中不同值的数目，比如 a, b, c, d 的基数就是 4，a, b, c, d, a 的基数还是 4。虽然 a 出现两次，只会被计算一次。精确的计算数据集的基数需要消耗大量的内存来存储数据集。在遍历数据集时，判断当前遍历值是否已经存在唯一方法就是">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Redis HyperLogLog 详解">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;Redis-HyperLogLog-%E8%AF%A6%E8%A7%A3&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="HyperLogLog 是一种概率数据结构，用来估算数据的基数。数据集可以是网站访客的 IP 地址，E-mail 邮箱或者用户 ID。基数就是指一个集合中不同值的数目，比如 a, b, c, d 的基数就是 4，a, b, c, d, a 的基数还是 4。虽然 a 出现两次，只会被计算一次。精确的计算数据集的基数需要消耗大量的内存来存储数据集。在遍历数据集时，判断当前遍历值是否已经存在唯一方法就是">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;image1-1.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;image2-1.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;image3-1.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;image4.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;image5-1.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;image6.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;image7.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;image8.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;image9.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;image10.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;image11.jpg">
+<meta property="og:updated_time" content="2020-01-08T05:26:12.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;image1-1.jpg">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/Redis-HyperLogLog-%E8%AF%A6%E8%A7%A3/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Redis HyperLogLog 详解 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/Redis-HyperLogLog-%E8%AF%A6%E8%A7%A3/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Redis HyperLogLog 详解
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 13:26:12" itemprop="dateCreated datePublished" datetime="2020-01-08T13:26:12+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/Redis/" itemprop="url" rel="index">
+                    <span itemprop="name">Redis</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>HyperLogLog 是一种概率数据结构，用来估算数据的基数。数据集可以是网站访客的 IP 地址，E-mail 邮箱或者用户 ID。<br>基数就是指一个集合中不同值的数目，比如 a, b, c, d 的基数就是 4，a, b, c, d, a 的基数还是 4。虽然 a 出现两次，只会被计算一次。<br>精确的计算数据集的基数需要消耗大量的内存来存储数据集。在遍历数据集时，判断当前遍历值是否已经存在唯一方法就是将这个值与已经遍历过的值进行一一对比。当数据集的数量越来越大，内存消耗就无法忽视，甚至成了问题的关键。<br>使用 Redis 统计集合的基数一般有三种方法，分别是使用 Redis 的 HashMap，BitMap 和 HyperLogLog。前两个数据结构在集合的数量级增长时，所消耗的内存会大大增加，但是 HyperLogLog 则不会。<br>Redis 的 HyperLogLog 通过牺牲准确率来减少内存空间的消耗，只需要12K内存，在标准误差0.81%的前提下，能够统计2^64个数据。所以 HyperLogLog 是否适合在比如统计日活月活此类的对精度要不不高的场景。<br>这是一个很惊人的结果，以如此小的内存来记录如此大数量级的数据基数。下面我们就带大家来深入了解一下 HyperLogLog 的使用，基础原理，源码实现和具体的试验数据分析。</p>
+<a id="more"></a>
+
+<h2 id="HyperLogLog-在-Redis-中的使用"><a href="#HyperLogLog-在-Redis-中的使用" class="headerlink" title="HyperLogLog 在 Redis 中的使用"></a>HyperLogLog 在 Redis 中的使用</h2><p>Redis 提供了 <code>PFADD</code> 、<code>PFCOUNT</code> 和 <code>PFMERGE</code> 三个命令来供用户使用 HyperLogLog。<br><code>PFADD</code> 用于向 HyperLogLog 添加元素。</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">&gt; PFADD visitors alice bob carol</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">(<span class="built_in">int</span>eger) <span class="number">1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">&gt; PFCOUNT visitors</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">(<span class="built_in">int</span>eger) <span class="number">3</span></span></pre></td></tr></table></figure>
+
+<p>如果 HyperLogLog 估计的近似基数在 <code>PFADD</code> 命令执行之后出现了变化， 那么命令返回 1 ， 否则返回 0 。 如果命令执行时给定的键不存在， 那么程序将先创建一个空的 HyperLogLog 结构， 然后再执行命令。<br><code>PFCOUNT</code> 命令会给出 HyperLogLog 包含的近似基数。在计算出基数后，<code>PFCOUNT</code> 会将值存储在 HyperLogLog 中进行缓存，知道下次 <code>PFADD</code> 执行成功前，就都不需要再次进行基数的计算。<br><code>PFMERGE</code> 将多个 HyperLogLog 合并为一个 HyperLogLog ， 合并后的 HyperLogLog 的基数接近于所有输入 HyperLogLog 的并集基数。</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">&gt; PFADD customers alice dan</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">(<span class="built_in">int</span>eger) <span class="number">1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">&gt; PFMERGE everyone visitors customers</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">OK</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">&gt; PFCOUNT everyone</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">(<span class="built_in">int</span>eger) <span class="number">4</span></span></pre></td></tr></table></figure>
+
+<h2 id="内存消耗对比实验"><a href="#内存消耗对比实验" class="headerlink" title="内存消耗对比实验"></a>内存消耗对比实验</h2><p>我们下面就来通过实验真实对比一下下面三种数据结构的内存消耗，HashMap、BitMap 和 HyperLogLog。<br>我们首先使用 Lua 脚本向 Redis 对应的数据结构中插入一定数量的数，然后执行<br>bgsave 命令，最后使用 redis-rdb-tools 的 rdb 的命令查看各个键所占的内存大小。<br>下面是 Lua 的脚本，不了解 Redis 执行 Lua 脚本的同学可以看一下我之前写的文章<a href="https://mp.weixin.qq.com/s/9zqEeCySDKIRX4gB5ICrGQ" target="_blank" rel="noopener">《基于Redis和Lua的分布式限流》</a>。</p>
+<figure class="highlight oxygene"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">local key = KEYS[<span class="number">1</span>]</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">local size = tonumber(ARGV[<span class="number">1</span>])</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">local <span class="function"><span class="keyword">method</span> = <span class="title">tonumber</span><span class="params">(ARGV[2])</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="title">for</span> <span class="title">i</span>=1,<span class="title">size</span>,1 <span class="title">do</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="function">  <span class="title">if</span> <span class="params">(<span class="keyword">method</span> == 0)</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="function">  <span class="title">then</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="function">    <span class="title">redis</span>.<span class="title">call</span><span class="params">(<span class="string">'hset'</span>,key,i,1)</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="function">  <span class="title">elseif</span> <span class="params">(<span class="keyword">method</span> == 1)</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="function">  <span class="title">then</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="function">    <span class="title">redis</span>.<span class="title">call</span><span class="params">(<span class="string">'pfadd'</span>,key, i)</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="function">  <span class="title">else</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="function">    <span class="title">redis</span>.<span class="title">call</span><span class="params">(<span class="string">'setbit'</span>, key, i, 1)</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="function">  <span class="title">end</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="title">end</span></span></span></pre></td></tr></table></figure>
+
+<p>我们在通过 redis-cli 的 <code>script load</code> 命令将 Lua 脚本加载到 Redis 中，然后使用 <code>evalsha</code> 命令分别向 HashMap、HyperLogLog 和 BitMap 三种数据结构中插入了一千万个数，然后使用 <code>rdb</code> 命令查看各个结构内存消耗。</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">[<span class="symbol">root@</span>VM_0_11_centos ~]# redis-cli -a <span class="number">082203</span> script load <span class="string">"$(cat HyperLogLog.lua)"</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="string">"6255c6d0a1f32349f59fd2c8711e93f2fbc7ecf8"</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">[<span class="symbol">root@</span>VM_0_11_centos ~]# redis-cli -a <span class="number">082203</span> evalsha <span class="number">6255</span>c6d0a1f32349f59fd2c8711e93f2fbc7ecf8 <span class="number">1</span> hashmap <span class="number">10000000</span> <span class="number">0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">(nil)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">[<span class="symbol">root@</span>VM_0_11_centos ~]# redis-cli -a <span class="number">082203</span> evalsha <span class="number">6255</span>c6d0a1f32349f59fd2c8711e93f2fbc7ecf8 <span class="number">1</span> hyperloglog <span class="number">10000000</span> <span class="number">1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">(nil)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">[<span class="symbol">root@</span>VM_0_11_centos ~]# redis-cli -a <span class="number">082203</span> evalsha <span class="number">6255</span>c6d0a1f32349f59fd2c8711e93f2fbc7ecf8 <span class="number">1</span> bitmap <span class="number">10000000</span> <span class="number">2</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">(nil)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">[<span class="symbol">root@</span>VM_0_11_centos ~]# rdb -c memory dump.rdb</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">database,type,key,size_in_bytes,encoding,num_elements,len_largest_element,expiry</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="number">0</span>,<span class="built_in">string</span>,bitmap,<span class="number">1310768</span>,<span class="built_in">string</span>,<span class="number">1250001</span>,<span class="number">1250001</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="number">0</span>,<span class="built_in">string</span>,hyperloglog,<span class="number">14392</span>,<span class="built_in">string</span>,<span class="number">12304</span>,<span class="number">12304</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="number">0</span>,hash,hashmap,<span class="number">441326740</span>,hashtable,<span class="number">10000000</span>,<span class="number">8</span>,</span></pre></td></tr></table></figure>
+
+<p>我们进行了两轮实验，分别插入一万数字和一千万数字，三种数据结构消耗的内存统计如下所示。<br><img src="http://image.winrains.cn/2019/10/image1-1.jpg" alt="img"><br>从表中可以明显看出，一万数量级时 BitMap 消耗内存最小， 一千万数量级时 HyperLogLog 消耗内存最小，但是总体来看，HyperLogLog 消耗的内存都是 14392 字节，可见 HyperLogLog 在内存消耗方面有自己的独到之处。</p>
+<h2 id="基本原理"><a href="#基本原理" class="headerlink" title="基本原理"></a>基本原理</h2><p>HyperLogLog 是一种概率数据结构，它使用概率算法来统计集合的近似基数。而它算法的最本源则是伯努利过程。<br>伯努利过程就是一个抛硬币实验的过程。抛一枚正常硬币，落地可能是正面，也可能是反面，二者的概率都是 1/2 。伯努利过程就是一直抛硬币，直到落地时出现正面位置，并记录下抛掷次数k。比如说，抛一次硬币就出现正面了，此时 k 为 1; 第一次抛硬币是反面，则继续抛，直到第三次才出现正面，此时 k 为 3。<br>对于 n 次伯努利过程，我们会得到 n 个出现正面的投掷次数值 $ k_1, k_2 … k_n $, 其中这里的最大值是k_max。<br>根据一顿数学推导，我们可以得出一个结论： $2^{k_ max}$ 来作为n的估计值。也就是说你可以根据最大投掷次数近似的推算出进行了几次伯努利过程。<br><img src="http://image.winrains.cn/2019/10/image2-1.jpg" alt="img"><br>下面，我们就来讲解一下 HyperLogLog 是如何模拟伯努利过程，并最终统计集合基数的。<br>HyperLogLog 在添加元素时，会通过Hash函数，将元素转为64位比特串，例如输入5，便转为101(省略前面的0，下同)。这些比特串就类似于一次抛硬币的伯努利过程。比特串中，0 代表了抛硬币落地是反面，1 代表抛硬币落地是正面，如果一个数据最终被转化了 10010000，那么从低位往高位看，我们可以认为，这串比特串可以代表一次伯努利过程，首次出现 1 的位数为5，就是抛了5次才出现正面。<br>所以 HyperLogLog 的基本思想是利用集合中数字的比特串第一个 1 出现位置的最大值来预估整体基数，但是这种预估方法存在较大误差，为了改善误差情况，HyperLogLog中引入分桶平均的概念，计算 m 个桶的调和平均值。<br><img src="http://image.winrains.cn/2019/10/image3-1.jpg" alt="img"><br>Redis 中 HyperLogLog 一共分了 2^14 个桶，也就是 16384 个桶。每个桶中是一个 6 bit 的数组，如下图所示。<br><img src="http://image.winrains.cn/2019/10/image4.jpg" alt="img"><br>HyperLogLog 将上文所说的 64 位比特串的低 14 位单独拿出，它的值就对应桶的序号，然后将剩下 50 位中第一次出现 1 的位置值设置到桶中。50位中出现1的位置值最大为50，所以每个桶中的 6 位数组正好可以表示该值。<br>在设置前，要设置进桶的值是否大于桶中的旧值，如果大于才进行设置，否则不进行设置。示例如下图所示。<br><img src="http://image.winrains.cn/2019/10/image5-1.jpg" alt="img"><br>此时为了性能考虑，是不会去统计当前的基数的，而是将 HyperLogLog 头的 card 属性中的标志位置为 1，表示下次进行 pfcount 操作的时候，当前的缓存值已经失效了，需要重新统计缓存值。在后面 pfcount 流程的时候，发现这个标记为失效，就会去重新统计新的基数，放入基数缓存。<br>在计算近似基数时，就分别计算每个桶中的值，带入到上文将的 DV 公式中，进行调和平均和结果修正，就能得到估算的基数值。</p>
+<h2 id="Redis-源码分析"><a href="#Redis-源码分析" class="headerlink" title="Redis 源码分析"></a>Redis 源码分析</h2><p>我们首先来看一下 HyperLogLog 对象的定义</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">struct hllhdr &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    char magic[<span class="number">4</span>];      <span class="comment">/* 魔法值 "HYLL" */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">uint</span>8_t encoding;   <span class="comment">/* 密集结构或者稀疏结构 HLL_DENSE or HLL_SPARSE. */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">uint</span>8_t notused[<span class="number">3</span>]; <span class="comment">/* 保留位, 全为0. */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">uint</span>8_t card[<span class="number">8</span>];    <span class="comment">/* 基数大小的缓存 */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">uint</span>8_t registers[]; <span class="comment">/* 数据字节数组 */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">&#125;;</span></pre></td></tr></table></figure>
+
+<p>HyperLogLog 对象中的 <code>registers</code> 数组就是桶，它有两种存储结构，分别为密集存储结构和稀疏存储结构，两种结构只涉及存储和桶的表现形式，从中我们可以看到 Redis 对节省内存极致地追求。<br><img src="http://image.winrains.cn/2019/10/image6.jpg" alt="img"><br>我们先看相对简单的密集存储结构，它也是十分的简单明了，既然要有 2^14 个 6 bit的桶，那么我就真使用足够多的 <code>uint8_t</code> 字节去表示，只是此时会涉及到字节位置和桶的转换，因为字节有 8 位，而桶只需要 6 位。<br>所以我们需要将桶的序号转换成对应的字节偏移量 offset_bytes 和其内部的位数偏移量 offset_bits。需要注意的是小端字节序，高位在右侧，需要进行倒转。<br>当 offset_bits 小于等于2时，说明一个桶就在该字节内，只需要进行倒转就能得到桶的值。<br><img src="http://image.winrains.cn/2019/10/image7.jpg" alt="img"><br>如果 offset_bits 大于 2 ，则说明一个桶分布在两个字节内，此时需要将两个字节的内容都进行倒置，然后再进行拼接得到桶的值，如下图所示。<br><img src="http://image.winrains.cn/2019/10/image8.jpg" alt="img"><br>HyperLogLog 的稀疏存储结构是为了节约内存消耗，它不像密集存储模式一样，真正找了那么多个字节数组来表示2^14 个桶，而是使用特殊的字节结构来表达。<br><img src="http://image.winrains.cn/2019/10/image9.jpg" alt="img"><br>Redis 为了方便表达稀疏存储，它将上面三种字节表示形式分别赋予了一条指令。</p>
+<ul>
+<li>ZERO : 一字节，表示连续多少个桶计数为0，前两位为标志00，后6位表示有多少个桶，最大为64。</li>
+<li>XZERO : 两个字节，表示连续多少个桶计数为0，前两位为标志01，后14位表示有多少个桶，最大为16384。</li>
+<li>VAL : 一字节，表示连续多少个桶的计数为多少，前一位为标志1，四位表示连桶内计数，所以最大表示桶的计数为32。后两位表示连续多少个桶。</li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/10/image10.jpg" alt="img"><br>所以，一个初始状态的 HyperLogLog 对象只需要2 字节，也就是一个 XZERO 来存储其数据，而不需要消耗12K 内存。当 HyperLogLog 插入了少数元素时，可以只使用少量的 XZERO、VAL 和 ZERO 进行表示，如下图所示。<br><img src="http://image.winrains.cn/2019/10/image11.jpg" alt="img"><br>Redis从稀疏存储转换到密集存储的条件是：</p>
+<ul>
+<li>任意一个计数值从 32 变成 33，因为 VAL 指令已经无法容纳，它能表示的计数值最大为 32</li>
+<li>稀疏存储占用的总字节数超过 3000 字节，这个阈值可以通过 hll_sparse_max_bytes 参数进行调整。</li>
+</ul>
+<p>具体 Redis 中的 HyperLogLog 源码由于涉及较多的位运算，这里就不多带大家学习了。大家对 HyperLogLog 有什么更好的理解或者问题都欢迎积极留言。</p>
+<h2 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h2><p><a href="https://thoughtbot.com/blog/hyperloglogs-in-redis" target="_blank" rel="noopener">https://thoughtbot.com/blog/hyperloglogs-in-redis</a><br><a href="https://juejin.im/post/5c7fe7525188251ba53b0623" target="_blank" rel="noopener">https://juejin.im/post/5c7fe7525188251ba53b0623</a><br><a href="https://juejin.im/post/5bef9c706fb9a049c23204a3" target="_blank" rel="noopener">https://juejin.im/post/5bef9c706fb9a049c23204a3</a></p>
+<blockquote>
+<p>作者：程序员历小冰</p>
+<p>来源：<a href="http://remcarpediem.net/article/ec0c40ae/" target="_blank" rel="noopener">http://remcarpediem.net/article/ec0c40ae/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Redis-RDB-%E6%8C%81%E4%B9%85%E5%8C%96%E8%AF%A6%E8%A7%A3/" rel="prev" title="Redis RDB 持久化详解">
+      <i class="fa fa-chevron-left"></i> Redis RDB 持久化详解
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/%E4%BA%86%E8%A7%A3-Redis-%E7%9A%84%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84%E5%92%8C%E5%AF%B9%E8%B1%A1%E7%B3%BB%E7%BB%9F/" rel="next" title="了解 Redis 的数据结构和对象系统">
+      了解 Redis 的数据结构和对象系统 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#HyperLogLog-在-Redis-中的使用"><span class="nav-number">1.</span> <span class="nav-text">HyperLogLog 在 Redis 中的使用</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#内存消耗对比实验"><span class="nav-number">2.</span> <span class="nav-text">内存消耗对比实验</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#基本原理"><span class="nav-number">3.</span> <span class="nav-text">基本原理</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Redis-源码分析"><span class="nav-number">4.</span> <span class="nav-text">Redis 源码分析</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#参考"><span class="nav-number">5.</span> <span class="nav-text">参考</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="Redis 是一种内存数据库，将数据保存在内存中，读写效率要比传统的将数据保存在磁盘上的数据库要快很多。但是一旦进程退出，Redis 的数据就会丢失。为了解决这个问题，Redis 提供了 RDB 和 AOF 两种持久化方案，将内存中的数据保存到磁盘中，避免数据丢失。RDB的介绍在这篇文章中《Redis RDB 持久化详解》，今天我们来看一下 AOF 相关的原理。AOF( append only f">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Redis AOF 持久化详解">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;Redis-AOF-%E6%8C%81%E4%B9%85%E5%8C%96%E8%AF%A6%E8%A7%A3&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="Redis 是一种内存数据库，将数据保存在内存中，读写效率要比传统的将数据保存在磁盘上的数据库要快很多。但是一旦进程退出，Redis 的数据就会丢失。为了解决这个问题，Redis 提供了 RDB 和 AOF 两种持久化方案，将内存中的数据保存到磁盘中，避免数据丢失。RDB的介绍在这篇文章中《Redis RDB 持久化详解》，今天我们来看一下 AOF 相关的原理。AOF( append only f">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031154215-6ecb2.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031154216-45df6.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031154219-d4735.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031154221-e1da4.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031154224-e74d8.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031154226-ad6c5.png">
+<meta property="og:updated_time" content="2020-01-08T05:24:58.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031154215-6ecb2.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/Redis-AOF-%E6%8C%81%E4%B9%85%E5%8C%96%E8%AF%A6%E8%A7%A3/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Redis AOF 持久化详解 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/Redis-AOF-%E6%8C%81%E4%B9%85%E5%8C%96%E8%AF%A6%E8%A7%A3/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Redis AOF 持久化详解
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 13:24:58" itemprop="dateCreated datePublished" datetime="2020-01-08T13:24:58+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/Redis/" itemprop="url" rel="index">
+                    <span itemprop="name">Redis</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>Redis 是一种内存数据库，将数据保存在内存中，读写效率要比传统的将数据保存在磁盘上的数据库要快很多。但是一旦进程退出，Redis 的数据就会丢失。<br>为了解决这个问题，Redis 提供了 RDB 和 AOF 两种持久化方案，将内存中的数据保存到磁盘中，避免数据丢失。RDB的介绍在这篇文章中<a href="https://links.jianshu.com/go?to=https%3A%2F%2Fmp.weixin.qq.com%2Fs%2FNpUV-7bvXTD3iu0_2aRssQ" target="_blank" rel="noopener">《Redis RDB 持久化详解》</a>，今天我们来看一下 AOF 相关的原理。<br>AOF( append only file )持久化以独立日志的方式记录每次写命令，并在 Redis 重启时在重新执行 AOF 文件中的命令以达到恢复数据的目的。AOF 的主要作用是解决数据持久化的实时性。</p>
+<a id="more"></a>
+
+<h2 id="RDB-和-AOF"><a href="#RDB-和-AOF" class="headerlink" title="RDB 和 AOF"></a>RDB 和 AOF</h2><p>antirez 在《Redis 持久化解密》一文中讲述了 RDB 和 AOF 各自的优缺点：</p>
+<ul>
+<li>RDB 是一个紧凑压缩的二进制文件，代表 Redis 在某个时间点上的数据备份。非常适合备份，全量复制等场景。比如每6小时执行 bgsave 备份，并把 RDB 文件拷贝到远程机器或者文件系统中，用于灾难恢复。</li>
+<li>Redis 加载 RDB 恢复数据远远快于 AOF 的方式</li>
+<li>RDB 方式数据没办法做到实时持久化，而 AOF 方式可以做到。</li>
+</ul>
+<p>下面，我们就来了解一下 AOF 是如何做到实时持久化的。</p>
+<h2 id="AOF-持久化的实现"><a href="#AOF-持久化的实现" class="headerlink" title="AOF 持久化的实现"></a>AOF 持久化的实现</h2><p><img src="http://image.winrains.cn/2019/10/20191031154215-6ecb2.png" alt="img"></p>
+<p>如上图所示，AOF 持久化功能的实现可以分为命令追加( append )、文件写入( write )、文件同步( sync )、文件重写(rewrite)和重启加载(load)。其流程如下：</p>
+<ul>
+<li>所有的写命令会追加到 AOF 缓冲中。</li>
+<li>AOF 缓冲区根据对应的策略向硬盘进行同步操作。</li>
+<li>随着 AOF 文件越来越大，需要定期对 AOF 文件进行重写，达到压缩的目的。</li>
+<li>当 Redis 重启时，可以加载 AOF 文件进行数据恢复。</li>
+</ul>
+<h3 id="命令追加"><a href="#命令追加" class="headerlink" title="命令追加"></a>命令追加</h3><p>当 AOF 持久化功能处于打开状态时，Redis 在执行完一个写命令之后，会以协议格式(也就是RESP，即 Redis 客户端和服务器交互的通信协议 )将被执行的写命令追加到 Redis 服务端维护的 AOF 缓冲区末尾。<br>比如说 SET mykey myvalue 这条命令就以如下格式记录到 AOF 缓冲中。</p>
+<figure class="highlight taggerscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">"*3<span class="symbol">\r</span><span class="symbol">\n</span>$3<span class="symbol">\r</span><span class="symbol">\n</span>SET<span class="symbol">\r</span><span class="symbol">\n</span>$5<span class="symbol">\r</span><span class="symbol">\n</span>mykey<span class="symbol">\r</span><span class="symbol">\n</span>$7<span class="symbol">\r</span><span class="symbol">\n</span>myvalue<span class="symbol">\r</span><span class="symbol">\n</span>"</span></pre></td></tr></table></figure>
+
+<p>Redis 协议格式本文不再赘述，AOF之所以直接采用文本协议格式，是因为所有写入命令都要进行追加操作，直接采用协议格式，避免了二次处理开销。</p>
+<h3 id="文件写入和同步"><a href="#文件写入和同步" class="headerlink" title="文件写入和同步"></a>文件写入和同步</h3><p>Redis 每次结束一个事件循环之前，它都会调用 <code>flushAppendOnlyFile</code> 函数，判断是否需要将 AOF 缓存区中的内容写入和同步到 AOF 文件中。<br><code>flushAppendOnlyFile</code> 函数的行为由 redis.conf 配置中的 <code>appendfsync</code> 选项的值来决定。该选项有三个可选值，分别是 <code>always</code>、<code>everysec</code> 和 <code>no</code>：</p>
+<ul>
+<li><code>always</code>：Redis 在每个事件循环都要将 AOF 缓冲区中的所有内容写入到 AOF 文件，并且同步 AOF 文件，所以 <code>always</code> 的效率是 <code>appendfsync</code> 选项三个值当中最差的一个，但从安全性来说，也是最安全的。当发生故障停机时，AOF 持久化也只会丢失一个事件循环中所产生的命令数据。</li>
+<li><code>everysec</code>：Redis 在每个事件循环都要将 AOF 缓冲区中的所有内容写入到 AOF 文件中，并且每隔一秒就要在子线程中对 AOF 文件进行一次同步。从效率上看，该模式足够快。当发生故障停机时，只会丢失一秒钟的命令数据。</li>
+<li><code>no</code>：Redis 在每一个事件循环都要将 AOF 缓冲区中的所有内容写入到 AOF 文件。而 AOF 文件的同步由操作系统控制。这种模式下速度最快，但是同步的时间间隔较长，出现故障时可能会丢失较多数据。</li>
+</ul>
+<p>Linux 系统下 <code>write</code> 操作会触发延迟写( delayed write )机制。Linux 在内核提供页缓存区用来提供硬盘 IO 性能。<code>write</code> 操作在写入系统缓冲区之后直接返回。同步硬盘操作依赖于系统调度机制，例如：缓冲区页空间写满或者达到特定时间周期。同步文件之前，如果此时系统故障宕机，缓冲区内数据将丢失。<br>而 <code>fsync</code> 针对单个文件操作，对其进行强制硬盘同步，<code>fsync</code> 将阻塞直到写入磁盘完成后返回，保证了数据持久化。<br><code>appendfsync</code>的三个值代表着三种不同的调用 <code>fsync</code>的策略。调用<code>fsync</code>周期越频繁，读写效率就越差，但是相应的安全性越高，发生宕机时丢失的数据越少。<br>有关 Linux 的I/O和各个系统调用的作用如下图所示。具体内容可以查看<a href="https://links.jianshu.com/go?to=https%3A%2F%2Fmp.weixin.qq.com%2Fs%2F3mKxTH2pfXFpDvvJnDtgEQ" target="_blank" rel="noopener">《聊聊 Linux I/O》</a>一文。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031154216-45df6.png" alt="img"></p>
+<h2 id="AOF-数据恢复"><a href="#AOF-数据恢复" class="headerlink" title="AOF 数据恢复"></a>AOF 数据恢复</h2><p>AOF 文件里边包含了重建 Redis 数据所需的所有写命令，所以 Redis 只要读入并重新执行一遍 AOF 文件里边保存的写命令，就可以还原 Redis 关闭之前的状态。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031154219-d4735.png" alt="img"></p>
+<p>Redis 读取 AOF 文件并且还原数据库状态的详细步骤如下：</p>
+<ul>
+<li>创建一个不带网络连接的的伪客户端( fake client)，因为 Redis 的命令只能在客户端上下文中执行，而载入 AOF 文件时所使用的的命令直接来源于 AOF 文件而不是网络连接，所以服务器使用了一个没有网络连接的伪客户端来执行 AOF 文件保存的写命令，伪客户端执行命令的效果和带网络连接的客户端执行命令的效果完全一样的。</li>
+<li>从 AOF 文件中分析并取出一条写命令。</li>
+<li>使用伪客户端执行被读出的写命令。</li>
+<li>一直执行步骤 2 和步骤3，直到 AOF 文件中的所有写命令都被处理完毕为止。</li>
+</ul>
+<p>当完成以上步骤之后，AOF 文件所保存的数据库状态就会被完整还原出来。</p>
+<h2 id="AOF-重写"><a href="#AOF-重写" class="headerlink" title="AOF 重写"></a>AOF 重写</h2><p>因为 AOF 持久化是通过保存被执行的写命令来记录 Redis 状态的，所以随着 Redis 长时间运行，AOF 文件中的内容会越来越多，文件的体积也会越来越大，如果不加以控制的话，体积过大的 AOF 文件很可能对 Redis 甚至宿主计算机造成影响。<br>为了解决 AOF 文件体积膨胀的问题，Redis 提供了 AOF 文件重写( rewrite) 功能。通过该功能，Redis 可以创建一个新的 AOF 文件来替代现有的 AOF 文件。新旧两个 AOF 文件所保存的 Redis 状态相同，但是新的 AOF 文件不会包含任何浪费空间的荣誉命令，所以新 AOF 文件的体积通常比旧 AOF 文件的体积要小得很多。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031154221-e1da4.png" alt="img"></p>
+<p>如上图所示，重写前要记录名为<code>list</code>的键的状态，AOF 文件要保存五条命令，而重写后，则只需要保存一条命令。<br>AOF 文件重写并不需要对现有的 AOF 文件进行任何读取、分析或者写入操作，而是通过读取服务器当前的数据库状态来实现的。首先从数据库中读取键现在的值，然后用一条命令去记录键值对，代替之前记录这个键值对的多条命令，这就是 AOF 重写功能的实现原理。<br>在实际过程中，为了避免在执行命令时造成客户端输入缓冲区溢出，AOF 重写在处理列表、哈希表、集合和有序集合这四种可能会带有多个元素的键时，会先检查键所包含的元素数量，如果数量超过 REDIS_AOF_REWRITE_ITEMS_PER_CMD ( 一般为64 )常量，则使用多条命令记录该键的值，而不是一条命令。<br>rewrite的触发机制主要有一下三个：</p>
+<ul>
+<li>手动调用 bgrewriteaof 命令，如果当前有正在运行的 rewrite 子进程，则本次rewrite 会推迟执行，否则，直接触发一次 rewrite。</li>
+<li>通过配置指令手动开启 AOF 功能，如果没有 RDB 子进程的情况下，会触发一次 rewrite，将当前数据库中的数据写入 rewrite 文件。</li>
+<li>在 Redis 定时器中，如果有需要退出执行的 rewrite 并且没有正在运行的 RDB 或者 rewrite 子进程时，触发一次或者 AOF 文件大小已经到达配置的 rewrite 条件也会自动触发一次。</li>
+</ul>
+<h2 id="AOF-后台重写"><a href="#AOF-后台重写" class="headerlink" title="AOF 后台重写"></a>AOF 后台重写</h2><p>AOF 重写函数会进行大量的写入操作，调用该函数的线程将被长时间阻塞，所以 Redis 在子进程中执行 AOF 重写操作。</p>
+<ul>
+<li>子进程进行 AOF 重写期间，Redis 进程可以继续处理客户端命令请求。</li>
+<li>子进程带有父进程的内存数据拷贝副本，在不适用锁的情况下，也可以保证数据的安全性。</li>
+</ul>
+<p>但是，在子进程进行 AOF 重启期间，Redis接收客户端命令，会对现有数据库状态进行修改，从而导致数据当前状态和 重写后的 AOF 文件所保存的数据库状态不一致。<br>为此，Redis 设置了一个 AOF 重写缓冲区，这个缓冲区在服务器创建子进程之后开始使用，当 Redis 执行完一个写命令之后，它会同时将这个写命令发送给 AOF 缓冲区和 AOF 重写缓冲区。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031154224-e74d8.png" alt="img"></p>
+<p>当子进程完成 AOF 重写工作之后，它会向父进程发送一个信号，父进程在接收到该信号之后，会调用一个信号处理函数，并执行以下工作：</p>
+<ul>
+<li>将 AOF 重写缓冲区中的所有内容写入到新的 AOF 文件中，保证新 AOF 文件保存的数据库状态和服务器当前状态一致。</li>
+<li>对新的 AOF 文件进行改名，原子地覆盖现有 AOF 文件，完成新旧文件的替换</li>
+<li>继续处理客户端请求命令。</li>
+</ul>
+<p>在整个 AOF 后台重写过程中，只有信号处理函数执行时会对 Redis 主进程造成阻塞，在其他时候，AOF 后台重写都不会阻塞主进程。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031154226-ad6c5.png" alt="img"></p>
+<h2 id="后记"><a href="#后记" class="headerlink" title="后记"></a>后记</h2><p>后续将会继续学习 Redis 复制和集群相关的知识，希望大家持久关注。</p>
+<blockquote>
+<p>作者：程序员历小冰</p>
+<p>来源：<a href="https://www.jianshu.com/p/c55570df108b" target="_blank" rel="noopener">https://www.jianshu.com/p/c55570df108b</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Redis-%E4%BA%8B%E4%BB%B6%E6%9C%BA%E5%88%B6%E8%AF%A6%E8%A7%A3/" rel="prev" title="Redis 事件机制详解">
+      <i class="fa fa-chevron-left"></i> Redis 事件机制详解
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Redis-RDB-%E6%8C%81%E4%B9%85%E5%8C%96%E8%AF%A6%E8%A7%A3/" rel="next" title="Redis RDB 持久化详解">
+      Redis RDB 持久化详解 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#RDB-和-AOF"><span class="nav-number">1.</span> <span class="nav-text">RDB 和 AOF</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#AOF-持久化的实现"><span class="nav-number">2.</span> <span class="nav-text">AOF 持久化的实现</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#命令追加"><span class="nav-number">2.1.</span> <span class="nav-text">命令追加</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#文件写入和同步"><span class="nav-number">2.2.</span> <span class="nav-text">文件写入和同步</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#AOF-数据恢复"><span class="nav-number">3.</span> <span class="nav-text">AOF 数据恢复</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#AOF-重写"><span class="nav-number">4.</span> <span class="nav-text">AOF 重写</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#AOF-后台重写"><span class="nav-number">5.</span> <span class="nav-text">AOF 后台重写</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#后记"><span class="nav-number">6.</span> <span class="nav-text">后记</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

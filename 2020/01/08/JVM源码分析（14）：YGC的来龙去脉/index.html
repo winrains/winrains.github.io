@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="换了新工作，确实比以前忙多了，从而也搁置了自己兴趣，不过还是想方设法的挤出一点时间把YGC的一些细节实现重新看了几遍，HotSpot里的不少代码写的太纠结，山路十八弯，要理清楚确实需要费点时间。YGC是JVM GC当前最为频繁的一种GC，一个高并发的服务在运行期间，会进行大量的YGC，发生YGC时，会进行STW，一般时间都很短，除非碰到YGC时，存在大量的存活对象需要进行拷贝。一次YGC过程主要分">
+<meta name="keywords" content="源码">
+<meta property="og:type" content="article">
+<meta property="og:title" content="JVM源码分析（14）：YGC的来龙去脉">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8814%EF%BC%89%EF%BC%9AYGC%E7%9A%84%E6%9D%A5%E9%BE%99%E5%8E%BB%E8%84%89&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="换了新工作，确实比以前忙多了，从而也搁置了自己兴趣，不过还是想方设法的挤出一点时间把YGC的一些细节实现重新看了几遍，HotSpot里的不少代码写的太纠结，山路十八弯，要理清楚确实需要费点时间。YGC是JVM GC当前最为频繁的一种GC，一个高并发的服务在运行期间，会进行大量的YGC，发生YGC时，会进行STW，一般时间都很短，除非碰到YGC时，存在大量的存活对象需要进行拷贝。一次YGC过程主要分">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030180109-cefb9.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030180111-d05f9.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030180112-e77e5.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030180113-385c6.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030180113-47b69.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030180114-c7ab5.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030180115-8a11d.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030180117-29bc5.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030180119-20474.png">
+<meta property="og:updated_time" content="2020-01-08T03:49:36.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030180109-cefb9.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8814%EF%BC%89%EF%BC%9AYGC%E7%9A%84%E6%9D%A5%E9%BE%99%E5%8E%BB%E8%84%89/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>JVM源码分析（14）：YGC的来龙去脉 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8814%EF%BC%89%EF%BC%9AYGC%E7%9A%84%E6%9D%A5%E9%BE%99%E5%8E%BB%E8%84%89/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          JVM源码分析（14）：YGC的来龙去脉
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 11:49:36" itemprop="dateCreated datePublished" datetime="2020-01-08T11:49:36+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/" itemprop="url" rel="index">
+                    <span itemprop="name">JVM</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>换了新工作，确实比以前忙多了，从而也搁置了自己兴趣，不过还是想方设法的挤出一点时间把YGC的一些细节实现重新看了几遍，HotSpot里的不少代码写的太纠结，山路十八弯，要理清楚确实需要费点时间。<br>YGC是JVM GC当前最为频繁的一种GC，一个高并发的服务在运行期间，会进行大量的YGC，发生YGC时，会进行STW，一般时间都很短，除非碰到YGC时，存在大量的存活对象需要进行拷贝。<br>一次YGC过程主要分成两个步骤：<br>1、查找GC Roots，拷贝所引用的对象到 to 区；<br>2、递归遍历步骤1中对象，并拷贝其所引用的对象到 to 区，当然可能会存在自然晋升，或者因为 to 区空间不足引起的提前晋升的情况；<br>下面进行分析的是Serial GC，ParNew GC可以理解成并发的Serial GC，实现原理都差不多，看源码的话建议看Serial GC 的实现类DefNewGeneration，毕竟单线程实现的复杂性会低一点，在DefNewGeneration中，会看到一些以 *-Closure 方式命名的类，这些都是封装起来的回调函数，是为了让GC的具体逻辑与对象内部的字段遍历逻辑能够松耦合，比如ScanClosure 与 FastScanClosure 作为回调函数传入到各个方法中，实现GC实现的对象遍历，正因为这种实现方式，大大增加了阅读源码的难度。</p>
+<a id="more"></a>
+
+<h2 id="查找GC-Roots"><a href="#查找GC-Roots" class="headerlink" title="查找GC Roots"></a>查找GC Roots</h2><p>YGC的第一步根据GC Roots找出第一批活跃的对象，Hotspot中通过<code>gch-&gt;gen_process_strong_roots</code>方法实现</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030180109-cefb9.png" alt="img"></p>
+<p>在黄色框的实现中，<code>SharedHeap::process_strong_roots()</code>扫描了所有一定是GC Roots的内存区域，有兴趣的可以查看<code>process_strong_roots</code>的实现，主要包括了以下东西：</p>
+<ul>
+<li>Universe类中所引用的一些必须存活的对象 <code>Universe::oops_do(roots)</code></li>
+<li>所有JNI Handles <code>JNIHandles::oops_do(roots)</code></li>
+<li>所有线程的栈 <code>Threads::oops_do(roots, code_roots)</code></li>
+<li>所有被Synchronize锁持有的对象 <code>ObjectSynchronizer::oops_do(roots)</code></li>
+<li>VM内实现的MBean所持有的对象 <code>Management::oops_do(roots)</code></li>
+<li>JVMTI所持有的对象 <code>JvmtiExport::oops_do(roots)</code></li>
+<li>（可选）所有已加载的类 或 所有已加载的系统类 <code>SystemDictionary::oops_do(roots)</code></li>
+<li>（可选）所有驻留字符串（StringTable） <code>StringTable::oops_do(roots)</code></li>
+<li>（可选）代码缓存（CodeCache） <code>CodeCache::scavenge_root_nmethods_do(code_roots)</code></li>
+<li>（可选）PermGen的remember set所记录的存在跨代引用的区域 <code>rem_set()-&gt;younger_refs_iterate(perm_gen(), perm_blk)</code></li>
+</ul>
+<p>YGC在执行时只收集young generation，不收集old generation和perm generation，并不会做类的卸载行为，所以上述可选部分都作为Strong root，但是在FGC时就不会当作Strong root了。<br>红色框中的实现逻辑对于YGC来说是没有意义的，因为level=0，Hotspot中唯一用到这个地方的只有CMS GC实现，默认只收集old generation，所以需要扫描young generation作为它的Strong root。<br>讲到这里，似乎有一部分被忽略了，如果一个old generation的对象引用了young generation，那么这个old generation的对象肯定也属于Strong root的一部分，这部分逻辑并没有在<code>process_strong_roots</code>中实现，而是在绿色框中实现了，其中rem_set中保存了old generation中dirty card的对应区域，每次对象的拷贝移动都会检查一下是否产生了新的跨代引用，比如有对象晋升到了old generation，而该对象还引用了young generation的对象，这种情况下会把相应的card置为dirty，下次YGC的时候只会扫描dirty card所指内存的对象，避免扫描所有的old generation对象。</p>
+<h2 id="遍历活跃对象"><a href="#遍历活跃对象" class="headerlink" title="遍历活跃对象"></a>遍历活跃对象</h2><p>在查找GC Roots的步骤中，已经找出了第一批存活的对象，这些存活对象可能在 to-space，也有可能直接晋升到了 old generation，这些区域都是需要进行遍历的，保证所有的活跃对象都能存活下来。<br>遍历过程的实现由FastEvacuateFollowersClosure类的do_void方法完成，这又是一个*-Closure 方式命名的类，实现如下</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030180111-d05f9.png" alt="img"></p>
+<p>每个内存区域都有两个指针变量，分别是 _saved_mark_word 和 _top，其中_saved_mark_word 指向当前遍历对象的位置，_top指向当前内存区域可分配的位置，其中_saved_mark_word 到 _top之间的对象是已拷贝，但未扫描的对象。<br><img src="http://image.winrains.cn/2019/10/20191030180112-e77e5.png" alt="img"><br>GC Roots引用的对象拷贝完成后，to-space的_saved_mark_word和_top的状态如上图所示，假设期间没有对象晋升到old generation。每次扫描一个对象，_saved_mark_word会往前移动，期间也有新的对象会被拷贝到to-space，_top也会往前移动，直到_saved_mark_word追上_top，说明to-space的对象都已经遍历完成。<br>其中while循环条件 <code>while (!_gch-&gt;no_allocs_since_save_marks(_level)</code>，就是在判断各个内存代中的_saved_mark_word是否已经追到_top，如果还没有追上，就执行<code>_gch-&gt;oop_since_save_marks_iterate</code>进行遍历，实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030180113-385c6.png" alt="img"></p>
+<p>从代码实现可以看出对新生代、老年代和永久代都会进行遍历，其中新生代的遍历实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030180113-47b69.png" alt="img"></p>
+<p>这里会对eden、from和to分别进行遍历，第一次看这块逻辑的时候很纳闷，为什么要对eden和from-space进行遍历，from倒没什么问题，_saved_mark_word和_top一般都是相同的，但是eden区的_saved_mark_word明显不会等于_top，一直没有找到在eden区分配对象时，改变_top的同时也改变_saved_mark_word的逻辑，后来发现<code>GenCollectedHeap::do_collection</code>方法中，在调用各个代的collect之前，会调用save_marks()方法，将_saved_mark_word设置为_top，这样在发生YGC时，eden区的对象其实是不会被遍历的，被这个疑惑困扰了好久，结果是个遗留代码。<br>to-space对象的遍历实现：<br><img src="http://image.winrains.cn/2019/10/20191030180114-c7ab5.png" alt="img"><br>这里的blk变量是传递过来的FastScanClosure回调函数，oop_iterate方法会遍历该对象的所有引用，并调用回调函数的do_oop_work方法处理这里引用所指向的对象。<br><code>do_oop_work</code>的实现</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030180115-8a11d.png" alt="img"></p>
+<p>在FastScanClosure回调函数的do_oop_work方法实现中，红框的是重要的部分，因为可能存在多个对象共同引用一个对象，所以在遍历过程中，可能会遇到已经处理过的对象，如果遇到这样的对象，就不会再次进行复制了，如果该对象没有被拷贝过，则调用 <code>copy_to_survivor_space</code> 方法拷贝对象到to-space或者晋升到old generation，这里提一下ParNew的实现，因为是并发执行的，所以可能存在多个线程拷贝了同一个对象到to-space，不过通过原子操作，保证了只有一个对象是有效的。<br><code>copy_to_survivor_space</code> 的实现：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030180117-29bc5.png" alt="img"></p>
+<p>拷贝对象的目标空间不一定是to-space，也有可能是old generation，如果一个对象经历了很多次YGC，会从young generation直接晋升到old generation，为了记录对象经历的YGC次数，在对象头的mark word 数据结构中有一个位置记录着对象的YGC次数，也叫对象的年龄，如果扫描到的对象，其年龄小于某个阈值（tenuring threshold），该对象会被拷贝到to-space，并增加该对象的年龄，同时to-space的_top指针也会往后移动，这个新对象等待着被扫描。<br><img src="http://image.winrains.cn/2019/10/20191030180119-20474.png" alt="img"><br>如果该对象的年龄大于某个阈值，会晋升到old generation，或者在拷贝到to-space时空间不足，也会提前晋升到old generation，晋升过程通过老年代_next_gen的promote方法实现，如果old generation也没有足够的空间容纳该对象，则会触发晋升失败。<br>参考<br><a href="https://link.jianshu.com?t=http://hllvm.group.iteye.com/group/topic/39376" target="_blank" rel="noopener">http://hllvm.group.iteye.com/group/topic/39376</a></p>
+<blockquote>
+<p>作者：占小狼</p>
+<p>来源：<a href="https://www.jianshu.com/p/9af1a63a33c3" target="_blank" rel="noopener">https://www.jianshu.com/p/9af1a63a33c3</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E6%BA%90%E7%A0%81/" rel="tag"># 源码</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8813%EF%BC%89%EF%BC%9A%E7%BA%BF%E7%A8%8B%E5%B1%80%E9%83%A8%E7%BC%93%E5%AD%98TLAB/" rel="prev" title="JVM源码分析（13）：线程局部缓存TLAB">
+      <i class="fa fa-chevron-left"></i> JVM源码分析（13）：线程局部缓存TLAB
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Kafka%E8%AE%BE%E8%AE%A1%E8%A7%A3%E6%9E%90%EF%BC%881%EF%BC%89%EF%BC%9AKafka%E8%83%8C%E6%99%AF%E5%8F%8A%E6%9E%B6%E6%9E%84%E4%BB%8B%E7%BB%8D/" rel="next" title="Kafka设计解析（1）：Kafka背景及架构介绍">
+      Kafka设计解析（1）：Kafka背景及架构介绍 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#查找GC-Roots"><span class="nav-number">1.</span> <span class="nav-text">查找GC Roots</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#遍历活跃对象"><span class="nav-number">2.</span> <span class="nav-text">遍历活跃对象</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

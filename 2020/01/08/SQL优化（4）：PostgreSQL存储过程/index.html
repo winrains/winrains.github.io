@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="存储过程简介什么是存储过程百度百科是这么描述存储过程的：存储过程（Stored Procedure）是在大型数据库系统中，一组为了完成特定功能的SQL语句集，存储在数据库中，首次编译后再次调用不需要再次编译，用户通过指定存储过程的名字并给出参数（如果有）来执行它。它是数据库中的一个重要对象，任何一个设计良好的数据库应用程序都应该用到存储过程。维基百科是这样定义的：A stored procedur">
+<meta property="og:type" content="article">
+<meta property="og:title" content="SQL优化（4）：PostgreSQL存储过程">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;SQL%E4%BC%98%E5%8C%96%EF%BC%884%EF%BC%89%EF%BC%9APostgreSQL%E5%AD%98%E5%82%A8%E8%BF%87%E7%A8%8B&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="存储过程简介什么是存储过程百度百科是这么描述存储过程的：存储过程（Stored Procedure）是在大型数据库系统中，一组为了完成特定功能的SQL语句集，存储在数据库中，首次编译后再次调用不需要再次编译，用户通过指定存储过程的名字并给出参数（如果有）来执行它。它是数据库中的一个重要对象，任何一个设计良好的数据库应用程序都应该用到存储过程。维基百科是这样定义的：A stored procedur">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;9979b-pg_udf_stored_precedure.png">
+<meta property="og:updated_time" content="2020-01-08T05:15:17.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;9979b-pg_udf_stored_precedure.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/SQL%E4%BC%98%E5%8C%96%EF%BC%884%EF%BC%89%EF%BC%9APostgreSQL%E5%AD%98%E5%82%A8%E8%BF%87%E7%A8%8B/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>SQL优化（4）：PostgreSQL存储过程 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/SQL%E4%BC%98%E5%8C%96%EF%BC%884%EF%BC%89%EF%BC%9APostgreSQL%E5%AD%98%E5%82%A8%E8%BF%87%E7%A8%8B/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          SQL优化（4）：PostgreSQL存储过程
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 13:15:17" itemprop="dateCreated datePublished" datetime="2020-01-08T13:15:17+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="存储过程简介"><a href="#存储过程简介" class="headerlink" title="存储过程简介"></a>存储过程简介</h1><h2 id="什么是存储过程"><a href="#什么是存储过程" class="headerlink" title="什么是存储过程"></a>什么是存储过程</h2><p>百度百科是这么描述存储过程的：存储过程（Stored Procedure）是在大型数据库系统中，一组为了完成特定功能的SQL语句集，存储在数据库中，首次编译后再次调用不需要再次编译，用户通过指定存储过程的名字并给出参数（如果有）来执行它。它是数据库中的一个重要对象，任何一个设计良好的数据库应用程序都应该用到存储过程。<br>维基百科是这样定义的：A stored procedure (also termed proc, storp, sproc, StoPro, StoredProc, StoreProc, sp, or SP) is a subroutine available to applications that access a relational database management system (RDMS). Such procedures are stored in the database data dictionary。<br>PostgreSQL对存储过程的描述是：存储过程和用户自定义函数（UDF）是SQL和过程语句的集合，它存储于数据库服务器并能被SQL接口调用。<br>总结下来存储过程有如下特性：</p>
+<ul>
+<li>存储于数据库服务器</li>
+<li>一次编译后可多次调用</li>
+<li>设计良好的数据库应用程序很可能会用到它</li>
+<li>由SQL和过程语句来定义</li>
+<li>应用程序通过SQL接口来调用</li>
+</ul>
+<a id="more"></a>
+
+<h2 id="使用存储过程的优势及劣势"><a href="#使用存储过程的优势及劣势" class="headerlink" title="使用存储过程的优势及劣势"></a>使用存储过程的优势及劣势</h2><p>首先看看使用存储过程的优势</p>
+<ul>
+<li>减少应用与数据库服务器的通信开销，从而提升整体性能。笔者在项目中使用的存储过程，少则几十行，多则几百行甚至上千行（假设一行10个字节，一千行即相当于10KB），如果不使用存储过程而直接通过应用程序将相应SQL请求发送到数据库服务器，会增大网络通信开销。相反，使用存储过程能降低该开销，从而提升整体性能。尤其在一些BI系统中，一个页面往往要使用多个存储过程，此时存储过程降低网络通信开销的优势非常明显</li>
+<li>一次编译多次调用，提高性能。存储过程存于数据库服务器中，第一次被调用后即被编译，之后再调用时无需再次编译，直接执行，提高了性能</li>
+<li>同一套业务逻辑可被不同应用程序共用，减少了应用程序的开发复杂度，同时也保证了不同应用程序使用的一致性</li>
+<li>保护数据库元信息。如果应用程序直接使用SQL语句查询数据库，会将数据库表结构暴露给应用程序，而使用存储过程是应用程序并不知道数据库表结构</li>
+<li>更细粒度的数据库权限管理。直接从表读取数据时，对应用程序只能实现表级别的权限管理，而使用存储过程是，可在存储过程中将应用程序无权访问的数据屏蔽</li>
+<li>将业务实现与应用程序解耦。当业务需求更新时，只需更改存储过程的定义，而不需要更改应用程序</li>
+<li>可以通过其它语言并可及其它系统交互。比如可以使用PL/Java与Kafka交互，将存储过程的参数Push到Kafka或者将从Kafka获取的数据作为存储过程的结果返回给调用方</li>
+</ul>
+<p>当然，使用存储过程也有它的劣势</p>
+<ul>
+<li>不便于调试。尤其在做性能调优时，以PostgreSQL为例，可使用EXPLAIN ANALYZE检查SQL查询计划，从而方便的进行性能调优。而使用存储过程时，EXPLAIN ANALYZE无法显示其内部查询计划</li>
+<li>不便于移植到其它数据库。直接使用SQL时，SQL存于应用程序中，对大部分标准SQL而言，换用其它数据库并不影响应用程序的使用。而使用存储过程时，由于不同数据库的存储过程定义方式不同，支持的语言及语法不同，移植成本较高</li>
+</ul>
+<h1 id="存储过程在PostgreSQL中的使用"><a href="#存储过程在PostgreSQL中的使用" class="headerlink" title="存储过程在PostgreSQL中的使用"></a>存储过程在PostgreSQL中的使用</h1><h2 id="PostgreSQL支持的过程语言"><a href="#PostgreSQL支持的过程语言" class="headerlink" title="PostgreSQL支持的过程语言"></a>PostgreSQL支持的过程语言</h2><p>PostgreSQL官方支持PL/pgSQL，PL/Tcl，PL/Perl和PL/Python这几种过程语言。同时还支持一些第三方提供的过程语言，如PL/Java，PL/PHP，PL/Py，PL/R，PL/Ruby，PL/Scheme，PL/sh。</p>
+<h2 id="基于SQL的存储过程定义"><a href="#基于SQL的存储过程定义" class="headerlink" title="基于SQL的存储过程定义"></a>基于SQL的存储过程定义</h2><figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">OR REPLACE</span> <span class="keyword">FUNCTION</span> <span class="keyword">add</span>(a <span class="type">INTEGER</span>, b <span class="type">NUMERIC</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">RETURNS</span> <span class="type">NUMERIC</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">SELECT</span> a+b;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">$$</span> <span class="keyword">LANGUAGE</span> <span class="keyword">SQL</span>;</span></pre></td></tr></table></figure>
+
+<p>调用方法</p>
+<figure class="highlight asciidoc"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">SELECT add(1,2);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="code"> add</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">-----</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="code">   3</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">(1 row)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">SELECT * FROM add(1,2);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="code"> add</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">-----</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="code">   3</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">(1 row)</span></pre></td></tr></table></figure>
+
+<p>上面这种方式参数列表只包含函数输入参数，不包含输出参数。下面这个例子将同时包含输入参数和输出参数</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">OR REPLACE</span> <span class="keyword">FUNCTION</span> plus_and_minus</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">(<span class="keyword">IN</span> a <span class="type">INTEGER</span>, <span class="keyword">IN</span> b <span class="type">NUMERIC</span>, <span class="keyword">OUT</span> c <span class="type">NUMERIC</span>, <span class="keyword">OUT</span> d <span class="type">NUMERIC</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">SELECT</span> a+b, a-b;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">$$</span> <span class="keyword">LANGUAGE</span> <span class="keyword">SQL</span>;</span></pre></td></tr></table></figure>
+
+<p>调用方式</p>
+<figure class="highlight asciidoc"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">SELECT plus<span class="emphasis">_and_</span>minus(3,2);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="code"> add_and_minute</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">----------------</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="code"> (5,1)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">(1 row)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">SELECT * FROM plus<span class="emphasis">_and_</span>minus(3,2);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="code"> c | d</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">---+---</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="code"> 5 | 1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">(1 row)</span></pre></td></tr></table></figure>
+
+<p>该例中，IN代表输入参数，OUT代表输出参数。这个带输出参数的函数和之前的<code>add</code>函数并无本质区别。事实上，输出参数的最大价值在于它为函数提供了返回多个字段的途径。<br>在函数定义中，可以写多个SQL语句，不一定是SELECT语句，可以是其它任意合法的SQL。但最后一条SQL必须是SELECT语句，并且该SQL的结果将作为该函数的输出结果。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">OR</span> <span class="keyword">REPLACE</span> <span class="keyword">FUNCTION</span> plus_and_minus</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">(<span class="keyword">IN</span> a <span class="built_in">INTEGER</span>, <span class="keyword">IN</span> b <span class="built_in">NUMERIC</span>, <span class="keyword">OUT</span> c <span class="built_in">NUMERIC</span>, <span class="keyword">OUT</span> d <span class="built_in">NUMERIC</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">SELECT</span> a+b, a-b;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">INSERT</span> <span class="keyword">INTO</span> <span class="keyword">test</span> <span class="keyword">VALUES</span>(<span class="string">'test1'</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">SELECT</span> a-b, a+b;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">$$ LANGUAGE SQL;</span></pre></td></tr></table></figure>
+
+<p>其效果如下</p>
+<figure class="highlight asciidoc"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">SELECT * FROM plus<span class="emphasis">_and_</span>minus(5,3);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="code"> c | d</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">---+---</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="code"> 2 | 8</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">(1 row)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">SELECT * FROM test;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="code">   a</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">-------</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="code"> test1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">(1 row)</span></pre></td></tr></table></figure>
+
+<h2 id="基于PL-PgSQL的存储过程定义"><a href="#基于PL-PgSQL的存储过程定义" class="headerlink" title="基于PL/PgSQL的存储过程定义"></a>基于PL/PgSQL的存储过程定义</h2><p>PL/pgSQL是一个块结构语言。函数定义的所有文本都必须是一个块。一个块用下面的方法定义：</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">[ <span class="symbol">&lt;&lt;label&gt;&gt;</span> ]</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">[<span class="keyword">DECLARE</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  declarations]</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">BEGIN</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  statements</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">END</span> [ label ];</span></pre></td></tr></table></figure>
+
+<ul>
+<li>中括号部分为可选部分</li>
+<li>块中的每一个declaration和每一条statement都由一个分号终止</li>
+<li>块支持嵌套，嵌套时子块的END后面必须跟一个分号，最外层的块END后可不跟分号</li>
+<li>BEGIN后面不必也不能跟分号</li>
+<li>END后跟的label名必须和块开始时的标签名一致</li>
+<li>所有关键字都不区分大小写。标识符被隐含地转换成小写字符，除非被双引号包围</li>
+<li>声明的变量在当前块及其子块中有效，子块开始前可声明并覆盖（只在子块内覆盖）外部块的同名变量</li>
+<li>变量被子块中声明的变量覆盖时，子块可以通过外部块的label访问外部块的变量</li>
+</ul>
+<p>声明一个变量的语法如下：</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">name [ CONSTANT ]<span class="built_in"> type </span>[ <span class="keyword">NOT</span> <span class="literal">NULL</span> ] [ &#123;<span class="built_in"> DEFAULT </span>| := &#125; expression ];</span></pre></td></tr></table></figure>
+
+<p>使用PL/PgSQL语言的函数定义如下：</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">FUNCTION</span> somefunc() <span class="keyword">RETURNS</span> <span class="type">integer</span> <span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">DECLARE</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  quantity <span class="type">integer</span> := <span class="number">30</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">BEGIN</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="comment">-- Prints 30</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">RAISE</span> <span class="keyword">NOTICE</span> <span class="string">'Quantity here is %'</span>, quantity;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  quantity := 50;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="comment">-- Create a subblock</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">    <span class="keyword">DECLARE</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">    	quantity <span class="type">integer</span> := <span class="number">80</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">    <span class="keyword">BEGIN</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">    	<span class="comment">-- Prints 80</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">    	<span class="keyword">RAISE</span> <span class="keyword">NOTICE</span> <span class="string">'Quantity here is %'</span>, quantity;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">    	<span class="comment">-- Prints 50</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">    	<span class="keyword">RAISE</span> <span class="keyword">NOTICE</span> <span class="string">'Outer quantity here is %'</span>, outerblock.quantity;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">    <span class="keyword">END</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">    <span class="comment">-- Prints 50</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">RAISE</span> <span class="keyword">NOTICE</span> <span class="string">'Quantity here is %'</span>, quantity;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">    <span class="keyword">RETURN</span> quantity;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">END</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">$$</span> <span class="keyword">LANGUAGE</span> plpgsql;</span></pre></td></tr></table></figure>
+
+<h2 id="声明函数参数"><a href="#声明函数参数" class="headerlink" title="声明函数参数"></a>声明函数参数</h2><p>　　如果只指定输入参数类型，不指定参数名，则函数体里一般用1，</p>
+<p>n这样的标识符来使用参数。</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">OR REPLACE</span> <span class="keyword">FUNCTION</span> discount(<span class="type">NUMERIC</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">RETURNS</span> <span class="type">NUMERIC</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">BEGIN</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">RETURN</span> <span class="meta">$1</span> * <span class="number">0.8</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">END</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">$$</span> <span class="keyword">LANGUAGE</span> PLPGSQL;</span></pre></td></tr></table></figure>
+
+<p>但该方法可读性不好，此时可以为$n参数声明别名，然后可以在函数体内通过别名指向该参数值。</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">OR REPLACE</span> <span class="keyword">FUNCTION</span> discount(<span class="type">NUMERIC</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">RETURNS</span> <span class="type">NUMERIC</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">DECLARE</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  total <span class="keyword">ALIAS</span> <span class="keyword">FOR</span> <span class="meta">$1</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">BEGIN</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">RETURN</span> total * <span class="number">0.8</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">END</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">$$</span> <span class="keyword">LANGUAGE</span> PLPGSQL;</span></pre></td></tr></table></figure>
+
+<p>笔者认为上述方法仍然不够直观，也不够完美。幸好PostgreSQL提供另外一种更为直接的方法来声明函数参数，即在声明参数类型时同时声明相应的参数名。</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">OR REPLACE</span> <span class="keyword">FUNCTION</span> discount(total <span class="type">NUMERIC</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">RETURNS</span> <span class="type">NUMERIC</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">BEGIN</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">RETURN</span> total * <span class="number">0.8</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">END</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">$$</span> <span class="keyword">LANGUAGE</span> PLPGSQL;</span></pre></td></tr></table></figure>
+
+<h2 id="返回多行或多列"><a href="#返回多行或多列" class="headerlink" title="返回多行或多列"></a>返回多行或多列</h2><h3 id="使用自定义复合类型返回一行多列"><a href="#使用自定义复合类型返回一行多列" class="headerlink" title="使用自定义复合类型返回一行多列"></a>使用自定义复合类型返回一行多列</h3><p>PostgreSQL除了支持自带的类型外，还支持用户创建自定义类型。在这里可以自定义一个复合类型，并在函数中返回一个该复合类型的值，从而实现返回一行多列。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">TYPE</span> compfoo <span class="keyword">AS</span> (col1 <span class="built_in">INTEGER</span>, col2 <span class="built_in">TEXT</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">OR</span> <span class="keyword">REPLACE</span> <span class="keyword">FUNCTION</span> getCompFoo</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">(in_col1 <span class="built_in">INTEGER</span>, in_col2 <span class="built_in">TEXT</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">RETURNS</span> compfoo</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">DECLARE</span> <span class="keyword">result</span> compfoo;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">BEGIN</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  result.col1 := in_col1 * <span class="number">2</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">  result.col2 := in_col2 || '_result';</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">  RETURN result;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">END</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">$$ LANGUAGE PLPGSQL;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> * <span class="keyword">FROM</span> getCompFoo(<span class="number">1</span>,<span class="string">'1'</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"> col1 |   col2</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="comment">------+----------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    2 | 1_result</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">(1 row)</span></pre></td></tr></table></figure>
+
+<h3 id="使用输出参数名返回一行多列"><a href="#使用输出参数名返回一行多列" class="headerlink" title="使用输出参数名返回一行多列"></a>使用输出参数名返回一行多列</h3><p>在声明函数时，除指定输入参数名及类型外，还可同时声明输出参数类型及参数名。此时函数可以输出一行多列。</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">OR REPLACE</span> <span class="keyword">FUNCTION</span> get2Col</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">(<span class="keyword">IN</span> in_col1 <span class="type">INTEGER</span>,<span class="keyword">IN</span> in_col2 <span class="type">TEXT</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">OUT</span> out_col1 <span class="type">INTEGER</span>, <span class="keyword">OUT</span> out_col2 <span class="type">TEXT</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">BEGIN</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  out_col1 := in_col1 * 2;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">  out_col2 <span class="symbol">:</span>= in_col2 <span class="params">||</span> <span class="string">'_result'</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">END</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">$$</span> <span class="keyword">LANGUAGE</span> PLPGSQL;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> * <span class="keyword">FROM</span> get2Col(<span class="number">1</span>,<span class="string">'1'</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"> out_col1 | out_col2</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="comment">----------+----------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="number">2</span> | <span class="number">1</span>_result</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">(<span class="number">1</span> <span class="keyword">row</span>)</span></pre></td></tr></table></figure>
+
+<h3 id="使用SETOF返回多行记录"><a href="#使用SETOF返回多行记录" class="headerlink" title="使用SETOF返回多行记录"></a>使用SETOF返回多行记录</h3><p>实际项目中，存储过程经常需要返回多行记录，可以通过SETOF实现。</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">TYPE</span> compfoo <span class="keyword">AS</span> (col1 <span class="type">INTEGER</span>, col2 <span class="type">TEXT</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">OR REPLACE</span> <span class="keyword">FUNCTION</span> getSet(<span class="keyword">rows</span> <span class="type">INTEGER</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">RETURNS</span> <span class="keyword">SETOF</span> compfoo</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">BEGIN</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">RETURN QUERY</span> <span class="keyword">SELECT</span> i * <span class="number">2</span>, i || <span class="string">'_text'</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">FROM</span> generate_series(<span class="number">1</span>, <span class="keyword">rows</span>, <span class="number">1</span>) <span class="keyword">as</span> t(i);</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">END</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">$$</span> <span class="keyword">LANGUAGE</span> PLPGSQL;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> col1, col2 <span class="keyword">FROM</span> getSet(<span class="number">2</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"> col1 |  col2</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="comment">------+--------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    <span class="number">2</span> | <span class="number">1</span>_text</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    <span class="number">4</span> | <span class="number">2</span>_text</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">(<span class="number">2</span> <span class="keyword">rows</span>)</span></pre></td></tr></table></figure>
+
+<p>本例返回的每一行记录是复合类型，该方法也可返回基本类型的结果集，即多行一列。</p>
+<h3 id="使用RETURN-TABLE返回多行多列"><a href="#使用RETURN-TABLE返回多行多列" class="headerlink" title="使用RETURN TABLE返回多行多列"></a>使用RETURN TABLE返回多行多列</h3><figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">OR REPLACE</span> <span class="keyword">FUNCTION</span> getTable(<span class="keyword">rows</span> <span class="type">INTEGER</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">RETURNS</span> <span class="keyword">TABLE</span>(col1 <span class="type">INTEGER</span>, col2 <span class="type">TEXT</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">BEGIN</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">RETURN QUERY</span> <span class="keyword">SELECT</span> i * <span class="number">2</span>, i || <span class="string">'_text'</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">FROM</span> generate_series(<span class="number">1</span>, <span class="keyword">rows</span>, <span class="number">1</span>) <span class="keyword">as</span> t(i);</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">END</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">$$</span> <span class="keyword">LANGUAGE</span> PLPGSQL;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> col1, col2 <span class="keyword">FROM</span> getTable(<span class="number">2</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"> col1 |  col2</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="comment">------+--------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    <span class="number">2</span> | <span class="number">1</span>_text</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    <span class="number">4</span> | <span class="number">2</span>_text</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">(<span class="number">2</span> <span class="keyword">rows</span>)</span></pre></td></tr></table></figure>
+
+<p>此时从函数中读取字段就和从表或视图中取字段一样，可以看此种类型的函数看成是带参数的表或者视图。</p>
+<h2 id="使用EXECUTE语句执行动态命令"><a href="#使用EXECUTE语句执行动态命令" class="headerlink" title="使用EXECUTE语句执行动态命令"></a>使用EXECUTE语句执行动态命令</h2><p>有时在PL/pgSQL函数中需要生成动态命令，这个命令将包括他们每次执行时使用不同的表或者字符。EXECUTE语句用法如下：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">EXECUTE</span> command-<span class="keyword">string</span> [ <span class="keyword">INTO</span> [<span class="keyword">STRICT</span>] target] [<span class="keyword">USING</span> expression [, ...]];</span></pre></td></tr></table></figure>
+
+<p>　　此时PL/plSQL将不再缓存该命令的执行计划。相反，在该语句每次被执行的时候，命令都会编译一次。这也让该语句获得了对各种不同的字段甚至表进行操作的能力。<br>command-string包含了要执行的命令，它可以使用参数值，在命令中通过引用如1，2等来引用参数值。这些符号的值是指USING字句的值。这种方法对于在命令字符串中使用参数是最好的：它能避免运行时数值从文本来回转换，并且不容易产生SQL注入，而且它不需要引用或者转义。</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">TABLE</span> testExecute</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  i || <span class="string">''</span> <span class="keyword">AS</span> a,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  i <span class="keyword">AS</span> b</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">FROM</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  generate_series(<span class="number">1</span>, <span class="number">10</span>, <span class="number">1</span>) <span class="keyword">AS</span> t(i);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">OR REPLACE</span> <span class="keyword">FUNCTION</span> <span class="keyword">execute</span>(<span class="keyword">filter</span> <span class="type">TEXT</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">RETURNS</span> <span class="keyword">TABLE</span> (a <span class="type">TEXT</span>, b <span class="type">INTEGER</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">BEGIN</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">RETURN QUERY</span> <span class="keyword">EXECUTE</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">    <span class="string">'SELECT * FROM testExecute where a = $1'</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">USING</span> <span class="keyword">filter</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">END</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">$$</span> <span class="keyword">LANGUAGE</span> PLPGSQL;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> * <span class="keyword">FROM</span> <span class="keyword">execute</span>(<span class="string">'3'</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"> a | b</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="comment">---+---</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"> <span class="number">3</span> | <span class="number">3</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">(<span class="number">1</span> <span class="keyword">row</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> * <span class="keyword">FROM</span> <span class="keyword">execute</span>(<span class="string">'3'' or ''c''=''c'</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line"> a | b</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"><span class="comment">---+---</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">(<span class="number">0</span> <span class="keyword">rows</span>)</span></pre></td></tr></table></figure>
+
+<p>当然，也可以使用字符串拼接的方式在command-string中使用参数，但会有SQL注入的风险。</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">TABLE</span> testExecute</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  i || <span class="string">''</span> <span class="keyword">AS</span> a,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  i <span class="keyword">AS</span> b</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">FROM</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  generate_series(<span class="number">1</span>, <span class="number">10</span>, <span class="number">1</span>) <span class="keyword">AS</span> t(i);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">OR REPLACE</span> <span class="keyword">FUNCTION</span> <span class="keyword">execute</span>(<span class="keyword">filter</span> <span class="type">TEXT</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">RETURNS</span> <span class="keyword">TABLE</span> (a <span class="type">TEXT</span>, b <span class="type">INTEGER</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">BEGIN</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">RETURN QUERY</span> <span class="keyword">EXECUTE</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">    <span class="string">'SELECT * FROM testExecute where b = '''</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">    <span class="params">||</span> filter <span class="params">||</span> <span class="string">''</span><span class="string">''</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql"><span class="keyword">END</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">$$</span> <span class="keyword">LANGUAGE</span> PLPGSQL;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> * <span class="keyword">FROM</span> <span class="keyword">execute</span>(<span class="number">3</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"> a | b</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="comment">---+---</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"> <span class="number">3</span> | <span class="number">3</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">(<span class="number">1</span> <span class="keyword">row</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line"> <span class="keyword">SELECT</span> * <span class="keyword">FROM</span> <span class="keyword">execute</span>(<span class="string">'3'' or ''c''=''c'</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line"> a  | b</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"><span class="comment">----+----</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line"> <span class="number">1</span>  |  <span class="number">1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line"> <span class="number">2</span>  |  <span class="number">2</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line"> <span class="number">3</span>  |  <span class="number">3</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line"> <span class="number">4</span>  |  <span class="number">4</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line"> <span class="number">5</span>  |  <span class="number">5</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line"> <span class="number">6</span>  |  <span class="number">6</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line"> <span class="number">7</span>  |  <span class="number">7</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line"> <span class="number">8</span>  |  <span class="number">8</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line"> <span class="number">9</span>  |  <span class="number">9</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line"> <span class="number">10</span> | <span class="number">10</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">(<span class="number">10</span> <span class="keyword">rows</span>)</span></pre></td></tr></table></figure>
+
+<p>从该例中可以看出使用字符串拼接的方式在command-string中使用参数会引入SQL注入攻击的风险，而使用USING的方式则能有效避免这一风险。</p>
+<h2 id="PostgreSQL中的UDF与存储过程"><a href="#PostgreSQL中的UDF与存储过程" class="headerlink" title="PostgreSQL中的UDF与存储过程"></a>PostgreSQL中的UDF与存储过程</h2><p>本文中并未区分PostgreSQL中的UDF和存储过程。实际上PostgreSQL创建存储与创建UDF的方式一样，并没有专用于创建存储过程的语法，如CREATE PRECEDURE。在PostgreSQL官方文档中也暂未找到这二者的区别。倒是从一些资料中找对了它们的对比，如下表如示，仅供参考。<br><a href="http://image.winrains.cn/2019/10/9979b-pg_udf_stored_precedure.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/9979b-pg_udf_stored_precedure.png" alt="UDF VS. Stored Precedure"></a></p>
+<h2 id="多态SQL函数"><a href="#多态SQL函数" class="headerlink" title="多态SQL函数"></a>多态SQL函数</h2><p>SQL函数可以声明为接受多态类型（anyelement和anyarray）的参数或返回多态类型的返回值。</p>
+<ul>
+<li><p>函数参数和返回值均为多态类型。其调用方式和调用其它类型的SQL函数完全相同，只是在传递字符串类型的参数时，需要显示转换到目标类型，否则将会被视为unknown类型。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"> </span></pre></td></tr></table></figure>
+
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">OR REPLACE</span> <span class="keyword">FUNCTION</span> get_array(<span class="type">anyelement</span>, <span class="type">anyelement</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">RETURNS</span> <span class="type">anyarray</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">SELECT</span> <span class="keyword">ARRAY</span>[<span class="meta">$1</span>, <span class="meta">$2</span>];</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">$$</span> <span class="keyword">LANGUAGE</span> <span class="keyword">SQL</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> get_array(<span class="number">1</span>,<span class="number">2</span>), get_array(<span class="string">'a'</span>::<span class="type">text</span>,<span class="string">'b'</span>::<span class="type">text</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"> get_array | get_array</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="comment">-----------+-----------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"> &#123;<span class="number">1</span>,<span class="number">2</span>&#125;     | &#123;a,b&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">(<span class="number">1</span> <span class="keyword">row</span>)</span></pre></td></tr></table></figure>
+
+
+
+</li>
+</ul>
+<ul>
+<li><p>函数参数为多态类型，而返回值为基本类型</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"> </span></pre></td></tr></table></figure>
+
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">OR REPLACE</span> <span class="keyword">FUNCTION</span> is_greater(<span class="type">anyelement</span>, <span class="type">anyelement</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">RETURNS</span> <span class="type">BOOLEAN</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">SELECT</span> <span class="meta">$1</span> &gt; <span class="meta">$2</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">$$</span> <span class="keyword">LANGUAGE</span> <span class="keyword">SQL</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> is_greater(<span class="number">7.0</span>, <span class="number">4.5</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"> is_greater</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="comment">------------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"> t</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">(<span class="number">1</span> <span class="keyword">row</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> is_greater(<span class="number">2</span>, <span class="number">4</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"> is_greater</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment">------------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"> f</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">(<span class="number">1</span> <span class="keyword">row</span>)</span></pre></td></tr></table></figure>
+</li>
+<li><p>输入输出参数均为多态类型。这种情况与第一种情况一样。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"> </span></pre></td></tr></table></figure>
+
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">OR REPLACE</span> <span class="keyword">FUNCTION</span> get_array</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">(<span class="keyword">IN</span> <span class="type">anyelement</span>, <span class="keyword">IN</span> <span class="type">anyelement</span>, <span class="keyword">OUT</span> <span class="type">anyelement</span>, <span class="keyword">OUT</span> <span class="type">anyarray</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">AS</span> $$</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="pgsql">  <span class="keyword">SELECT</span> <span class="meta">$1</span>, <span class="keyword">ARRAY</span>[<span class="meta">$1</span>, <span class="meta">$2</span>];</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="ruby">$$</span> <span class="keyword">LANGUAGE</span> <span class="keyword">SQL</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> get_array(<span class="number">4</span>,<span class="number">5</span>), get_array(<span class="string">'c'</span>::<span class="type">text</span>, <span class="string">'d'</span>::<span class="type">text</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  get_array  |  get_array</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="comment">-------------+-------------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"> (<span class="number">4</span>,"&#123;4,5&#125;") | (c,"&#123;c,d&#125;")</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">(<span class="number">1</span> <span class="keyword">row</span>)</span></pre></td></tr></table></figure>
+
+
+
+</li>
+</ul>
+<h2 id="函数重载（Overwrite）"><a href="#函数重载（Overwrite）" class="headerlink" title="函数重载（Overwrite）"></a>函数重载（Overwrite）</h2><p>在PostgreSQL中，多个函数可共用同一个函数名，但它们的参数必须得不同。这一规则与面向对象语言（比如Java）中的函数重载类似。也正因如此，在PostgreSQL删除函数时，必须指定其参数列表，如：</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">DROP</span> <span class="keyword">FUNCTION</span> get_array(<span class="type">anyelement</span>, <span class="type">anyelement</span>);</span></pre></td></tr></table></figure>
+
+<p>另外，在实际项目中，经常会用到CREATE OR REPLACE FUNCTION去替换已有的函数实现。如果同名函数已存在，但输入参数列表不同，会创建同名的函数，也即重载。如果同名函数已存在，且输入输出参数列表均相同，则替换。如果已有的函数输入参数列表相同，但输出参数列表不同，则会报错，并提示需要先DROP已有的函数定义。</p>
+<h1 id="SQL优化系列"><a href="#SQL优化系列" class="headerlink" title="SQL优化系列"></a>SQL优化系列</h1><ul>
+<li><a href="http://www.jasongj.com/2015/03/07/Join1/" target="_blank" rel="noopener">SQL优化（一） Merge Join vs. Hash Join vs. Nested Loop</a></li>
+<li><a href="http://www.jasongj.com/2015/03/15/count_distinct/" target="_blank" rel="noopener">SQL优化（二） 快速计算Distinct Count</a></li>
+<li><a href="http://www.jasongj.com/2015/12/13/SQL3_partition/" target="_blank" rel="noopener">SQL优化（三） PostgreSQL Table Partitioning</a></li>
+<li>[SQL优化（四） Postgre Sql存储过程](<a href="http://www.jasongj.com/2015/12/27/SQL4_存储过程_Store" target="_blank" rel="noopener">http://www.jasongj.com/2015/12/27/SQL4_存储过程_Store</a> Procedure/)</li>
+<li><a href="http://www.jasongj.com/sql/cte/" target="_blank" rel="noopener">SQL优化（五） PostgreSQL （递归）CTE 通用表表达式</a></li>
+</ul>
+<blockquote>
+<p>作者：郭俊</p>
+<p>来源：<a href="http://www.jasongj.com/2015/12/27/SQL4_%E5%AD%98%E5%82%A8%E8%BF%87%E7%A8%8B_Store%20Procedure/" target="_blank" rel="noopener">http://www.jasongj.com/2015/12/27/SQL4_%E5%AD%98%E5%82%A8%E8%BF%87%E7%A8%8B_Store%20Procedure/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/SQL%E4%BC%98%E5%8C%96%EF%BC%883%EF%BC%89%EF%BC%9APostgreSQL-Table-Partitioning/" rel="prev" title="SQL优化（3）：PostgreSQL Table Partitioning">
+      <i class="fa fa-chevron-left"></i> SQL优化（3）：PostgreSQL Table Partitioning
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/SQL%E4%BC%98%E5%8C%96%EF%BC%885%EF%BC%89%EF%BC%9APostgreSQL-%EF%BC%88%E9%80%92%E5%BD%92%EF%BC%89CTE-%E9%80%9A%E7%94%A8%E8%A1%A8%E8%A1%A8%E8%BE%BE%E5%BC%8F/" rel="next" title="SQL优化（5）：PostgreSQL （递归）CTE 通用表表达式">
+      SQL优化（5）：PostgreSQL （递归）CTE 通用表表达式 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#存储过程简介"><span class="nav-number">1.</span> <span class="nav-text">存储过程简介</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#什么是存储过程"><span class="nav-number">1.1.</span> <span class="nav-text">什么是存储过程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#使用存储过程的优势及劣势"><span class="nav-number">1.2.</span> <span class="nav-text">使用存储过程的优势及劣势</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#存储过程在PostgreSQL中的使用"><span class="nav-number">2.</span> <span class="nav-text">存储过程在PostgreSQL中的使用</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#PostgreSQL支持的过程语言"><span class="nav-number">2.1.</span> <span class="nav-text">PostgreSQL支持的过程语言</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#基于SQL的存储过程定义"><span class="nav-number">2.2.</span> <span class="nav-text">基于SQL的存储过程定义</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#基于PL-PgSQL的存储过程定义"><span class="nav-number">2.3.</span> <span class="nav-text">基于PL/PgSQL的存储过程定义</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#声明函数参数"><span class="nav-number">2.4.</span> <span class="nav-text">声明函数参数</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#返回多行或多列"><span class="nav-number">2.5.</span> <span class="nav-text">返回多行或多列</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#使用自定义复合类型返回一行多列"><span class="nav-number">2.5.1.</span> <span class="nav-text">使用自定义复合类型返回一行多列</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#使用输出参数名返回一行多列"><span class="nav-number">2.5.2.</span> <span class="nav-text">使用输出参数名返回一行多列</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#使用SETOF返回多行记录"><span class="nav-number">2.5.3.</span> <span class="nav-text">使用SETOF返回多行记录</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#使用RETURN-TABLE返回多行多列"><span class="nav-number">2.5.4.</span> <span class="nav-text">使用RETURN TABLE返回多行多列</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#使用EXECUTE语句执行动态命令"><span class="nav-number">2.6.</span> <span class="nav-text">使用EXECUTE语句执行动态命令</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#PostgreSQL中的UDF与存储过程"><span class="nav-number">2.7.</span> <span class="nav-text">PostgreSQL中的UDF与存储过程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#多态SQL函数"><span class="nav-number">2.8.</span> <span class="nav-text">多态SQL函数</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#函数重载（Overwrite）"><span class="nav-number">2.9.</span> <span class="nav-text">函数重载（Overwrite）</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#SQL优化系列"><span class="nav-number">3.</span> <span class="nav-text">SQL优化系列</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

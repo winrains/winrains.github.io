@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="CTE or WITHWITH语句通常被称为通用表表达式（Common Table Expressions）或者CTEs。WITH语句作为一个辅助语句依附于主语句，WITH语句和主语句都可以是SELECT，INSERT，UPDATE，DELETE中的任何一种语句。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="SQL优化（5）：PostgreSQL （递归）CTE 通用表表达式">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;SQL%E4%BC%98%E5%8C%96%EF%BC%885%EF%BC%89%EF%BC%9APostgreSQL-%EF%BC%88%E9%80%92%E5%BD%92%EF%BC%89CTE-%E9%80%9A%E7%94%A8%E8%A1%A8%E8%A1%A8%E8%BE%BE%E5%BC%8F&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="CTE or WITHWITH语句通常被称为通用表表达式（Common Table Expressions）或者CTEs。WITH语句作为一个辅助语句依附于主语句，WITH语句和主语句都可以是SELECT，INSERT，UPDATE，DELETE中的任何一种语句。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;206b5-graph.png">
+<meta property="og:updated_time" content="2020-01-08T05:16:09.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;206b5-graph.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/SQL%E4%BC%98%E5%8C%96%EF%BC%885%EF%BC%89%EF%BC%9APostgreSQL-%EF%BC%88%E9%80%92%E5%BD%92%EF%BC%89CTE-%E9%80%9A%E7%94%A8%E8%A1%A8%E8%A1%A8%E8%BE%BE%E5%BC%8F/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>SQL优化（5）：PostgreSQL （递归）CTE 通用表表达式 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/SQL%E4%BC%98%E5%8C%96%EF%BC%885%EF%BC%89%EF%BC%9APostgreSQL-%EF%BC%88%E9%80%92%E5%BD%92%EF%BC%89CTE-%E9%80%9A%E7%94%A8%E8%A1%A8%E8%A1%A8%E8%BE%BE%E5%BC%8F/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          SQL优化（5）：PostgreSQL （递归）CTE 通用表表达式
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 13:16:09" itemprop="dateCreated datePublished" datetime="2020-01-08T13:16:09+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="CTE-or-WITH"><a href="#CTE-or-WITH" class="headerlink" title="CTE or WITH"></a>CTE or WITH</h1><p>WITH语句通常被称为通用表表达式（Common Table Expressions）或者CTEs。<br>WITH语句作为一个辅助语句依附于主语句，WITH语句和主语句都可以是<code>SELECT</code>，<code>INSERT</code>，<code>UPDATE</code>，<code>DELETE</code>中的任何一种语句。</p>
+<a id="more"></a>
+
+<h2 id="例讲CTE"><a href="#例讲CTE" class="headerlink" title="例讲CTE"></a>例讲CTE</h2><p>WITH语句最基本的功能是把复杂查询语句拆分成多个简单的部分，如下例所示</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> regional_sales <span class="keyword">AS</span> (</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">SELECT</span> region, <span class="keyword">SUM</span>(amount) <span class="keyword">AS</span> total_sales</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">FROM</span> orders</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">GROUP</span> <span class="keyword">BY</span> region</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">), top_regions <span class="keyword">AS</span> (</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">SELECT</span> region</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">FROM</span> regional_sales</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">WHERE</span> total_sales &gt; (<span class="keyword">SELECT</span> <span class="keyword">SUM</span>(total_sales)/<span class="number">10</span> <span class="keyword">FROM</span> regional_sales</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">  region,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">  product,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">SUM</span>(quantity) <span class="keyword">AS</span> product_units,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">SUM</span>(amount) <span class="keyword">AS</span> product_sales</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">FROM</span> orders</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">WHERE</span> region <span class="keyword">IN</span> (<span class="keyword">SELECT</span> region <span class="keyword">FROM</span> top_regions)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> region, product;</span></pre></td></tr></table></figure>
+
+<p>该例中，定义了两个WITH辅助语句，regional_sales和top_regions。前者算出每个区域的总销售量，后者了查出所有销售量占所有地区总销售里10%以上的区域。主语句通过将这个CTEs及订单表关联，算出了顶级区域每件商品的销售量和销售额。<br>当然，本例也可以不使用CTEs而使用两层嵌套子查询来实现，但使用CTEs更简单，更清晰，可读性更强。</p>
+<h2 id="在WITH中使用数据修改语句"><a href="#在WITH中使用数据修改语句" class="headerlink" title="在WITH中使用数据修改语句"></a>在WITH中使用数据修改语句</h2><p>文章开头处提到，WITH中可以不仅可以使用<code>SELECT</code>语句，同时还能使用<code>DELETE</code>，<code>UPDATE</code>，<code>INSERT</code>语句。因此，可以使用WITH，在一条SQL语句中进行不同的操作，如下例所示。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> moved_rows <span class="keyword">AS</span> (</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">DELETE</span> <span class="keyword">FROM</span> products</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">WHERE</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="string">"date"</span> &gt;= <span class="string">'2010-10-01'</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">AND</span> <span class="string">"date"</span> &lt; <span class="string">'2010-11-01'</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">RETURNING</span> *</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">INSERT</span> <span class="keyword">INTO</span> products_log</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> * <span class="keyword">FROM</span> moved_rows;</span></pre></td></tr></table></figure>
+
+<p>本例通过WITH中的DELETE语句从products表中删除了一个月的数据，并通过<code>RETURNING</code>子句将删除的数据集赋给moved_rows这一CTE，最后在主语句中通过INSERT将删除的商品插入products_log中。<br>如果WITH里面使用的不是SELECT语句，并且没有通过RETURNING子句返回结果集，则主查询中不可以引用该CTE，但主查询和WITH语句仍然可以继续执行。这种情况可以实现将多个不相关的语句放在一个SQL语句里，实现了在不显式使用事务的情况下保证WITH语句和主语句的事务性，如下例所示。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> d <span class="keyword">AS</span> (</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">DELETE</span> <span class="keyword">FROM</span> foo</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">u <span class="keyword">as</span> (</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">UPDATE</span> foo <span class="keyword">SET</span> a = <span class="number">1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">WHERE</span> b = <span class="number">2</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">DELETE</span> <span class="keyword">FROM</span> bar;</span></pre></td></tr></table></figure>
+
+<h2 id="WITH使用注意事项"><a href="#WITH使用注意事项" class="headerlink" title="WITH使用注意事项"></a>WITH使用注意事项</h2><ol>
+<li>WITH中的数据修改语句会被执行一次，并且肯定会完全执行，无论主语句是否读取或者是否读取所有其输出。而WITH中的SELECT语句则只输出主语句中所需要记录数。</li>
+<li>WITH中使用多个子句时，这些子句和主语句会并行执行，所以当存在多个修改子语句修改相同的记录时，它们的结果不可预测。</li>
+<li>所有的子句所能“看”到的数据集是一样的，所以它们看不到其它语句对目标数据集的影响。这也缓解了多子句执行顺序的不可预测性造成的影响。</li>
+<li>如果在一条SQL语句中，更新同一记录多次，只有其中一条会生效，并且很难预测哪一个会生效。</li>
+<li>如果在一条SQL语句中，同时更新和删除某条记录，则只有更新会生效。</li>
+<li>目前，任何一个被数据修改CTE的表，不允许使用条件规则，和ALSO规则以及INSTEAD规则。</li>
+</ol>
+<h1 id="WITH-RECURSIVE"><a href="#WITH-RECURSIVE" class="headerlink" title="WITH RECURSIVE"></a>WITH RECURSIVE</h1><p>WITH语句还可以通过增加<code>RECURSIVE</code>修饰符来引入它自己，从而实现递归</p>
+<h2 id="WITH-RECURSIVE实例"><a href="#WITH-RECURSIVE实例" class="headerlink" title="WITH RECURSIVE实例"></a>WITH RECURSIVE实例</h2><p>WITH RECURSIVE一般用于处理逻辑上层次化或树状结构的数据，典型的使用场景是寻找直接及间接子结点。<br>定义下面这样的表，存储每个区域（省、市、区）的id，名字及上级区域的id</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">TABLE</span> chinamap</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">id</span> <span class="built_in">INTEGER</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  pid <span class="built_in">INTEGER</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">name</span> <span class="built_in">TEXT</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">);</span></pre></td></tr></table></figure>
+
+<p>需要查出某个省，比如湖北省，管辖的所有市及市辖地区，可以通过WITH RECURSIVE来实现，如下</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> <span class="keyword">RECURSIVE</span> <span class="keyword">result</span> <span class="keyword">AS</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  SELECCT</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">id</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">name</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">FROM</span>  chinamap</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">WHERE</span> <span class="keyword">id</span> = <span class="number">11</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">UNION</span> <span class="keyword">ALL</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">SELECT</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    origin.id,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    result.name || <span class="string">' &gt; '</span> || origin.name</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">FROM</span> <span class="keyword">result</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">JOIN</span> chinamap origin</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">ON</span> origin.pid = result.id</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">id</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">name</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">FROM</span> <span class="keyword">result</span>;</span></pre></td></tr></table></figure>
+
+<p>结果如下</p>
+<figure class="highlight 1c"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">id <span class="string">| name</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">-----+--------------------------</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="number">11</span> <span class="string">| 湖北省</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="number">110</span> <span class="string">| 湖北省 &gt; 武汉市</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="number">120</span> <span class="string">| 湖北省 &gt; 孝感市</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="number">130</span> <span class="string">| 湖北省 &gt; 宜昌市</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="number">140</span> <span class="string">| 湖北省 &gt; 随州市</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="number">150</span> <span class="string">| 湖北省 &gt; 仙桃市</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="number">160</span> <span class="string">| 湖北省 &gt; 荆门市</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="number">170</span> <span class="string">| 湖北省 &gt; 枝江市</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="number">180</span> <span class="string">| 湖北省 &gt; 神农架市</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="number">111</span> <span class="string">| 湖北省 &gt; 武汉市 &gt; 武昌区</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="number">112</span> <span class="string">| 湖北省 &gt; 武汉市 &gt; 下城区</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="number">113</span> <span class="string">| 湖北省 &gt; 武汉市 &gt; 江岸区</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="number">114</span> <span class="string">| 湖北省 &gt; 武汉市 &gt; 江汉区</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="number">115</span> <span class="string">| 湖北省 &gt; 武汉市 &gt; 汉阳区</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="number">116</span> <span class="string">| 湖北省 &gt; 武汉市 &gt; 洪山区</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="number">117</span> <span class="string">| 湖北省 &gt; 武汉市 &gt; 青山区</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">(<span class="number">16</span> rows)</span></pre></td></tr></table></figure>
+
+<h2 id="WITH-RECURSIVE-执行过程"><a href="#WITH-RECURSIVE-执行过程" class="headerlink" title="WITH RECURSIVE 执行过程"></a>WITH RECURSIVE 执行过程</h2><p>从上面的例子可以看出，WITH RECURSIVE语句包含了两个部分</p>
+<ul>
+<li>non-recursive term（非递归部分），即上例中的union all前面部分</li>
+<li>recursive term（递归部分），即上例中union all后面部分</li>
+</ul>
+<p>执行步骤如下</p>
+<ol>
+<li>执行non-recursive term。（如果使用的是union而非union all，则需对结果去重）其结果作为recursive term中对result的引用，同时将这部分结果放入临时的working table中</li>
+<li>重复执行如下步骤，直到working table为空：用working table的内容替换递归的自引用，执行recursive term，（如果使用union而非union all，去除重复数据），并用该结果（如果使用union而非union all，则是去重后的结果）替换working table</li>
+</ol>
+<p>以上面的query为例，来看看具体过程<br>1.执行</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">id</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">name</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">FROM</span> chinamap</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">WHERE</span> <span class="keyword">id</span> = <span class="number">11</span></span></pre></td></tr></table></figure>
+
+<p>结果集和working table为</p>
+<figure class="highlight basic"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">11 </span>| 湖北</span></pre></td></tr></table></figure>
+
+<p>2.执行</p>
+<figure class="highlight oxygene"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  origin.id,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">result</span>.name || <span class="string">' &gt; '</span> || origin.name</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">FROM</span> <span class="keyword">result</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">JOIN</span> chinamap origin</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">ON</span> origin.pid = <span class="keyword">result</span>.id</span></pre></td></tr></table></figure>
+
+<p>结果集和working table为</p>
+<figure class="highlight basic"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">110 </span>| 湖北省 &gt; 武汉市</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">120 </span>| 湖北省 &gt; 孝感市</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">130 </span>| 湖北省 &gt; 宜昌市</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">140 </span>| 湖北省 &gt; 随州市</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">150 </span>| 湖北省 &gt; 仙桃市</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">160 </span>| 湖北省 &gt; 荆门市</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">170 </span>| 湖北省 &gt; 枝江市</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">180 </span>| 湖北省 &gt; 神农架市</span></pre></td></tr></table></figure>
+
+<p>3.再次执行recursive query，结果集和working table为</p>
+<figure class="highlight basic"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">111 </span>| 湖北省 &gt; 武汉市 &gt; 武昌区</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">112 </span>| 湖北省 &gt; 武汉市 &gt; 下城区</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">113 </span>| 湖北省 &gt; 武汉市 &gt; 江岸区</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">114 </span>| 湖北省 &gt; 武汉市 &gt; 江汉区</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">115 </span>| 湖北省 &gt; 武汉市 &gt; 汉阳区</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">116 </span>| 湖北省 &gt; 武汉市 &gt; 洪山区</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">117 </span>| 湖北省 &gt; 武汉市 &gt; 青山区</span></pre></td></tr></table></figure>
+
+<p>4.继续执行recursive query，结果集和working table为空<br>5.结束递归，将前三个步骤的结果集合并，即得到最终的WITH RECURSIVE的结果集<br>严格来讲，这个过程实现上是一个迭代的过程而非递归，不过RECURSIVE这个关键词是SQL标准委员会定立的，所以PostgreSQL也延用了RECURSIVE这一关键词。</p>
+<h2 id="WITH-RECURSIVE-防止死循环"><a href="#WITH-RECURSIVE-防止死循环" class="headerlink" title="WITH RECURSIVE 防止死循环"></a>WITH RECURSIVE 防止死循环</h2><p>从上一节中可以看到，决定是否继续迭代的working table是否为空，如果它永不为空，则该CTE将陷入无限循环中。<br>对于本身并不会形成循环引用的数据集，无段作特别处理。而对于本身可能形成循环引用的数据集，则须通过SQL处理。<br>一种方式是使用UNION而非UNION ALL，从而每次recursive term的计算结果都会将已经存在的数据清除后再存入working table，使得working table最终会为空，从而结束迭代。<br>然而，这种方法并不总是有效的，因为有时可能需要这些重复数据。同时UNION只能去除那些所有字段都完全一样的记录，而很有可能特定字段集相同的记录即应该被删除。此时可以通过数组（单字段）或者ROW（多字段）记录已经访问过的记录，从而实现去重的目的。</p>
+<h2 id="WITH-RECURSIVE-求最短路径"><a href="#WITH-RECURSIVE-求最短路径" class="headerlink" title="WITH RECURSIVE 求最短路径"></a>WITH RECURSIVE 求最短路径</h2><p>定义无向有环图如下图所示<br><a href="http://image.winrains.cn/2019/10/206b5-graph.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/206b5-graph.png" alt="Non-directional cycle graph"></a><br>定义如下表并存入每条边的权重</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> <span class="keyword">TABLE</span> graph</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">id</span> <span class="built_in">char</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  neighbor <span class="built_in">char</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">value</span> <span class="built_in">integer</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">INSERT</span> <span class="keyword">INTO</span> graph</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">VALUES</span>(<span class="string">'A'</span>, <span class="string">'B'</span>, <span class="number">3</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">(<span class="string">'A'</span>, <span class="string">'C'</span>, <span class="number">5</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">(<span class="string">'A'</span>, <span class="string">'D'</span>, <span class="number">4</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">(<span class="string">'B'</span>, <span class="string">'E'</span>, <span class="number">8</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">(<span class="string">'B'</span>, <span class="string">'C'</span>, <span class="number">4</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">(<span class="string">'E'</span>, <span class="string">'C'</span>, <span class="number">7</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">(<span class="string">'E'</span>,<span class="string">'F'</span>, <span class="number">10</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">(<span class="string">'C'</span>, <span class="string">'D'</span>, <span class="number">3</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">(<span class="string">'C'</span>, <span class="string">'F'</span>, <span class="number">6</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">(<span class="string">'F'</span>,<span class="string">'D'</span>, <span class="number">5</span>);</span></pre></td></tr></table></figure>
+
+<p>计算思路如下：</p>
+<ul>
+<li>因为是无向图，所以首先要将各条边的id和neighbor交换一次以方便后续计算。</li>
+<li>利用WITH RECURSIVE算出所有可能的路径并计算其总权重。</li>
+<li>因为该图有环，为避免无限循环，同时为了计算路径，将经过的结点存于数据中，当下一个结点已经在数据中时，说明该结点已被计算。</li>
+<li>最终可算出所有可能的路径及其总权重</li>
+</ul>
+<p>实现如下</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">WITH</span> <span class="keyword">RECURSIVE</span> edges <span class="keyword">AS</span> (</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">SELECT</span> <span class="keyword">id</span>, neighbor, <span class="keyword">value</span> <span class="keyword">FROM</span> graph</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">UNION</span> <span class="keyword">ALL</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">SELECT</span> neighbor, <span class="keyword">id</span>, <span class="keyword">value</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">FROM</span> graph</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">all_path (<span class="keyword">id</span>, neighbor, <span class="keyword">value</span>, <span class="keyword">path</span>, <span class="keyword">depth</span>, <span class="keyword">cycle</span>) <span class="keyword">AS</span> (</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">SELECT</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">id</span>, neighbor, <span class="keyword">value</span>, <span class="built_in">ARRAY</span>[<span class="keyword">id</span>], <span class="number">1</span>, <span class="string">'f'</span>::<span class="built_in">BOOLEAN</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">FROM</span> edges</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">WHERE</span> <span class="keyword">id</span> = <span class="string">'A'</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">UNION</span> <span class="keyword">ALL</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">SELECT</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    all_path.id,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    edges.neighbor,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    edges.value + all_path.value,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    all_path.path || <span class="built_in">ARRAY</span>[edges.id],</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">depth</span> + <span class="number">1</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">    edges.id = <span class="keyword">ANY</span>(all_path.path)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">FROM</span> edges</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">JOIN</span> all_path</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">ON</span> all_path.neighbor = edges.id</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">AND</span> <span class="keyword">NOT</span> <span class="keyword">cycle</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">), a_f <span class="keyword">AS</span> (</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">SELECT</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">rank</span>() <span class="keyword">over</span>(<span class="keyword">order</span> <span class="keyword">by</span> <span class="keyword">value</span>) <span class="keyword">AS</span> <span class="keyword">rank</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">path</span> || neighbor <span class="keyword">AS</span> <span class="keyword">path</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">value</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">depth</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">FROM</span> all_path</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">WHERE</span> neighbor = <span class="string">'F'</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> <span class="keyword">path</span>, <span class="keyword">value</span>, <span class="keyword">depth</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">FROM</span> a_f</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">WHERE</span> <span class="keyword">rank</span> = <span class="number">1</span>;</span></pre></td></tr></table></figure>
+
+<h1 id="WITH-RECURSIVE-使用限制"><a href="#WITH-RECURSIVE-使用限制" class="headerlink" title="WITH RECURSIVE 使用限制"></a>WITH RECURSIVE 使用限制</h1><ul>
+<li>如果在recursive term中使用LEFT JOIN，自引用必须在“左”边</li>
+<li>如果在recursive term中使用RIGHT JOIN，自引用必须在“右”边</li>
+<li>recursive term中不允许使用FULL JOIN</li>
+<li>recursive term中不允许使用GROUP BY和HAVING</li>
+<li>不允许在recursive term的WHERE语句的子查询中使用CTE的名字</li>
+<li>不支持在recursive term中对CTE作aggregation</li>
+<li>recursive term中不允许使用ORDER BY</li>
+<li>LIMIT / OFFSET不允许在recursive term中使用</li>
+<li>FOR UPDATE不可在recursive term中使用</li>
+<li>recursive term中SELECT后面不允许出现引用CTE名字的子查询</li>
+<li>同时使用多个CTE表达式时，不允许多表达式之间互相访问（支持单向访问）</li>
+<li>在recursive term中不允许使用FOR UPDATE</li>
+</ul>
+<h1 id="CTE-优缺点"><a href="#CTE-优缺点" class="headerlink" title="CTE 优缺点"></a>CTE 优缺点</h1><ul>
+<li>可以使用递归 WITH RECURSIVE，从而实现其它方式无法实现或者不容易实现的查询</li>
+<li>当不需要将查询结果被其它独立查询共享时，它比视图更灵活也更轻量</li>
+<li>CTE只会被计算一次，且可在主查询中多次使用</li>
+<li>CTE可极大提高代码可读性及可维护性</li>
+<li>CTE不支持将主查询中where后的限制条件push down到CTE中，而普通的子查询支持</li>
+</ul>
+<h1 id="SQL优化系列"><a href="#SQL优化系列" class="headerlink" title="SQL优化系列"></a>SQL优化系列</h1><ul>
+<li><a href="http://www.jasongj.com/2015/03/07/Join1/" target="_blank" rel="noopener">SQL优化（一） Merge Join vs. Hash Join vs. Nested Loop</a></li>
+<li><a href="http://www.jasongj.com/2015/03/15/count_distinct/" target="_blank" rel="noopener">SQL优化（二） 快速计算Distinct Count</a></li>
+<li><a href="http://www.jasongj.com/2015/12/13/SQL3_partition/" target="_blank" rel="noopener">SQL优化（三） PostgreSQL Table Partitioning</a></li>
+<li>[SQL优化（四） Postgre Sql存储过程](<a href="http://www.jasongj.com/2015/12/27/SQL4_存储过程_Store" target="_blank" rel="noopener">http://www.jasongj.com/2015/12/27/SQL4_存储过程_Store</a> Procedure/)</li>
+<li><a href="http://www.jasongj.com/sql/cte/" target="_blank" rel="noopener">SQL优化（五） PostgreSQL （递归）CTE 通用表表达式</a></li>
+</ul>
+<blockquote>
+<p>作者：郭俊</p>
+<p>来源：<a href="http://www.jasongj.com/sql/cte/" target="_blank" rel="noopener">http://www.jasongj.com/sql/cte/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/SQL%E4%BC%98%E5%8C%96%EF%BC%884%EF%BC%89%EF%BC%9APostgreSQL%E5%AD%98%E5%82%A8%E8%BF%87%E7%A8%8B/" rel="prev" title="SQL优化（4）：PostgreSQL存储过程">
+      <i class="fa fa-chevron-left"></i> SQL优化（4）：PostgreSQL存储过程
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/%E6%9C%80%E8%AF%A6%E7%BB%86%E7%9A%84JVM%E5%92%8CGC%E8%AE%B2%E8%A7%A3/" rel="next" title="最详细的JVM和GC讲解">
+      最详细的JVM和GC讲解 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#CTE-or-WITH"><span class="nav-number">1.</span> <span class="nav-text">CTE or WITH</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#例讲CTE"><span class="nav-number">1.1.</span> <span class="nav-text">例讲CTE</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#在WITH中使用数据修改语句"><span class="nav-number">1.2.</span> <span class="nav-text">在WITH中使用数据修改语句</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#WITH使用注意事项"><span class="nav-number">1.3.</span> <span class="nav-text">WITH使用注意事项</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#WITH-RECURSIVE"><span class="nav-number">2.</span> <span class="nav-text">WITH RECURSIVE</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#WITH-RECURSIVE实例"><span class="nav-number">2.1.</span> <span class="nav-text">WITH RECURSIVE实例</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#WITH-RECURSIVE-执行过程"><span class="nav-number">2.2.</span> <span class="nav-text">WITH RECURSIVE 执行过程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#WITH-RECURSIVE-防止死循环"><span class="nav-number">2.3.</span> <span class="nav-text">WITH RECURSIVE 防止死循环</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#WITH-RECURSIVE-求最短路径"><span class="nav-number">2.4.</span> <span class="nav-text">WITH RECURSIVE 求最短路径</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#WITH-RECURSIVE-使用限制"><span class="nav-number">3.</span> <span class="nav-text">WITH RECURSIVE 使用限制</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#CTE-优缺点"><span class="nav-number">4.</span> <span class="nav-text">CTE 优缺点</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#SQL优化系列"><span class="nav-number">5.</span> <span class="nav-text">SQL优化系列</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

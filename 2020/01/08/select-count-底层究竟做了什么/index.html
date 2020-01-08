@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="SELECT COUNT( * ) FROM t是个再常见不过的 SQL 需求了。在 MySQL 的使用规范中，我们一般使用事务引擎 InnoDB 作为(一般业务)表的存储引擎，在此前提下，COUNT( * )操作的时间复杂度为 O(N)，其中 N 为表的行数。而 MyISAM 表中可以快速取到表的行数。这些实践经验的背后是怎样的机制，以及为什么需要&#x2F;可以是这样，就是此文想要探讨的。先来看一下概况">
+<meta property="og:type" content="article">
+<meta property="og:title" content="select count(*) 底层究竟做了什么">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;select-count-%E5%BA%95%E5%B1%82%E7%A9%B6%E7%AB%9F%E5%81%9A%E4%BA%86%E4%BB%80%E4%B9%88&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="SELECT COUNT( * ) FROM t是个再常见不过的 SQL 需求了。在 MySQL 的使用规范中，我们一般使用事务引擎 InnoDB 作为(一般业务)表的存储引擎，在此前提下，COUNT( * )操作的时间复杂度为 O(N)，其中 N 为表的行数。而 MyISAM 表中可以快速取到表的行数。这些实践经验的背后是怎样的机制，以及为什么需要&#x2F;可以是这样，就是此文想要探讨的。先来看一下概况">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191106083506-57330.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191106083509-79da8.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191106083509-b12ad.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191106083509-e3c44.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191106083510-ba478.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191106083510-64c1a.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191106083510-71b3b.png">
+<meta property="og:updated_time" content="2020-01-08T07:15:29.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191106083506-57330.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/select-count-%E5%BA%95%E5%B1%82%E7%A9%B6%E7%AB%9F%E5%81%9A%E4%BA%86%E4%BB%80%E4%B9%88/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>select count(*) 底层究竟做了什么 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/select-count-%E5%BA%95%E5%B1%82%E7%A9%B6%E7%AB%9F%E5%81%9A%E4%BA%86%E4%BB%80%E4%B9%88/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          select count(*) 底层究竟做了什么
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 15:15:29" itemprop="dateCreated datePublished" datetime="2020-01-08T15:15:29+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/MySQL/" itemprop="url" rel="index">
+                    <span itemprop="name">MySQL</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p><code>SELECT COUNT( * ) FROM t</code>是个再常见不过的 SQL 需求了。在 MySQL 的使用规范中，我们一般使用事务引擎 InnoDB 作为(一般业务)表的存储引擎，在此前提下，<code>COUNT( * )</code>操作的时间复杂度为 <code>O(N)</code>，其中 N 为表的行数。<br>而 <code>MyISAM</code> 表中可以快速取到表的行数。这些实践经验的背后是怎样的机制，以及为什么需要/可以是这样，就是此文想要探讨的。<br>先来看一下概况: <code>MySQL COUNT( * )</code> 在 2 种存储引擎中的部分问题：<br><img src="http://image.winrains.cn/2019/11/20191106083506-57330.png" alt="http://image.winrains.cn/2019/11/20191106083506-57330.png"><br>下面就带着这些问题，以 <code>InnoDB</code> 存储引擎为主来进行讨论。</p>
+<hr>
+<a id="more"></a>
+
+<h1 id="一、InnoDB-全表-COUNT"><a href="#一、InnoDB-全表-COUNT" class="headerlink" title="一、InnoDB 全表 COUNT( * )"></a>一、InnoDB 全表 COUNT( * )</h1><h2 id="主要问题"><a href="#主要问题" class="headerlink" title="主要问题:"></a>主要问题:</h2><ul>
+<li>执行过程是怎样的？</li>
+<li>如何计算 <code>count</code>？影响 <code>count</code> 结果的因素有哪些？</li>
+<li><code>count</code> 值存在哪里？涉及的数据结构是怎样的？</li>
+<li>为什么 <code>InnoDB</code> 只能通过扫表来实现 <code>count( * )</code>？(见本文最后的问题)</li>
+<li>全表<code>COUNT( * )</code>作为 <code>table scan</code> 类型操作的一个 <code>case</code>，有什么风险？</li>
+<li><code>COUNT(* )</code>操作是否会像<code>SELECT *</code>一样可能读取大字段涉及的溢出页？</li>
+</ul>
+<h2 id="1-执行框架-–-循环-读取-计数"><a href="#1-执行框架-–-循环-读取-计数" class="headerlink" title="1. 执行框架 – 循环: 读取 + 计数"></a>1. 执行框架 – 循环: 读取 + 计数</h2><h3 id="1-1-基本结论"><a href="#1-1-基本结论" class="headerlink" title="1.1 基本结论"></a>1.1 基本结论</h3><ul>
+<li>全表扫描，一个循环解决问题。</li>
+<li>循环内: 先读取一行，再决定该行是否计入 <code>count</code>。</li>
+<li>循环内是一行一行进行计数处理的。</li>
+</ul>
+<h3 id="1-2-说明"><a href="#1-2-说明" class="headerlink" title="1.2 说明"></a>1.2 说明</h3><p>简单 <code>SELELCT-SQL</code> 的执行框架，类比 <code>INSERT INTO … SELECT</code> 是同样的过程。<br><img src="http://image.winrains.cn/2019/11/20191106083509-79da8.png" alt="http://image.winrains.cn/2019/11/20191106083509-79da8.png"><br>下面会逐步细化如何读取与计数 ( <code>count++</code> ) 。</p>
+<h2 id="2-执行过程"><a href="#2-执行过程" class="headerlink" title="2. 执行过程"></a>2. 执行过程</h2><p>引述: 执行过程部分，分为 4 个部分:</p>
+<ul>
+<li><code>COUNT( * )</code>前置流程: 从 <code>Client</code> 端发 SQL 语句，到 <code>MySQL-Server</code>端执行 <code>SELECT</code> 之前，为后面的一些阐述做一铺垫。</li>
+<li><code>COUNT( * )</code> 流程: 简要给出代码层面的流程框架及 2 个核心步骤的重点调用栈部分。</li>
+<li>读取一行: 可见性及 <code>row_search_mvcc</code>函数，介绍可见性如何影响 <code>COUNT( * )</code> 结果。</li>
+<li>计数一行: <code>Evaluate_join_record</code>与列是否为空，介绍计数过程如何影响 <code>COUNT( * )</code>结果。</li>
+</ul>
+<p>如果读者希望直接看如何进行 <code>COUNT( * )</code>，那么也可以忽略 (1)，而直接跳到 (2) 开始看。</p>
+<h3 id="2-1-COUNT-前置流程回忆-–-从-Client-端发-SQL-到-sub-select-函数"><a href="#2-1-COUNT-前置流程回忆-–-从-Client-端发-SQL-到-sub-select-函数" class="headerlink" title="2.1 COUNT( * ) 前置流程回忆 – 从 Client 端发 SQL 到 sub_select 函数"></a>2.1 COUNT( * ) 前置流程回忆 – 从 Client 端发 SQL 到 sub_select 函数</h3><p>为了使看到的调用过程不太突兀，我们还是先回忆一下如何执行到 <code>sub_select</code>函数这来的：<br><img src="http://image.winrains.cn/2019/11/20191106083509-b12ad.jpeg" alt="http://image.winrains.cn/2019/11/20191106083509-b12ad.jpeg"></p>
+<ol>
+<li><code>MySQL-Client</code> 端发送 SQL 语句，根据 MySQL 通信协议封包发送。</li>
+<li><code>Mysql-Server</code>端接收数据包，由协议解析出 <code>command</code> 类型 ( <code>QUERY</code> ) 及 SQL 语句 ( 字符串 ) 。</li>
+<li>SQL 语句经过解析器解析输出为 <code>JOIN</code>类的对象，用于结构化地表达该 SQL 语句。</li>
+</ol>
+<blockquote>
+<p>PS: 这里的 <code>JOIN</code> 结构，不仅仅是纯语法结构，而是已经进行了语义处理，粗略地说，汇总了表的列表 (<code>table_list</code> )、目标列的列表 (<code>target_list</code> )、<code>WHERE</code> 条件、子查询等语法结构。<br>在全表 <code>COUNT( * )-case</code> 中，<code>table_list = [表“t”(别名也是“t”)]</code>，<code>target_list = [目标列对象(列名为“COUNT( * )”)]</code>，当然这里没有 <code>WHERE</code> 条件、子查询等结构。</p>
+</blockquote>
+<ol>
+<li><code>JOIN</code>对象有 2 个重要的方法: <code>JOIN::optimize()</code>, <code>JOIN::exec()</code>，分别用于进行查询语句的优化 和 查询语句的执行。</li>
+</ol>
+<blockquote>
+<p>join-&gt;optimize()，优化阶段 (稍后 <code>myisam</code> 下全表 <code>count( * )</code>操作会涉及这里的一点内容)。<br>join-&gt;exec()，执行阶段 ( 重点 )，包含了 <code>InnoDB</code> 下全表<code>count( * )</code> 操作的执行流程。</p>
+</blockquote>
+<ol>
+<li>join-&gt;exec() 经过若干调用，将调用到<code>sub_select</code>函数来执行简单 SQL，包括 <code>COUNT( * )</code> 。</li>
+<li><code>END of sub_select</code> 。</li>
+</ol>
+<h3 id="2-2-COUNT-流程-于-sub-select-函数中"><a href="#2-2-COUNT-流程-于-sub-select-函数中" class="headerlink" title="2.2 COUNT( * ) 流程 ( 于 sub_select 函数中 )"></a>2.2 COUNT( * ) 流程 ( 于 sub_select 函数中 )</h3><p>上层的流程与代码是比较简单的，集中在 <code>sub_select</code> 函数中，其中 2 类函数分别对应于前面”执行框架”部分所述的 2 个步骤 – 读取、计数。先给出结论如下：</p>
+<ol>
+<li>读取一行：从相对顶层的 <code>sub_select</code> 函数经过一番调用，最终所有分支将调用到 <code>row_search_mvcc</code> 函数中，该函数就是用于从 <code>InnoDB</code> 存储引擎所存储的<code>B+-tree</code>结构中读取一行到内存中的一个 <code>buf (uchar * )</code> 中，待后续处理使用。<br>这里会涉及行锁的获取、MVCC 及行可见性的问题。当然对 于 <code>SELECT COUNT( * )</code> 这类快照读而言，只会涉及 MVCC 及其可见性，而不涉及行锁。详情可跳至“可见性与 <code>row_search_mvcc</code> 函数”部分。</li>
+<li>计数一行: 代码层面，将会在 <code>evaluate_join_record</code>函数中对所读取的行进行评估，看其是否应当计入 <code>count</code>中 ( 即是否要<code>count++</code> )。</li>
+</ol>
+<p>简单来说，<code>COUNT(arg)</code> 本身为 MySQL 的函数操作，对于一行来说，若括号内的参数 <code>arg ( 某列或整行 )</code>的值若不是 NULL，则 <code>count++</code>，否则对该行不予计数。详情可跳至“ Evaluate_join_record 与列是否为空”部分。<br>这两个阶段对 <code>COUNT( * )</code>结果的影响如下: (两层过滤)<br><img src="http://image.winrains.cn/2019/11/20191106083509-e3c44.png" alt="http://image.winrains.cn/2019/11/20191106083509-e3c44.png"><br>SQL 层流程框架相关代码摘要如下:</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="number">1210</span> enum_nested_loop_state</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="number">1211</span> sub_select(JOIN *join, QEP_TAB *<span class="keyword">const</span> qep_tab,<span class="built_in">bool</span> end_of_records)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="number">1212</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="number">1213</span>   DBUG_ENTER(<span class="string">"sub_select"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">... ... <span class="comment">// 此处省略1000字</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="number">1265</span>   <span class="keyword">while</span> (rc == NESTED_LOOP_OK &amp;&amp; join-&gt;return_tab &gt;= qep_tab_idx)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="number">1266</span>   &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="number">1267</span>     <span class="built_in">int</span> error;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 第一步，从存储引擎中获取一行；</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="number">1268</span>     <span class="keyword">if</span> (in_first_read)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="number">1269</span>     &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="number">1270</span>       in_first_read= <span class="literal">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 第一步，首次读取，扫描第一个满足条件的记录；</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 初始化cursor，从”头”扫描到某个位置</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 类似: SELECT id FROM t LIMIT 1;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="number">1271</span>       error= (*qep_tab-&gt;read_first_record)(qep_tab);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="number">1272</span>     &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="number">1273</span>     <span class="keyword">else</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 第一步，后续读取，在前次扫描的位置上继续遍历，找到一个满足条件的记录；</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 类似: SELECT id FROM t WHERE id &gt; $last_id LIMIT 1;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="number">1274</span>       error= info-&gt;read_record(info);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">... ... <span class="comment">// 此处省略1000字</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 第二步，处理刚刚取出的一行</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"><span class="number">1291</span>       rc= evaluate_join_record(join, qep_tab);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">... ... <span class="comment">// 此处省略1000字</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line"><span class="number">1303</span>   DBUG_RETURN(rc);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line"><span class="number">1304</span> &#125;</span></pre></td></tr></table></figure>
+
+<p><strong>Q： 代码层面，第一步骤(读取一行)有 2 个分支，为什么？</strong><br>A：从 <code>InnoDB</code> 接口层面考虑，分为 “读第一行” 和 “读下一行”，是 2 个不同的执行过程，读第一行需要找到一个 ( <code>cursor</code> ) 位置并做一些初始化工作让后续的过程可递归。<br>正如我们如果用脚本/程序来进行逐行的扫表操作，实现上就会涉及下面 2 个 SQL：</p>
+<figure class="highlight n1ql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">// <span class="keyword">SELECT</span> id <span class="keyword">FROM</span> t <span class="keyword">LIMIT</span> <span class="number">1</span>; OR <span class="keyword">SELECT</span> <span class="built_in">MIN</span>(id)<span class="number">-1</span> <span class="keyword">FROM</span> t; -&gt; $last_id</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">// <span class="keyword">SELECT</span> id <span class="keyword">FROM</span> t <span class="keyword">WHERE</span> id &gt; $last_id <span class="keyword">LIMIT</span> <span class="number">1</span>;</span></pre></td></tr></table></figure>
+
+<p>具体涉及到此例的代码，SQL 层到存储引擎层的调用关系，读取阶段的调用栈如下：(供参考)<br>sub_select 函数中从 SQL 层到 InnoDB 层的函数调用关系：(同颜色、同缩进 表示同一层)</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">sub_select 函数中从 SQL 层到 InnoDB 层的函数调用关系：(同颜色、同缩进 表示同一层)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">Ø  (*qep_tab-&gt;read_first_record) <span class="literal">()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">| -- &gt; join<span class="constructor">_read_first(<span class="params">tab</span>)</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    | -- &gt; tab-&gt;read<span class="constructor">_record</span>.read<span class="constructor">_record</span>=join<span class="constructor">_read_next</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    | -- &gt; table-&gt;file-&gt;ha<span class="constructor">_index_init()</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">        | -- &gt; handler::ha<span class="constructor">_index_init(<span class="params">uint</span> <span class="params">idx</span>, <span class="params">bool</span> <span class="params">sorted</span>)</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">            | -- &gt; ha<span class="constructor">_innobase</span>::index<span class="constructor">_init()</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    | -- &gt; table-&gt;file-&gt;ha<span class="constructor">_index_first()</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">        | -- &gt; handler::ha<span class="constructor">_index_first(<span class="params">uint</span> <span class="params">idx</span>, <span class="params">bool</span> <span class="params">sorted</span>)</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">            | -- &gt; ha<span class="constructor">_innobase</span>::index<span class="constructor">_first()</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">                | -- &gt; ha<span class="constructor">_innobase</span>::index<span class="constructor">_read()</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">                    | -- &gt; row<span class="constructor">_search_mvcc()</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">                    初始化cursor并将其放到一个有效的初始位置上;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">Ø  info-&gt;read<span class="constructor">_record</span> (info)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">| -- &gt; join<span class="constructor">_read_next(<span class="params">info</span>)</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    | -- &gt; info-&gt;table-&gt;file-&gt;ha<span class="constructor">_index_next(<span class="params">info</span>-&gt;<span class="params">record</span>)</span>)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">        | -- &gt; handler::ha<span class="constructor">_index_next(<span class="params">uchar</span> <span class="operator">*</span> <span class="params">buf</span>)</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">            | -- &gt; ha<span class="constructor">_innobase</span>::index<span class="constructor">_next(<span class="params">uchar</span> <span class="operator">*</span> <span class="params">buf</span>)</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">                | -- &gt; general<span class="constructor">_fetch(<span class="params">buf</span>, ROW_SEL_NEXT, 0)</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">                    | -- &gt; row<span class="constructor">_search_mvcc()</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">                        “向前”移动一次cursor;</span></span></pre></td></tr></table></figure>
+
+<p>我们可以看到，无论是哪一个分支的读取，最终都殊途同归于 <code>row_search_mvcc</code>函数。<br>以上是对 LOOP 中的代码做一些简要的说明，下面来看 <code>row_search_mvcc</code>与 <code>evaluate_join_record</code> 如何输出最终的 <code>count</code> 结果。</p>
+<h3 id="2-3-行可见性及-row-search-mvcc-函数"><a href="#2-3-行可见性及-row-search-mvcc-函数" class="headerlink" title="2.3 行可见性及 row_search_mvcc 函数"></a>2.3 行可见性及 row_search_mvcc 函数</h3><p>这里我们主要通过一组 case 和几个问题来看行可见性对 COUNT( * ) 的影响。<br><img src="http://image.winrains.cn/2019/11/20191106083510-ba478.jpeg" alt="http://image.winrains.cn/2019/11/20191106083510-ba478.jpeg"><br><strong>Q：对于<code>SELECT COUNT( \* ) FROM t</code>或者<code>SELECT MIN(id) FROM t</code>操作，第一次的读行操作读到的是表 t 中 ( B+ 树最左叶节点 page 内 ) 的最小记录吗？( <code>ha_index_first</code> 为何也调用 <code>row_search_mvcc</code> 来获取最小 key 值？)</strong><br>A：不一定。即使是<code>MIN ( id )</code> 也不一定就读取的是 id 最小的那一行，因为也同样有行可见性的问题，实际上 <code>index_read</code> 取到的是 当前事务内语句可见的最小 index 记录。这也反映了前面提到的 <code>join_read_first</code> 与 <code>join_read_next</code> “殊途同归”到 <code>row_search_mvcc</code> 是理所应当的。<br><strong>Q：针对图中最后一问，如果事务 X 是 <code>RU ( Read-Uncommitted )</code> 隔离级别，且 <code>C-Insert ( 100 )</code> 的完成是在 <code>X-count( \* )</code>执行过程中 ( 仅扫描到 5 或 10 这条记录 ) 完成的，那么 <code>X-count( \* )</code> 在事务 <code>C-Insert ( 100 )</code> 完成后，能否在之后的读取过程中看到 100 这条记录呢？</strong><br>A：MySQL 采取”读到什么就是什么”的策略，即<code>X-count( * )</code>在后面可以读到 100 这条记录。</p>
+<h3 id="2-4-evaluate-join-record-与列是否为空"><a href="#2-4-evaluate-join-record-与列是否为空" class="headerlink" title="2.4 evaluate_join_record 与列是否为空"></a>2.4 evaluate_join_record 与列是否为空</h3><p><strong>Q：某一行如何计入 count？</strong><br>A：两种情况会将所读的行计入 count:<br>1、如果 COUNT 函数中的参数是某列，则会判断所读行中该列定义是否 <code>Nullable</code>以及该列的值是否为 <code>NULL</code>；若两者均为是，则不会计入 count，否则将计入 count。</p>
+<ul>
+<li>e.g. <code>SELECT COUNT(col_name) FROM t</code></li>
+<li><code>col_name</code>可以是主键、唯一键、非唯一键、非索引字段</li>
+</ul>
+<p>2、如果 COUNT 中带有 * ，则会判断这部分的整行是否为 NULL，如果判断参数为 NULL，则忽略该行，否则 <code>count++</code>。</p>
+<ul>
+<li>e.g-1. <code>SELECT COUNT(*) FROM t</code></li>
+<li>e.g-2. <code>SELECT COUNT(B.*) FROM A LEFT JOIN B ON A.id = B.id</code></li>
+</ul>
+<p><strong>Q： 特别地，对于 <code>SELECT COUNT(id) FROM t</code>，其中 id 字段是表 t 的主键，则如何？</strong><br>A：效果上等价于 <code>COUNT( * )</code>。因为无论是 <code>COUNT( * )</code>，还是 <code>COUNT ( pk_col )</code> 都是因为有主键从而充分断定索取数据不为 <code>NULL</code>，这类 COUNT 表达式可以用于获取当前可见的表行数。<br><strong>Q： 用户层面对 <code>InnoDB COUNT( \* )</code> 的优化操作问题</strong><br>A：这个问题是业界熟悉的一个问题，扫描非空唯一键可得到表行数，但所涉及的字节数可能会少很多(在表的行长与主键、唯一键的长度相差较多时)，相对的 IO 代价小很多。<br>相关调用栈参考如下:</p>
+<figure class="highlight livescript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">参考一:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">evaluate_join_record()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">| -- &gt; rc= (*qep_tab-&gt;next_select)(join, qep_tab+<span class="number">1</span>, <span class="number">0</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    | -- &gt; end_send_group(...)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        | -- &gt; init_sum_functions(join-&gt;sum_funcs, join-&gt;sum_funcs_end[idx+<span class="number">1</span>]))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            | -- &gt; <span class="function"><span class="params">(*func_ptr)</span>-&gt;</span>reset_and_add()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">                | -- &gt; Item_sum::aggregator_clear()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">                | -- &gt; Item_sum::aggregator_add()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        | -- &gt; update_sum_func(Item_sum **func_ptr)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            | -- &gt; <span class="function"><span class="params">(*func_ptr)</span>-&gt;</span>add()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">                | -- &gt; Item_sum::aggregator_add()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">参考二: (Item_sum::aggregator_add)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="params">((Item_sum *) (*func_ptr))</span>-&gt;</span>aggregator_add()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">| -- &gt; (Item_sum *)<span class="keyword">this</span>-&gt;aggr-&gt;add()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    | -- &gt; <span class="function"><span class="params">((Aggregator_simple *) aggr)</span>-&gt;</span>item_sum-&gt;add()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        | -- &gt; <span class="keyword">if</span> (! aggr-&gt;arg_is_null(<span class="literal">false</span>))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        | ------ &gt; <span class="function"><span class="params">((Item_sum_count *)aggr-&gt;item_sum)</span>-&gt;</span>count++;</span></pre></td></tr></table></figure>
+
+<hr>
+<h1 id="二、数据结构"><a href="#二、数据结构" class="headerlink" title="二、数据结构:"></a>二、数据结构:</h1><p><strong>Q：count 值存储在哪个内存变量里？</strong><br>A：SQL 解析后，存储于表达 <code>COUNT( * )</code> 这一项中，<code>((Item_sum_count*)item_sum)-&gt;count</code><br>如下图所示回顾我们之前“<code>COUNT( * )</code>前置流程”部分提到的 JOIN 结构。<br><img src="http://image.winrains.cn/2019/11/20191106083510-64c1a.png" alt="http://image.winrains.cn/2019/11/20191106083510-64c1a.png"><br>即 SQL 解析器为每个 SQL 语句进行结构化，将其放在一个 <code>JOIN</code> 对象 ( join ) 中来表达。在该对象中创建并填充了一个列表 <code>result_field_list</code> 用于存放结果列，列表中每个元素则是一个结果列的 ( <code>Item_result_field*</code>) 对象 ( 指针 ) 。<br>在 <code>COUNT( * )-case</code> 中，结果列列表只包含一个元素，( <code>Item_sum_count: public Item_result_field</code> ) 类型对象 ( <code>name = “COUNT( * )</code>”)，其中该类所特有的成员变量 count即为所求。</p>
+<hr>
+<h1 id="三、MyISAM-全表-COUNT"><a href="#三、MyISAM-全表-COUNT" class="headerlink" title="三、MyISAM 全表 COUNT( * )"></a>三、MyISAM 全表 COUNT( * )</h1><p>由于 <code>MyISAM</code>引擎并不常用于实际业务中，仅做简要描述如下：</p>
+<ol>
+<li><code>MyISAM-COUNT( * )</code> 操作是 <code>O(1)</code> 时间复杂度的操作。</li>
+<li>每张<code>MyISAM</code>表中存放了一个 <code>meta</code> 信息-count 值，在内存中与文件中各有一份，内存中的 count 变量值通过读取文件中的 count 值来进行初始化。</li>
+<li><code>SELECT COUNT( * ) FROM t</code> 会直接读取内存中的表 t 对应的 count 变量值。</li>
+<li>内存中的 count 值与文件中的 count 值由写操作来进行更新，其一致性由表级锁来保证。</li>
+<li>表级锁保证的写入串行化使得，同一时刻所有用户线程的读操作要么被锁，要么只会看到一种数据状态。</li>
+</ol>
+<hr>
+<h1 id="四、几个问题"><a href="#四、几个问题" class="headerlink" title="四、几个问题"></a>四、几个问题</h1><p><strong>Q：<code>MyISAM</code> 与 <code>InnoDB 在 COUNT( \* )</code> 操作的执行过程在哪里开始分道扬镳？</strong></p>
+<ul>
+<li>共性：共性存在于 SQL 层，即 SQL 解析之后的数据结构是一致的，count 变量都是存在于作为结果列的 <code>Item_sum_count</code> 类型对象中；返回给客户端的过程也类似 – 对该 count 变量进行赋值并经由 MySQL 通信协议返回给客户端。</li>
+<li>区别：<code>InnoDB</code> 的 count 值计算是在 SQL 执行阶段进行的；而 <code>MyISAM</code>表本身在内存中有一份包含了表 <code>row_count</code> 值的 <code>meta</code> 信息，在 SQL 优化阶段通过存储引擎的标记给优化器一个 <code>hint</code>，表明该表所用的存储引擎保存了精确行数，可以直接获取到，无需再进入执行器。</li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/11/20191106083510-71b3b.png" alt="http://image.winrains.cn/2019/11/20191106083510-71b3b.png"><br><strong>Q：InnoDB 中为何无法向 MyISAM 一样维护住一个 row_count 变量？</strong><br>A：从 MVCC 机制与行可见性问题中可得到原因，每个事务所看到的行可能是不一样的，其 <code>count( * )</code>结果也可能是不同的；反过来看，则是 <code>MySQL-Server</code> 端无法在同一时刻对所有用户线程提供一个统一的读视图，也就无法提供一个统一的 <code>count</code> 值。</p>
+<blockquote>
+<p>PS: 对于多个访问 MySQL 的用户线程 <code>( COUNT( * ) )</code> 而言，决定它们各自的结果的因素有几个:</p>
+</blockquote>
+<ul>
+<li>一组事务执行前的数据状态(初始数据状态)。</li>
+<li>有时间重叠的事务们的执行序列 (操作时序，事务理论表明 并发事务操作的可串行化是正确性的必要条件)。</li>
+<li>事务们各自的隔离级别(每个操作的输入)。</li>
+</ul>
+<p>其中 1、2 对于 Server 而言都是全局或者说可控的，只有 3 是每个用户线程中事务所独有的属性，这是 Server 端不可控的因素，因此 Server 端也就对每个 <code>COUNT( * )</code> 结果不可控了。<br><strong>Q：<code>InnoDB-COUNT( \* )</code> 属 <code>table scan</code> 操作，是否会将现有 <code>Buffer Pool</code> 中其它用户线程所需热点页从 <code>LRU-list</code> 中挤占掉，从而其它用户线程还需从磁盘 <code>load</code>一次，突然加重 IO 消耗，可能对现有请求造成阻塞？</strong><br>A：MySQL 有这样的优化策略，将扫表操作所 <code>load</code>的 <code>page</code> 放在 <code>LRU-list</code> 的 <code>oung/old</code> 的交界处 ( LRU 尾部约 3/8 处 )。这样用户线程所需的热点页仍然在 <code>LRU-list-young</code> 区域，而扫表操作不断 load 的页则会不断冲刷<code>old</code>区域的页，这部分的页本身就是被认为非热点的页，因此也相对符合逻辑。</p>
+<blockquote>
+<p>PS: 个人认为还有一种类似的优化思路，是限定扫描操作所使用的 <code>Buffer Pool</code> 的大小为 O(1) 级别，但这样做需要付出额外的内存管理成本。</p>
+</blockquote>
+<p><strong>Q：<code>InnoDB-COUNT( \* )</code> 是否会像 <code>SELECT \* FROM t</code> 那样读取存储大字段的溢出页(如果存在)？</strong><br>A：否。因为 <code>InnoDB-COUNT( * )</code> 只需要数行数，而每一行的主键肯定不是 <code>NULL</code>，因此只需要读主键索引页内的行数据，而无需读取额外的溢出页。</p>
+<blockquote>
+<p>作者：K’illCode</p>
+<p>来源：<a href="https://blog.csdn.net/Dome_/article/details/88929215" target="_blank" rel="noopener">https://blog.csdn.net/Dome_/article/details/88929215</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/MySQL%E7%9A%84count%E8%AF%AD%E5%8F%A5%E4%BB%8B%E7%BB%8D/" rel="prev" title="MySQL的count语句介绍">
+      <i class="fa fa-chevron-left"></i> MySQL的count语句介绍
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/%E6%84%9F%E5%8F%97lambda%E4%B9%8B%E7%BE%8E/" rel="next" title="感受lambda之美">
+      感受lambda之美 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#一、InnoDB-全表-COUNT"><span class="nav-number">1.</span> <span class="nav-text">一、InnoDB 全表 COUNT( * )</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#主要问题"><span class="nav-number">1.1.</span> <span class="nav-text">主要问题:</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#1-执行框架-–-循环-读取-计数"><span class="nav-number">1.2.</span> <span class="nav-text">1. 执行框架 – 循环: 读取 + 计数</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1-1-基本结论"><span class="nav-number">1.2.1.</span> <span class="nav-text">1.1 基本结论</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#1-2-说明"><span class="nav-number">1.2.2.</span> <span class="nav-text">1.2 说明</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-执行过程"><span class="nav-number">1.3.</span> <span class="nav-text">2. 执行过程</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#2-1-COUNT-前置流程回忆-–-从-Client-端发-SQL-到-sub-select-函数"><span class="nav-number">1.3.1.</span> <span class="nav-text">2.1 COUNT( * ) 前置流程回忆 – 从 Client 端发 SQL 到 sub_select 函数</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-2-COUNT-流程-于-sub-select-函数中"><span class="nav-number">1.3.2.</span> <span class="nav-text">2.2 COUNT( * ) 流程 ( 于 sub_select 函数中 )</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-3-行可见性及-row-search-mvcc-函数"><span class="nav-number">1.3.3.</span> <span class="nav-text">2.3 行可见性及 row_search_mvcc 函数</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-4-evaluate-join-record-与列是否为空"><span class="nav-number">1.3.4.</span> <span class="nav-text">2.4 evaluate_join_record 与列是否为空</span></a></li></ol></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#二、数据结构"><span class="nav-number">2.</span> <span class="nav-text">二、数据结构:</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#三、MyISAM-全表-COUNT"><span class="nav-number">3.</span> <span class="nav-text">三、MyISAM 全表 COUNT( * )</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#四、几个问题"><span class="nav-number">4.</span> <span class="nav-text">四、几个问题</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

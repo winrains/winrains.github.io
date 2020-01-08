@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="前一篇文章分析到了org.apache.catalina.deploy.WebXml类的 configureContext 方法，可以看到在这个方法中通过各种 setXXX、addXXX 方法的调用，使得每个应用中的 web.xml 文件的解析后将应用内部的表示 Servlet、Listener、Filter 的配置信息与表示一个 web 应用的 Context 对象关联起来。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Tomcat 7 中 web 应用加载原理（3）：Listener、Filter、Servlet 的加载和调用">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;Tomcat-7-%E4%B8%AD-web-%E5%BA%94%E7%94%A8%E5%8A%A0%E8%BD%BD%E5%8E%9F%E7%90%86%EF%BC%883%EF%BC%89%EF%BC%9AListener%E3%80%81Filter%E3%80%81Servlet-%E7%9A%84%E5%8A%A0%E8%BD%BD%E5%92%8C%E8%B0%83%E7%94%A8&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="前一篇文章分析到了org.apache.catalina.deploy.WebXml类的 configureContext 方法，可以看到在这个方法中通过各种 setXXX、addXXX 方法的调用，使得每个应用中的 web.xml 文件的解析后将应用内部的表示 Servlet、Listener、Filter 的配置信息与表示一个 web 应用的 Context 对象关联起来。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182916-29ed9.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182917-c5ded.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182918-64716.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182918-d7b96.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182919-3c673.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182920-233ae.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182921-5e906.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182921-53f6b.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182921-93390.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182922-b7d73.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182922-ce1f6.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182923-9448b.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182923-7105d.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182924-74b9d.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182924-cdb3e.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182925-645eb.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182925-665b5.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182926-cf32a.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182926-8bae1.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182927-a9f9e.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182927-dd82a.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182928-c74cd.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182928-4ce99.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182929-c292b.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182929-74ca8.png">
+<meta property="og:updated_time" content="2020-01-08T03:30:46.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029182916-29ed9.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/Tomcat-7-%E4%B8%AD-web-%E5%BA%94%E7%94%A8%E5%8A%A0%E8%BD%BD%E5%8E%9F%E7%90%86%EF%BC%883%EF%BC%89%EF%BC%9AListener%E3%80%81Filter%E3%80%81Servlet-%E7%9A%84%E5%8A%A0%E8%BD%BD%E5%92%8C%E8%B0%83%E7%94%A8/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Tomcat 7 中 web 应用加载原理（3）：Listener、Filter、Servlet 的加载和调用 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/Tomcat-7-%E4%B8%AD-web-%E5%BA%94%E7%94%A8%E5%8A%A0%E8%BD%BD%E5%8E%9F%E7%90%86%EF%BC%883%EF%BC%89%EF%BC%9AListener%E3%80%81Filter%E3%80%81Servlet-%E7%9A%84%E5%8A%A0%E8%BD%BD%E5%92%8C%E8%B0%83%E7%94%A8/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Tomcat 7 中 web 应用加载原理（3）：Listener、Filter、Servlet 的加载和调用
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 11:30:46" itemprop="dateCreated datePublished" datetime="2020-01-08T11:30:46+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/Tomcat/" itemprop="url" rel="index">
+                    <span itemprop="name">Tomcat</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p><a href="https://juejin.im/post/5a7aa6f4f265da4e7e10a0aa" target="_blank" rel="noopener">前一篇文章</a>分析到了<code>org.apache.catalina.deploy.WebXml</code>类的 configureContext 方法，可以看到在这个方法中通过各种 setXXX、addXXX 方法的调用，使得每个应用中的 web.xml 文件的解析后将应用内部的表示 Servlet、Listener、Filter 的配置信息与表示一个 web 应用的 Context 对象关联起来。</p>
+<a id="more"></a>
+
+<p>这里列出 configureContext 方法中与 Servlet、Listener、Filter 的配置信息设置相关的调用代码：</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span> (FilterDef<span class="built_in"> filter </span>: filters.values()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (filter.getAsyncSupported() == <span class="literal">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        filter.setAsyncSupported(<span class="string">"false"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    context.addFilterDef(filter);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span> (FilterMap filterMap : filterMaps) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    context.addFilterMap(filterMap);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>这是设置 Filter 相关配置信息的。</p>
+<figure class="highlight haxe"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span> (<span class="keyword">String</span> listener : <span class="type">listeners</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    context.addApplicationListener(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">new</span> <span class="type">ApplicationListener</span>(listener, <span class="literal">false</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>这是给应用添加 Listener 的。</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span> (ServletDef servlet : servlets.<span class="keyword">values</span>()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">Wrapper</span> <span class="keyword">wrapper</span> = context.createWrapper();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    // Description <span class="keyword">is</span> ignored</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    // Display <span class="type">name</span> <span class="keyword">is</span> ignored</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    // Icons are ignored</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    // jsp-file gets passed <span class="keyword">to</span> the JSP Servlet <span class="keyword">as</span> an init-param</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (servlet.getLoadOnStartup() != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">wrapper</span>.setLoadOnStartup(servlet.getLoadOnStartup().intValue());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (servlet.getEnabled() != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">wrapper</span>.setEnabled(servlet.getEnabled().booleanValue());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">wrapper</span>.setName(servlet.getServletName());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    Map&lt;String,String&gt; params = servlet.getParameterMap();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">for</span> (Entry&lt;String, String&gt; entry : params.entrySet()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">wrapper</span>.addInitParameter(entry.getKey(), entry.getValue());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">wrapper</span>.setRunAs(servlet.getRunAs());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">Set</span>&lt;SecurityRoleRef&gt; roleRefs = servlet.getSecurityRoleRefs();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">for</span> (SecurityRoleRef roleRef : roleRefs) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">wrapper</span>.addSecurityReference(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">                roleRef.getName(), roleRef.getLink());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">wrapper</span>.setServletClass(servlet.getServletClass());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">    MultipartDef multipartdef = servlet.getMultipartDef();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (multipartdef != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (multipartdef.getMaxFileSize() != <span class="keyword">null</span> &amp;&amp;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">                multipartdef.getMaxRequestSize()!= <span class="keyword">null</span> &amp;&amp;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">                multipartdef.getFileSizeThreshold() != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">wrapper</span>.setMultipartConfigElement(<span class="built_in">new</span> MultipartConfigElement(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">                    multipartdef.getLocation(),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">                    Long.parseLong(multipartdef.getMaxFileSize()),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">                    Long.parseLong(multipartdef.getMaxRequestSize()),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">                    <span class="type">Integer</span>.parseInt(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">                            multipartdef.getFileSizeThreshold())));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">        &#125; <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">wrapper</span>.setMultipartConfigElement(<span class="built_in">new</span> MultipartConfigElement(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">                    multipartdef.getLocation()));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (servlet.getAsyncSupported() != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">wrapper</span>.setAsyncSupported(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">                servlet.getAsyncSupported().booleanValue());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">wrapper</span>.setOverridable(servlet.isOverridable());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line">    context.addChild(<span class="keyword">wrapper</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span> (Entry&lt;String, String&gt; entry : servletMappings.entrySet()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">49</span></pre></td><td class="code"><pre><span class="line">    context.addServletMapping(entry.getKey(), entry.getValue());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">50</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>这段代码是设置 Servlet 的相关配置信息的。<br>以上是在各个 web 应用的 web.xml 文件中（如果是 servlet 3，还会包括将这些配置信息放在类的注解中，所以解析 web.xml 文件之前可能会存在各个 web.xml 文件信息的合并步骤，这些动作的代码在<a href="https://juejin.im/post/5a7aa6f4f265da4e7e10a0aa" target="_blank" rel="noopener">前一篇文章</a>中讲 ContextConfig 类的 webConfig 方法中）的相关配置信息的设置，但需要注意的是，这里仅仅是将这些配置信息保存到了 StandardContext 的相应实例变量中，真正在一次请求访问中用到的 Servlet、Listener、Filter 的实例并没有构造出来，以上方法调用仅构造了代表这些实例的封装类的实例，如 StandardWrapper、ApplicationListener、FilterDef、FilterMap。<br>那么一个 web 应用中的 Servlet、Listener、Filter 的实例究竟在什么时候构造出来的呢？答案在<code>org.apache.catalina.core.StandardContext</code>类的 startInternal 方法中：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182916-29ed9.png" alt="img"></p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182917-c5ded.png" alt="img"></p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182918-64716.png" alt="img"></p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182918-d7b96.png" alt="img"></p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182919-3c673.png" alt="img"></p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182920-233ae.png" alt="img"></p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182921-5e906.png" alt="img"></p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182921-53f6b.png" alt="img"></p>
+<p>这 303 行可以讲的东西有很多，为了不偏离本文主题只抽出与现在要讨论的问题相关的代码来分析。第 125 行会发布一个<code>CONFIGURE_START_EVENT</code>事件，按前一篇博文所述，这里即会触发对 web.xml 的解析。第 205、206 行设置实例管理器为 DefaultInstanceManager（这个类在后面谈实例构造时会用到）。第 237 行会调用 listenerStart 方法，第 255 行调用了 filterStart 方法，第 263 行调用了 loadOnStartup 方法，这三处调用即触发 Listener、Filter、Servlet 真正对象的构造，下面逐个分析这些方法。<br>listenerStart 方法的完整代码较长，这里仅列出与 Listenner 对象构造相关的代码：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182921-93390.png" alt="img"></p>
+<p>先从 Context 对象中取出实例变量 applicationListeners（该变量的值在 web.xml 解析时设置），第 12 行通过调用<code>instanceManager.newInstance(listener.getClassName())</code>，前面在看 StandardContext 的 startInternal 方法第 205 行时看到 instanceManager 被设置为 DefaultInstanceManager 对象，所以这里实际会执行 DefaultInstanceManager 类的 newInstance 方法：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public Object <span class="keyword">new</span><span class="constructor">Instance(String <span class="params">className</span>)</span> throws IllegalAccessException, InvocationTargetException, NamingException, InstantiationException, ClassNotFoundException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    Class&lt;?&gt; clazz = load<span class="constructor">ClassMaybePrivileged(<span class="params">className</span>, <span class="params">classLoader</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    return <span class="keyword">new</span><span class="constructor">Instance(<span class="params">clazz</span>.<span class="params">newInstance</span>()</span>, clazz);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>所以<code>instanceManager.newInstance(listener.getClassName())</code>这段代码的作用是取出 web.xml 中配置的 Listener 的 class 配置信息，从而构造实际配置的 Listener 对象。<br>看下 filterStart 方法：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182922-b7d73.png" alt="img"></p>
+<p>这段代码看起来很简单，取出 web.xml 解析时读到的 filter 配置信息，在第 17 行调用 ApplicationFilterConfig 的构造方法：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182922-ce1f6.png" alt="img"></p>
+<p>默认情况下 filterDef 中是没有 Filter 对象的，所以会调用第 12 行 getFilter 方法：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182923-9448b.png" alt="img"></p>
+<p>与 Listener 的对象构造类似，都是通过调用<code>getInstanceManager().newInstance</code>方法。当然，按照 Servlet 规范，第 13 行还会调用 Filter 的 init 方法。看下 loadOnStartup 方法：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182923-7105d.png" alt="img"></p>
+<p>在 web 应用启动时将会加载配置了 load-on-startup 属性的 Servlet。第 24 行，调用了 StandardWrapper 类的 load 方法：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182924-74b9d.png" alt="img"></p>
+<p>在第 2 行 loadServlet 方法中与上面的 Listener 和 Filter 对象构造一样调用<code>instanceManager.newInstance</code>来构造 Servlet 对象，与 Filter 类似在第 5 行调用 Servlet 的 init 方法。当然这种加载只是针对配置了 load-on-startup 属性的 Servlet 而言，其它一般 Servlet 的加载和初始化会推迟到真正请求访问 web 应用而第一次调用该 Servlet 时，下面会看到这种情况下代码分析。<br>以上分析的 web 应用启动后这些对象的加载情况，接下来分析一下一次请求访问时，相关的 Filter、Servlet 对象的调用。<br>在之前的《Tomcat 7 的一次请求分析》系列文章中曾经分析了一次请求如何与容器中的 Engine、Host、Context、Wrapper 各级组件匹配，并在这些容器组件内部的管道中流转的。在<a href="https://juejin.im/post/5a72c2886fb9a01ca915c732" target="_blank" rel="noopener">该系列第四篇文章</a>最后提到，一次请求最终会执行与它最适配的一个 StandardWrapper 的基础阀<code>org.apache.catalina.core.StandardWrapperValve</code>的 invoke 方法。当时限于篇幅没继续往下分析，这里接着这段来看看请求的流转。看下 invoke 方法的代码：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182924-cdb3e.png" alt="img"></p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182925-645eb.png" alt="img"></p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182925-665b5.png" alt="img"></p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182926-cf32a.png" alt="img"></p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182926-8bae1.png" alt="img"></p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182927-a9f9e.png" alt="img"></p>
+<p>因为要支持 Servlet 3 的新特性及各种异常处理，这段代码显得比较长。关注重点第 42 行，这里会调用 StandardWrapper 的 allocate 方法，不再贴出这个方法的代码，需要提醒的是在 allocate 方法中可能会调用 loadServlet() 方法，这就是上一段提到的请求访问 web 应用而第一次调用该 Servlet 时再加载并初始化 Servlet 。第 87 到 91 行会构造一个过滤器链（ filterChain ）用于执行这一次请求所经过的相应 Filter ，第 111 和第 128 行会调用该 filterChain 的 doFilter 方法：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182927-dd82a.png" alt="img"></p>
+<p>在该方法最后调用了 internalDoFilter 方法：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182928-c74cd.png" alt="img"></p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182928-4ce99.png" alt="img"></p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182929-c292b.png" alt="img"></p>
+<p><img src="http://image.winrains.cn/2019/10/20191029182929-74ca8.png" alt="img"></p>
+<p>概述一下这段代码，第 6 到 60 行是执行过滤器链中的各个过滤器的 doFilter 方法，实例变量<code>n</code>表示过滤器链中所有的过滤器，<code>pos</code>表示当前要执行的过滤器。其中第 7 行取出当前要执行的 Filter，之后将<code>pos</code>加 1，接着第 30 行执行 Filter 的 doFilter 方法。一般的过滤器实现中在最后都会有这一句：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">FilterChain</span>.</span></span><span class="keyword">do</span><span class="constructor">Filter(<span class="params">request</span>, <span class="params">response</span>)</span>;</span></pre></td></tr></table></figure>
+
+<p>这样就又回到了 filterChain 的 doFilter 方法，形成了一个递归调用。要注意的是，filterChain 对象内部的 pos 是不断加的，所以假如过滤器链中的各个 Filter 的 doFilter 方法都执行完之后将会执行到第 63 行，在接下来的第 92 行、第 95 行即调用 Servlet 的 service 方法。</p>
+<blockquote>
+<p>作者：预流</p>
+<p>来源：<a href="https://juejin.im/post/5a7ceeabf265da4e9449a802" target="_blank" rel="noopener">https://juejin.im/post/5a7ceeabf265da4e9449a802</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Tomcat-7-%E4%B8%AD-web-%E5%BA%94%E7%94%A8%E5%8A%A0%E8%BD%BD%E5%8E%9F%E7%90%86%EF%BC%882%EF%BC%89%EF%BC%9Aweb-xml-%E8%A7%A3%E6%9E%90/" rel="prev" title="Tomcat 7 中 web 应用加载原理（2）：web.xml 解析">
+      <i class="fa fa-chevron-left"></i> Tomcat 7 中 web 应用加载原理（2）：web.xml 解析
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Tomcat-7-%E8%87%AA%E5%8A%A8%E5%8A%A0%E8%BD%BD%E7%B1%BB%E5%8F%8A%E6%A3%80%E6%B5%8B%E6%96%87%E4%BB%B6%E5%8F%98%E5%8A%A8%E5%8E%9F%E7%90%86/" rel="next" title="Tomcat 7 自动加载类及检测文件变动原理">
+      Tomcat 7 自动加载类及检测文件变动原理 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

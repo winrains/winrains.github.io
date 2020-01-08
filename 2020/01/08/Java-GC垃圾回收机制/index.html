@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="Java GC垃圾回收几乎是面试必问的JVM问题之一，本篇文章带领大家了解Java GC的底层原理，图文并茂，突破学习及面试瓶颈。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Java GC垃圾回收机制">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;Java-GC%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E6%9C%BA%E5%88%B6&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="Java GC垃圾回收几乎是面试必问的JVM问题之一，本篇文章带领大家了解Java GC的底层原理，图文并茂，突破学习及面试瓶颈。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;a85ca-heap.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;6d1d3-stack-size.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;25662-gc-root.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;5e658-mark-clean.gif">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;62091-gc-copying.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;a85ca-heap.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;f162f-mark-compact.jpg">
+<meta property="og:updated_time" content="2020-01-08T08:07:21.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;a85ca-heap.jpg">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/Java-GC%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E6%9C%BA%E5%88%B6/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Java GC垃圾回收机制 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/Java-GC%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E6%9C%BA%E5%88%B6/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Java GC垃圾回收机制
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 16:07:21" itemprop="dateCreated datePublished" datetime="2020-01-08T16:07:21+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/" itemprop="url" rel="index">
+                    <span itemprop="name">JVM</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6/" itemprop="url" rel="index">
+                    <span itemprop="name">垃圾回收</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>Java GC垃圾回收几乎是面试必问的JVM问题之一，本篇文章带领大家了解Java GC的底层原理，图文并茂，突破学习及面试瓶颈。</p>
+<a id="more"></a>
+
+<h2 id="楔子-JVM内存结构补充"><a href="#楔子-JVM内存结构补充" class="headerlink" title="楔子-JVM内存结构补充"></a>楔子-JVM内存结构补充</h2><p>在上篇《<a href="http://www.choupangxia.com/2019/10/18/jvm之内存结构详解/" target="_blank" rel="noopener">JVM之内存结构详解</a>》中有些内容我们没有讲，本篇结合垃圾回收机制来一起学习。还记得JVM中堆的结构图吗？</p>
+<p><img src="http://image.winrains.cn/2019/11/a85ca-heap.jpg" alt="image"></p>
+<p>图中展示了堆中三个区域：Eden、From Survivor、To Survivor。从图中可以也可以看到它们的大小比例，准确来说是：8:1:1。为什么要这样设计呢，本篇文章后续会给出解答，还是根据垃圾回收的具体情况来设计的。<br>还记得在设置JVM时，常用的类似-Xms和-Xmx等参数吗？对的它们就是用来说设置堆中各区域的大小的。</p>
+<p><img src="http://image.winrains.cn/2019/11/6d1d3-stack-size.png" alt="image"></p>
+<p>(图片来源于网络)<br>控制参数详解：</p>
+<ul>
+<li>-Xms设置堆的最小空间大小。</li>
+<li>-Xmx设置堆的最大空间大小。</li>
+<li>-Xmn堆中新生代初始及最大大小（NewSize和MaxNewSize为其细化）。</li>
+<li>-XX:NewSize设置新生代最小空间大小。</li>
+<li>-XX:MaxNewSize设置新生代最大空间大小。</li>
+<li>-XX:PermSize设置永久代最小空间大小。</li>
+<li>-XX:MaxPermSize设置永久代最大空间大小。</li>
+<li>-Xss设置每个线程的堆栈大小。</li>
+</ul>
+<p>对照上面两个图，再来看这些参数是不是没有之前那么枯燥了，它们在图中都有了对应的位置。<br>有没有发现没有直接设置老年代空间大小的参数？我们通过简单的计算获得。</p>
+<figure class="highlight fix"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="attr">老年代空间大小</span>=<span class="string">堆空间大小-年轻代大空间大小</span></span></pre></td></tr></table></figure>
+
+<p>对上面参数立即了，但记忆有困难？那么，以下几个助记词可能更好的帮你记忆和理解参数的含义。<br>Xmx（memory maximum）, Xms（memory startup）, Xmn（memory nursery/new）, Xss（stack size）。<br>对于参数的格式可以这样理解：</p>
+<ul>
+<li>-: 标准VM选项，VM规范的选项。</li>
+<li>-X: 非标准VM选项，不保证所有VM支持。</li>
+<li>-XX: 高级选项，高级特性，但属于不稳定的选项。</li>
+</ul>
+<h2 id="GC概述"><a href="#GC概述" class="headerlink" title="GC概述"></a>GC概述</h2><p>垃圾收集（Garbage Collection）通常被称为“GC”，由虚拟机“自动化”完成垃圾回收工作。<br>思考一个问题，既然GC会自动回收，开发人员为什么要学习GC和内存分配呢？为了能够配置上面的参数配置？参数配置又是为了什么？<br>“<strong>当需要排查各种内存溢出，内存泄露问题时，当垃圾成为系统达到更高并发量的瓶颈时，我们就需要对GC的自动回收实施必要的监控和调节。</strong>”<br>JVM中程序计数器、虚拟机栈、本地方法栈3个区域随线程而生随线程而灭。栈帧随着方法的进入和退出做入栈和出栈操作，实现了自动的内存清理。它们的内存分配和回收都具有确定性。<br>因此，GC垃圾回收主要集中在堆和方法区，在程序运行期间，这部分内存的分配和使用都是动态的。<br>下面通过概念和具体的算法来了解GC垃圾回收的过程。</p>
+<h2 id="如何判断对象存活"><a href="#如何判断对象存活" class="headerlink" title="如何判断对象存活"></a>如何判断对象存活</h2><p>判断对象常规有两种方法：引用计数算法和可达性分析算法（Reachability Analysis）。<br>引用计数算法：给对象添加一个引用计数器，每当有一个地方引用它时计数器加1，引用释放时计数减1，当计数器为0时可以回收。<br>引用计数算法实现简单，判断高效，在微软COM和Python语言等被广泛使用，但在主流的Java虚拟机中没有使用该方法，主要是因为无法解决对象相互循环引用的问题。<br>可达性分析算法：基本思想是通过一系列称为“GC Root”的对象（如系统类加载器、栈中的对象、处于激活状态的线程等）作为起点，基于对象引用关系，开始向下搜索，所走过的路径称为引用链，当一个对象到GC Root没有任何引用链相连，证明对象是不可用的。</p>
+<p><img src="http://image.winrains.cn/2019/11/25662-gc-root.jpg" alt="image"></p>
+<p>上图中中绿色部分为存活对象，灰色部分为可回收对象。虽然灰色部分内部依旧有关联，但它们到GC Root是不可达的。</p>
+<h2 id="面试问题"><a href="#面试问题" class="headerlink" title="面试问题"></a>面试问题</h2><p>面试官，说说Java GC都用了哪些算法？分别应用在什么地方？<br>答：复制算法、标记清除、标记整理……<br>你还在单纯的死记硬背么？继续往下看，你会豁然开朗，再也不用死记硬背了。</p>
+<h2 id="标记清除算法"><a href="#标记清除算法" class="headerlink" title="标记清除算法"></a>标记清除算法</h2><p>标记清除（Mark-Sweep）算法，包含“标记”和“清除”两个阶段：首先标记出所有需要回收的对象，在标记完成后统一回收掉所有被标记的对象。<br>标记清除算法是最基础的收集算法，后续的收集算法都是基于该思路并对其缺点进行改进而得到的。</p>
+<p><img src="http://image.winrains.cn/2019/11/5e658-mark-clean.gif" alt="image"></p>
+<p>主要缺点：一个是效率问题，标记和清除过程的效率都不高；另外是空间问题，标记清除之后会产生大量不连续的内存碎片，空间碎片太多可能会导致，当程序在以后的运行过程中需要分配较大对象时无法找到足够的连续内存而不得不提前触发另一次垃圾收集动作。</p>
+<h2 id="复制算法"><a href="#复制算法" class="headerlink" title="复制算法"></a>复制算法</h2><p>复制（Copying）算法：将可用内存按容量划分为大小相等的两块，每次只使用其中的一块。当一块内存用完了，就将还存活着的对象复制到另外一块上，然后清理掉前一块。</p>
+<p><img src="http://image.winrains.cn/2019/11/62091-gc-copying.jpg" alt="image"></p>
+<p>每次对半区内存回收时、内存分配时就不用考虑内存碎片等复杂情况，只要移动堆顶指针，按顺序分配内存即可，实现简单，运行高效。<br>缺点：将内存缩小为一半，性价比低，持续复制长生存期的对象则导致效率低下。<br>JVM堆中新生代便采用复制算法。回到最初推分配结构图。</p>
+<p><img src="http://image.winrains.cn/2019/11/a85ca-heap.jpg" alt="image"></p>
+<p>在GC回收过程中，当Eden区满时，还存活的对象会被复制到其中一个Survivor区；当回收时，会将Eden和使用的Survivor区还存活的对象，复制到另外一个Survivor区，然后对Eden和用过的Survivor区进行清理。<br>如果另外一个Survivor区没有足够的内存存储时，则会进入老年代。<br>这里针对哪些对象会进入老年代有这样的机制：对象每经历一次复制，年龄加1，达到晋升年龄阈值后，转移到老年代。<br>在这整个过程中，由于Eden中的对象属于像浮萍一样“瞬生瞬灭”的对象，所以并不需要1：1的比例来分配内存，而是采用了8：1：1的比例来分配。<br>而针对那些像“水熊虫”一样，历经多次清理依旧存活的对象，则会进入老年代，而老年的清理算法则采用下面要讲到的“标记整理算法”。</p>
+<h2 id="标记整理算法"><a href="#标记整理算法" class="headerlink" title="标记整理算法"></a>标记整理算法</h2><p>标记整理（Mark-Compact）算法：标记过程与“标记-清除”算法一样，但后续步骤不是直接对可回收对象进行清理，而是让所有存活的对象都向一端移动，然后直接清理掉端边界以外的内存。</p>
+<p><img src="http://image.winrains.cn/2019/11/f162f-mark-compact.jpg" alt="image"></p>
+<p>这种算法不既不用浪费50%的内存，也解决了复制算法在对象存活率较高时的效率低下问题。</p>
+<h2 id="分代收集算法"><a href="#分代收集算法" class="headerlink" title="分代收集算法"></a>分代收集算法</h2><p>分代收集算法，基本思路：将Java的堆内存逻辑上分成两块，新生代和老年代，针对不同存活周期、不同大小的对象采取不同的垃圾回收策略。<br>而在新生代中大多数对象都是瞬间对象，只有少量对象存活，复制较少对象即可完成清理，因此采用复制算法。而针对老年代中的对象，存活率较高，又没有额外的担保内存，因此采用标记整理算法。<br>其实，回头看，分代收集算法就是对新生代和老年代算法从策略维度的规划而已。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2><p>至此，当面试官再问Java GC都用到了哪些垃圾回收算法和分别应用在什么场景下的问题，再也不用死记硬背了吧？<br>关于Java GC还有垃圾收集器及垃圾回收调优，我们将在后续文章中持续更新，欢迎关注公众号“程序新视界”获得第一手更新。<br>原文链接:《<a href="https://www.choupangxia.com/2019/10/20/interview-jvm-gc-01/" target="_blank" rel="noopener">面试官，不要再问我“Java GC垃圾回收机制”了</a>》<br>系列文章：</p>
+<ul>
+<li>1、《<a href="https://www.choupangxia.com/2019/10/18/jvm之内存结构详解/" target="_blank" rel="noopener">JVM之内存结构详解</a>》</li>
+<li>2、《<a href="https://www.choupangxia.com/2019/10/20/interview-jvm-gc-01/" target="_blank" rel="noopener">面试官，不要再问我“Java GC垃圾回收机制”了</a>》</li>
+</ul>
+<p>参考资料：《深入理解java虚拟机》。</p>
+<blockquote>
+<p>作者：程序新视界</p>
+<p>来源：<a href="http://www.choupangxia.com/2019/10/20/interview-jvm-gc-01/" target="_blank" rel="noopener">http://www.choupangxia.com/2019/10/20/interview-jvm-gc-01/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Spring-Boot%E6%97%A5%E5%BF%97%E6%A1%86%E6%9E%B6%E7%B3%BB%E7%BB%9F%E5%8F%8A%E9%85%8D%E7%BD%AE%E8%AF%A6%E8%A7%A3/" rel="prev" title="Spring Boot日志框架系统及配置详解">
+      <i class="fa fa-chevron-left"></i> Spring Boot日志框架系统及配置详解
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/JVM%E4%B9%8B%E5%86%85%E5%AD%98%E7%BB%93%E6%9E%84%E8%AF%A6%E8%A7%A3/" rel="next" title="JVM之内存结构详解">
+      JVM之内存结构详解 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#楔子-JVM内存结构补充"><span class="nav-number">1.</span> <span class="nav-text">楔子-JVM内存结构补充</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#GC概述"><span class="nav-number">2.</span> <span class="nav-text">GC概述</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#如何判断对象存活"><span class="nav-number">3.</span> <span class="nav-text">如何判断对象存活</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#面试问题"><span class="nav-number">4.</span> <span class="nav-text">面试问题</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#标记清除算法"><span class="nav-number">5.</span> <span class="nav-text">标记清除算法</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#复制算法"><span class="nav-number">6.</span> <span class="nav-text">复制算法</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#标记整理算法"><span class="nav-number">7.</span> <span class="nav-text">标记整理算法</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#分代收集算法"><span class="nav-number">8.</span> <span class="nav-text">分代收集算法</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#小结"><span class="nav-number">9.</span> <span class="nav-text">小结</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

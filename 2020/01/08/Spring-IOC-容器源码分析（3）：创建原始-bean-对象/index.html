@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="1. 简介本篇文章是上一篇文章（创建单例 bean 的过程）的延续。在上一篇文章中，我们从战略层面上领略了doCreateBean方法的全过程。本篇文章，我们就从战术的层面上，详细分析doCreateBean方法中的一个重要的调用，即createBeanInstance方法。在本篇文章中，你将看到三种不同的构造 bean 对象的方式。你也会了解到构造 bean 对象的两种策略。如果你对这些内容感兴">
+<meta name="keywords" content="源码,IOC">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Spring IOC 容器源码分析（3）：创建原始 bean 对象">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;Spring-IOC-%E5%AE%B9%E5%99%A8%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%883%EF%BC%89%EF%BC%9A%E5%88%9B%E5%BB%BA%E5%8E%9F%E5%A7%8B-bean-%E5%AF%B9%E8%B1%A1&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="1. 简介本篇文章是上一篇文章（创建单例 bean 的过程）的延续。在上一篇文章中，我们从战略层面上领略了doCreateBean方法的全过程。本篇文章，我们就从战术的层面上，详细分析doCreateBean方法中的一个重要的调用，即createBeanInstance方法。在本篇文章中，你将看到三种不同的构造 bean 对象的方式。你也会了解到构造 bean 对象的两种策略。如果你对这些内容感兴">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:updated_time" content="2020-01-08T05:58:57.000Z">
+<meta name="twitter:card" content="summary">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/Spring-IOC-%E5%AE%B9%E5%99%A8%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%883%EF%BC%89%EF%BC%9A%E5%88%9B%E5%BB%BA%E5%8E%9F%E5%A7%8B-bean-%E5%AF%B9%E8%B1%A1/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Spring IOC 容器源码分析（3）：创建原始 bean 对象 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/Spring-IOC-%E5%AE%B9%E5%99%A8%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%883%EF%BC%89%EF%BC%9A%E5%88%9B%E5%BB%BA%E5%8E%9F%E5%A7%8B-bean-%E5%AF%B9%E8%B1%A1/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Spring IOC 容器源码分析（3）：创建原始 bean 对象
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 13:58:57" itemprop="dateCreated datePublished" datetime="2020-01-08T13:58:57+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Spring%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Spring技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Spring%E6%8A%80%E6%9C%AF/Spring/" itemprop="url" rel="index">
+                    <span itemprop="name">Spring</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="1-简介"><a href="#1-简介" class="headerlink" title="1. 简介"></a>1. 简介</h1><p>本篇文章是上一篇文章（<a href="http://www.coolblog.xyz/2018/06/04/Spring-IOC-容器源码分析-创建单例-bean/" target="_blank" rel="noopener">创建单例 bean 的过程</a>）的延续。在上一篇文章中，我们从战略层面上领略了<code>doCreateBean</code>方法的全过程。本篇文章，我们就从战术的层面上，详细分析<code>doCreateBean</code>方法中的一个重要的调用，即<code>createBeanInstance</code>方法。在本篇文章中，你将看到三种不同的构造 bean 对象的方式。你也会了解到构造 bean 对象的两种策略。如果你对这些内容感兴趣，那么不妨继续往下读。我会在代码进行大量的注解，相信能帮助你理解代码逻辑。好了，其他的就不多说了，进入正题吧。</p>
+<a id="more"></a>
+
+<h1 id="2-源码分析"><a href="#2-源码分析" class="headerlink" title="2. 源码分析"></a>2. 源码分析</h1><h2 id="2-1-创建-bean-对象的过程"><a href="#2-1-创建-bean-对象的过程" class="headerlink" title="2.1 创建 bean 对象的过程"></a>2.1 创建 bean 对象的过程</h2><p>本节，我们一起来来分析一下本篇文章的主角<code>createBeanInstance</code>方法。按照惯例，我们还是先分析一下方法的大致脉络，然后我们再按照这个脉络去分析一些重要的调用。So. Let`s go → ↓</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">protected BeanWrapper create<span class="constructor">BeanInstance(String <span class="params">beanName</span>, RootBeanDefinition <span class="params">mbd</span>, Object[] <span class="params">args</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    Class&lt;?&gt; beanClass = resolve<span class="constructor">BeanClass(<span class="params">mbd</span>, <span class="params">beanName</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 检测类的访问权限。默认情况下，对于非 public 的类，是允许访问的。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 若禁止访问，这里会抛出异常</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (beanClass != null<span class="operator"> &amp;&amp; </span>!<span class="module-access"><span class="module"><span class="identifier">Modifier</span>.</span></span>is<span class="constructor">Public(<span class="params">beanClass</span>.<span class="params">getModifiers</span>()</span>)<span class="operator"> &amp;&amp; </span>!mbd.is<span class="constructor">NonPublicAccessAllowed()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        throw <span class="keyword">new</span> <span class="constructor">BeanCreationException(<span class="params">mbd</span>.<span class="params">getResourceDescription</span>()</span>, beanName,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">                <span class="string">"Bean class isn't public, and non-public access not allowed: "</span> + beanClass.get<span class="constructor">Name()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 如果工厂方法不为空，则通过工厂方法构建 bean 对象。这种构建 bean 的方式</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 就不深入分析了，有兴趣的朋友可以自己去看一下。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (mbd.get<span class="constructor">FactoryMethodName()</span> != null)  &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 通过“工厂方法”的方式构建 bean 对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        return instantiate<span class="constructor">UsingFactoryMethod(<span class="params">beanName</span>, <span class="params">mbd</span>, <span class="params">args</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 当多次构建同一个 bean 时，可以使用此处的快捷路径，即无需再次推断应该使用哪种方式构造实例，</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 以提高效率。比如在多次构建同一个 prototype 类型的 bean 时，就可以走此处的捷径。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 这里的 resolved 和 mbd.constructorArgumentsResolved 将会在 bean 第一次实例</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 化的过程中被设置，在后面的源码中会分析到，先继续往下看。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">    boolean resolved = <span class="literal">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    boolean autowireNecessary = <span class="literal">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (args<span class="operator"> == </span>null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">        synchronized (mbd.constructorArgumentLock) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (mbd.resolvedConstructorOrFactoryMethod != null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">                resolved = <span class="literal">true</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">                autowireNecessary = mbd.constructorArgumentsResolved;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (resolved) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (autowireNecessary) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// 通过“构造方法自动注入”的方式构造 bean 对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">            return autowire<span class="constructor">Constructor(<span class="params">beanName</span>, <span class="params">mbd</span>, <span class="params">null</span>, <span class="params">null</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// 通过“默认构造方法”的方式构造 bean 对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">            return instantiate<span class="constructor">Bean(<span class="params">beanName</span>, <span class="params">mbd</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 由后置处理器决定返回哪些构造方法，这里不深入分析了</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line">    Constructor&lt;?&gt;<span class="literal">[]</span> ctors = determine<span class="constructor">ConstructorsFromBeanPostProcessors(<span class="params">beanClass</span>, <span class="params">beanName</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 下面的条件分支条件用于判断使用什么方式构造 bean 实例，有两种方式可选 - 构造方法自动</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">49</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 注入和默认构造方法。判断的条件由4部分综合而成，如下：</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">50</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">51</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     *    条件1：ctors != null -&gt; 后置处理器返回构造方法数组是否为空</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">52</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">53</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     *    条件2：mbd.getResolvedAutowireMode() == RootBeanDefinition.AUTOWIRE_CONSTRUCTOR</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">54</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     *              -&gt; bean 配置中的 autowire 属性是否为 constructor</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">55</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     *    条件3：mbd.hasConstructorArgumentValues()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">56</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     *              -&gt; constructorArgumentValues 是否存在元素，即 bean 配置文件中</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">57</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     *                 是否配置了 &lt;construct-arg/&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">58</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     *    条件4：!ObjectUtils.isEmpty(args)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">59</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     *              -&gt; args 数组是否存在元素，args 是由用户调用</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">60</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     *                 getBean(String name, Object... args) 传入的</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">61</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">62</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 上面4个条件，只要有一个为 true，就会通过构造方法自动注入的方式构造 bean 实例</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">63</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">64</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (ctors != null <span class="pattern-match"><span class="operator">||</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">65</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">            mbd.get<span class="constructor">ResolvedAutowireMode()</span> <span class="operator">==</span> <span class="constructor">RootBeanDefinition</span>.<span class="constructor">AUTOWIRE_CONSTRUCTOR</span> <span class="operator">||</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">66</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">            mbd.has<span class="constructor">ConstructorArgumentValues()</span> <span class="operator">||</span> !<span class="constructor">ObjectUtils</span>.is<span class="constructor">Empty(<span class="params">args</span>)</span>)  &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">67</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">        <span class="operator">/</span><span class="operator">/</span> 通过“构造方法自动注入”的方式构造 bean 对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">68</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">        return autowire<span class="constructor">Constructor(<span class="params">beanName</span>, <span class="params">mbd</span>, <span class="params">ctors</span>, <span class="params">args</span>)</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">69</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    &#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">70</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    <span class="operator">/</span><span class="operator">/</span> 通过“默认构造方法”的方式构造 bean 对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">71</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">    return instantiate<span class="constructor">Bean(<span class="params">beanName</span>, <span class="params">mbd</span>)</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">72</span></pre></td><td class="code"><pre><span class="line"><span class="pattern-match">&#125;</span></span></pre></td></tr></table></figure>
+
+<p>以上就是 createBeanInstance 方法的源码，不是很长。配合着注释，应该不是很难懂。下面我们来总结一下这个方法的执行流程，如下：</p>
+<ol>
+<li>检测类的访问权限，若禁止访问，则抛出异常</li>
+<li>若工厂方法不为空，则通过工厂方法构建 bean 对象，并返回结果</li>
+<li>若构造方式已解析过，则走快捷路径构建 bean 对象，并返回结果</li>
+<li>如第三步不满足，则通过组合条件决定使用哪种方式构建 bean 对象</li>
+</ol>
+<p>这里有三种构造 bean 对象的方式，如下：</p>
+<ol>
+<li>通过“工厂方法”的方式构造 bean 对象</li>
+<li>通过“构造方法自动注入”的方式构造 bean 对象</li>
+<li>通过“默认构造方法”的方式构造 bean 对象</li>
+</ol>
+<p>下面我将会分析第2和第3种构造 bean 对象方式的实现源码。至于第1种方式，实现逻辑和第2种方式较为相似。所以就不分析了，大家有兴趣可以自己看一下。</p>
+<h2 id="2-2-通过构造方法自动注入的方式创建-bean-实例"><a href="#2-2-通过构造方法自动注入的方式创建-bean-实例" class="headerlink" title="2.2 通过构造方法自动注入的方式创建 bean 实例"></a>2.2 通过构造方法自动注入的方式创建 bean 实例</h2><p>本节，我将会分析构造方法自动注入的实现逻辑。代码逻辑较为复杂，需要大家耐心阅读。代码如下：</p>
+<figure class="highlight processing"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">protected</span> BeanWrapper autowireConstructor(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">String</span> beanName, RootBeanDefinition mbd, Constructor&lt;?&gt;[] ctors, <span class="keyword">Object</span>[] explicitArgs) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 创建 ConstructorResolver 对象，并调用其 autowireConstructor 方法</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> <span class="keyword">new</span> ConstructorResolver(<span class="keyword">this</span>).autowireConstructor(beanName, mbd, ctors, explicitArgs);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> BeanWrapper autowireConstructor(<span class="keyword">final</span> <span class="keyword">String</span> beanName, <span class="keyword">final</span> RootBeanDefinition mbd,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        Constructor&lt;?&gt;[] chosenCtors, <span class="keyword">final</span> <span class="keyword">Object</span>[] explicitArgs) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 创建 BeanWrapperImpl 对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    BeanWrapperImpl bw = <span class="keyword">new</span> BeanWrapperImpl();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">this</span>.beanFactory.initBeanWrapper(bw);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    Constructor&lt;?&gt; constructorToUse = <span class="keyword">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    ArgumentsHolder argsHolderToUse = <span class="keyword">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">Object</span>[] argsToUse = <span class="keyword">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 确定参数值列表（argsToUse）</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (explicitArgs != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        argsToUse = explicitArgs;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">Object</span>[] argsToResolve = <span class="keyword">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">synchronized</span> (mbd.constructorArgumentLock) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// 获取已解析的构造方法</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">            constructorToUse = (Constructor&lt;?&gt;) mbd.resolvedConstructorOrFactoryMethod;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (constructorToUse != <span class="keyword">null</span> &amp;&amp; mbd.constructorArgumentsResolved) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// 获取已解析的构造方法参数列表</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">                argsToUse = mbd.resolvedConstructorArguments;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (argsToUse == <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">                    <span class="comment">// 若 argsToUse 为空，则获取未解析的构造方法参数列表</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">                    argsToResolve = mbd.preparedConstructorArguments;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (argsToResolve != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// 解析参数列表</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">            argsToUse = resolvePreparedArguments(beanName, mbd, bw, constructorToUse, argsToResolve);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (constructorToUse == <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">boolean</span> autowiring = (chosenCtors != <span class="keyword">null</span> ||</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">                mbd.getResolvedAutowireMode() == RootBeanDefinition.AUTOWIRE_CONSTRUCTOR);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">        ConstructorArgumentValues resolvedValues = <span class="keyword">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">int</span> minNrOfArgs;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (explicitArgs != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">            minNrOfArgs = explicitArgs.length;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line">            ConstructorArgumentValues cargs = mbd.getConstructorArgumentValues();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line">            resolvedValues = <span class="keyword">new</span> ConstructorArgumentValues();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">49</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 确定构造方法参数数量，比如下面的配置：</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">50</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *     &lt;bean id="persion" class="xyz.coolblog.autowire.Person"&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">51</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *         &lt;constructor-arg index="0" value="xiaoming"/&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">52</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *         &lt;constructor-arg index="1" value="1"/&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">53</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *         &lt;constructor-arg index="2" value="man"/&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">54</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *     &lt;/bean&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">55</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">56</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 此时 minNrOfArgs = maxIndex + 1 = 2 + 1 = 3，除了计算 minNrOfArgs，</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">57</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 下面的方法还会将 cargs 中的参数数据转存到 resolvedValues 中</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">58</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">59</span></pre></td><td class="code"><pre><span class="line">            minNrOfArgs = resolveConstructorArguments(beanName, mbd, bw, cargs, resolvedValues);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">60</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">61</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 获取构造方法列表</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">62</span></pre></td><td class="code"><pre><span class="line">        Constructor&lt;?&gt;[] candidates = chosenCtors;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">63</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (candidates == <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">64</span></pre></td><td class="code"><pre><span class="line">            Class&lt;?&gt; beanClass = mbd.getBeanClass();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">65</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">66</span></pre></td><td class="code"><pre><span class="line">                candidates = (mbd.isNonPublicAccessAllowed() ?</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">67</span></pre></td><td class="code"><pre><span class="line">                        beanClass.getDeclaredConstructors() : beanClass.getConstructors());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">68</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">69</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">catch</span> (Throwable ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">70</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">throw</span> <span class="keyword">new</span> BeanCreationException(mbd.getResourceDescription(), beanName,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">71</span></pre></td><td class="code"><pre><span class="line">                        <span class="string">"Resolution of declared constructors on bean Class ["</span> + beanClass.getName() +</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">72</span></pre></td><td class="code"><pre><span class="line">                        <span class="string">"] from ClassLoader ["</span> + beanClass.getClassLoader() + <span class="string">"] failed"</span>, ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">73</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">74</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">75</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 按照构造方法的访问权限级别和参数数量进行排序</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">76</span></pre></td><td class="code"><pre><span class="line">        AutowireUtils.sortConstructors(candidates);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">77</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">int</span> minTypeDiffWeight = Integer.MAX_VALUE;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">78</span></pre></td><td class="code"><pre><span class="line">        Set&lt;Constructor&lt;?&gt;&gt; ambiguousConstructors = <span class="keyword">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">79</span></pre></td><td class="code"><pre><span class="line">        LinkedList&lt;UnsatisfiedDependencyException&gt; causes = <span class="keyword">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">80</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">for</span> (Constructor&lt;?&gt; candidate : candidates) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">81</span></pre></td><td class="code"><pre><span class="line">            Class&lt;?&gt;[] paramTypes = candidate.getParameterTypes();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">82</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">83</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 下面的 if 分支的用途是：若匹配到到合适的构造方法了，提前结束 for 循环</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">84</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * constructorToUse != null 这个条件比较好理解，下面分析一下条件 argsToUse.length &gt; paramTypes.length：</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">85</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 前面说到 AutowireUtils.sortConstructors(candidates) 用于对构造方法进行</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">86</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 排序，排序规则如下：</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">87</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *   1. 具有 public 访问权限的构造方法排在非 public 构造方法前</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">88</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *   2. 参数数量多的构造方法排在前面</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">89</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">90</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 假设现在有一组构造方法按照上面的排序规则进行排序，排序结果如下（省略参数名称）：</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">91</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">92</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *   1. public Hello(Object, Object, Object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">93</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *   2. public Hello(Object, Object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">94</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *   3. public Hello(Object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">95</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *   4. protected Hello(Integer, Object, Object, Object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">96</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *   5. protected Hello(Integer, Object, Object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">97</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *   6. protected Hello(Integer, Object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">98</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">99</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * argsToUse = [num1, obj2]，可以匹配上的构造方法2和构造方法6。由于构造方法2有</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">100</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 更高的访问权限，所以没理由不选他（尽管后者在参数类型上更加匹配）。由于构造方法3</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">101</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 参数数量 &lt; argsToUse.length，参数数量上不匹配，也不应该选。所以</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">102</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * argsToUse.length &gt; paramTypes.length 这个条件用途是：在条件</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">103</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * constructorToUse != null 成立的情况下，通过判断参数数量与参数值数量</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">104</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * （argsToUse.length）是否一致，来决定是否提前终止构造方法匹配逻辑。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">105</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">106</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (constructorToUse != <span class="keyword">null</span> &amp;&amp; argsToUse.length &gt; paramTypes.length) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">107</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">break</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">108</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">109</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">110</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 构造方法参数数量低于配置的参数数量，则忽略当前构造方法，并重试。比如</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">111</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * argsToUse = [obj1, obj2, obj3, obj4]，上面的构造方法列表中，</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">112</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 构造方法1、2和3显然不是合适选择，忽略之。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">113</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">114</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (paramTypes.length &lt; minNrOfArgs) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">115</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">continue</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">116</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">117</span></pre></td><td class="code"><pre><span class="line">            ArgumentsHolder argsHolder;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">118</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (resolvedValues != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">119</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">120</span></pre></td><td class="code"><pre><span class="line">                    <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">121</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     * 判断否则方法是否有 ConstructorProperties 注解，若有，则取注解中的</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">122</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     * 值。比如下面的代码：</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">123</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">124</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *  public class Persion &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">125</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *      private String name;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">126</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *      private Integer age;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">127</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">128</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *      @ConstructorProperties(value = &#123;"coolblog", "20"&#125;)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">129</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *      public Persion(String name, Integer age) &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">130</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *          this.name = name;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">131</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *          this.age = age;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">132</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *      &#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">133</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     * &#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">134</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">135</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">String</span>[] paramNames = ConstructorPropertiesChecker.evaluate(candidate, paramTypes.length);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">136</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">if</span> (paramNames == <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">137</span></pre></td><td class="code"><pre><span class="line">                        ParameterNameDiscoverer pnd = <span class="keyword">this</span>.beanFactory.getParameterNameDiscoverer();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">138</span></pre></td><td class="code"><pre><span class="line">                        <span class="keyword">if</span> (pnd != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">139</span></pre></td><td class="code"><pre><span class="line">                            <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">140</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                             * 获取构造方法参数名称列表，比如有这样一个构造方法:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">141</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                             *   public Person(String name, int age, String sex)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">142</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                             *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">143</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                             * 调用 getParameterNames 方法返回 paramNames = [name, age, sex]</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">144</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                             */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">145</span></pre></td><td class="code"><pre><span class="line">                            paramNames = pnd.getParameterNames(candidate);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">146</span></pre></td><td class="code"><pre><span class="line">                        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">147</span></pre></td><td class="code"><pre><span class="line">                    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">148</span></pre></td><td class="code"><pre><span class="line">                    <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">149</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     * 创建参数值列表，返回 argsHolder 会包含进行类型转换后的参数值，比如下</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">150</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     * 面的配置:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">151</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">152</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *     &lt;bean id="persion" class="xyz.coolblog.autowire.Person"&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">153</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *         &lt;constructor-arg name="name" value="xiaoming"/&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">154</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *         &lt;constructor-arg name="age" value="1"/&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">155</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *         &lt;constructor-arg name="sex" value="man"/&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">156</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *     &lt;/bean&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">157</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">158</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     * Person 的成员变量 age 是 Integer 类型的，但由于在 Spring 配置中</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">159</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     * 只能配成 String 类型，所以这里要进行类型转换。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">160</span></pre></td><td class="code"><pre><span class="line"><span class="comment">                     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">161</span></pre></td><td class="code"><pre><span class="line">                    argsHolder = createArgumentArray(beanName, mbd, resolvedValues, bw, paramTypes, paramNames,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">162</span></pre></td><td class="code"><pre><span class="line">                            getUserDeclaredConstructor(candidate), autowiring);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">163</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">164</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">catch</span> (UnsatisfiedDependencyException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">165</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">if</span> (<span class="keyword">this</span>.beanFactory.logger.isTraceEnabled()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">166</span></pre></td><td class="code"><pre><span class="line">                        <span class="keyword">this</span>.beanFactory.logger.trace(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">167</span></pre></td><td class="code"><pre><span class="line">                                <span class="string">"Ignoring constructor ["</span> + candidate + <span class="string">"] of bean '"</span> + beanName + <span class="string">"': "</span> + ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">168</span></pre></td><td class="code"><pre><span class="line">                    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">169</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">if</span> (causes == <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">170</span></pre></td><td class="code"><pre><span class="line">                        causes = <span class="keyword">new</span> LinkedList&lt;UnsatisfiedDependencyException&gt;();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">171</span></pre></td><td class="code"><pre><span class="line">                    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">172</span></pre></td><td class="code"><pre><span class="line">                    causes.<span class="built_in">add</span>(ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">173</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">continue</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">174</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">175</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">176</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">177</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (paramTypes.length != explicitArgs.length) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">178</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">continue</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">179</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">180</span></pre></td><td class="code"><pre><span class="line">                argsHolder = <span class="keyword">new</span> ArgumentsHolder(explicitArgs);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">181</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">182</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">183</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 计算参数值（argsHolder.arguments）每个参数类型与构造方法参数列表</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">184</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * （paramTypes）中参数的类型差异量，差异量越大表明参数类型差异越大。参数类型差异</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">185</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 越大，表明当前构造方法并不是一个最合适的候选项。引入差异量（typeDiffWeight）</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">186</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 变量目的：是将候选构造方法的参数列表类型与参数值列表类型的差异进行量化，通过量化</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">187</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 后的数值筛选出最合适的构造方法。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">188</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">189</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 讲完差异量，再来说说 mbd.isLenientConstructorResolution() 条件。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">190</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 官方的解释是：返回构造方法的解析模式，有宽松模式（lenient mode）和严格模式</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">191</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * （strict mode）两种类型可选。具体的细节没去研究，就不多说了。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">192</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">193</span></pre></td><td class="code"><pre><span class="line">            <span class="built_in">int</span> typeDiffWeight = (mbd.isLenientConstructorResolution() ?</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">194</span></pre></td><td class="code"><pre><span class="line">                    argsHolder.getTypeDifferenceWeight(paramTypes) : argsHolder.getAssignabilityWeight(paramTypes));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">195</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (typeDiffWeight &lt; minTypeDiffWeight) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">196</span></pre></td><td class="code"><pre><span class="line">                constructorToUse = candidate;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">197</span></pre></td><td class="code"><pre><span class="line">                argsHolderToUse = argsHolder;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">198</span></pre></td><td class="code"><pre><span class="line">                argsToUse = argsHolder.arguments;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">199</span></pre></td><td class="code"><pre><span class="line">                minTypeDiffWeight = typeDiffWeight;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">200</span></pre></td><td class="code"><pre><span class="line">                ambiguousConstructors = <span class="keyword">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">201</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">202</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">203</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 如果两个构造方法与参数值类型列表之间的差异量一致，那么这两个方法都可以作为</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">204</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 候选项，这个时候就出现歧义了，这里先把有歧义的构造方法放入</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">205</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * ambiguousConstructors 集合中</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">206</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">207</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">else</span> <span class="keyword">if</span> (constructorToUse != <span class="keyword">null</span> &amp;&amp; typeDiffWeight == minTypeDiffWeight) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">208</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (ambiguousConstructors == <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">209</span></pre></td><td class="code"><pre><span class="line">                    ambiguousConstructors = <span class="keyword">new</span> LinkedHashSet&lt;Constructor&lt;?&gt;&gt;();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">210</span></pre></td><td class="code"><pre><span class="line">                    ambiguousConstructors.<span class="built_in">add</span>(constructorToUse);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">211</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">212</span></pre></td><td class="code"><pre><span class="line">                ambiguousConstructors.<span class="built_in">add</span>(candidate);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">213</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">214</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">215</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 若上面未能筛选出合适的构造方法，这里将抛出 BeanCreationException 异常</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">216</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (constructorToUse == <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">217</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (causes != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">218</span></pre></td><td class="code"><pre><span class="line">                UnsatisfiedDependencyException ex = causes.removeLast();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">219</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">for</span> (Exception cause : causes) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">220</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">this</span>.beanFactory.onSuppressedException(cause);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">221</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">222</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">throw</span> ex;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">223</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">224</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">throw</span> <span class="keyword">new</span> BeanCreationException(mbd.getResourceDescription(), beanName,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">225</span></pre></td><td class="code"><pre><span class="line">                    <span class="string">"Could not resolve matching constructor "</span> +</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">226</span></pre></td><td class="code"><pre><span class="line">                    <span class="string">"(hint: specify index/type/name arguments for simple parameters to avoid type ambiguities)"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">227</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">228</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">229</span></pre></td><td class="code"><pre><span class="line"><span class="comment">         * 如果 constructorToUse != null，且 ambiguousConstructors 也不为空，表明解析</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">230</span></pre></td><td class="code"><pre><span class="line"><span class="comment">         * 出了多个的合适的构造方法，此时就出现歧义了。Spring 不会擅自决定使用哪个构造方法，</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">231</span></pre></td><td class="code"><pre><span class="line"><span class="comment">         * 所以抛出异常。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">232</span></pre></td><td class="code"><pre><span class="line"><span class="comment">         */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">233</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">else</span> <span class="keyword">if</span> (ambiguousConstructors != <span class="keyword">null</span> &amp;&amp; !mbd.isLenientConstructorResolution()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">234</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">throw</span> <span class="keyword">new</span> BeanCreationException(mbd.getResourceDescription(), beanName,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">235</span></pre></td><td class="code"><pre><span class="line">                    <span class="string">"Ambiguous constructor matches found in bean '"</span> + beanName + <span class="string">"' "</span> +</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">236</span></pre></td><td class="code"><pre><span class="line">                    <span class="string">"(hint: specify index/type/name arguments for simple parameters to avoid type ambiguities): "</span> +</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">237</span></pre></td><td class="code"><pre><span class="line">                    ambiguousConstructors);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">238</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">239</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (explicitArgs == <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">240</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">241</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 缓存相关信息，比如：</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">242</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *   1. 已解析出的构造方法对象 resolvedConstructorOrFactoryMethod</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">243</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *   2. 构造方法参数列表是否已解析标志 constructorArgumentsResolved</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">244</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *   3. 参数值列表 resolvedConstructorArguments 或 preparedConstructorArguments</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">245</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">246</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 这些信息可用在其他地方，用于进行快捷判断</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">247</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">248</span></pre></td><td class="code"><pre><span class="line">            argsHolderToUse.storeCache(mbd, constructorToUse);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">249</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">250</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">251</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">252</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">Object</span> beanInstance;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">253</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (System.getSecurityManager() != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">254</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">final</span> Constructor&lt;?&gt; ctorToUse = constructorToUse;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">255</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">final</span> <span class="keyword">Object</span>[] argumentsToUse = argsToUse;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">256</span></pre></td><td class="code"><pre><span class="line">            beanInstance = AccessController.doPrivileged(<span class="keyword">new</span> PrivilegedAction&lt;<span class="keyword">Object</span>&gt;() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">257</span></pre></td><td class="code"><pre><span class="line">                @Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">258</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">public</span> <span class="keyword">Object</span> run() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">259</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">return</span> beanFactory.getInstantiationStrategy().instantiate(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">260</span></pre></td><td class="code"><pre><span class="line">                            mbd, beanName, beanFactory, ctorToUse, argumentsToUse);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">261</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">262</span></pre></td><td class="code"><pre><span class="line">            &#125;, beanFactory.getAccessControlContext());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">263</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">264</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">265</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">266</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 调用实例化策略创建实例，默认情况下使用反射创建实例。如果 bean 的配置信息中</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">267</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 包含 lookup-method 和 replace-method，则通过 CGLIB 增强 bean 实例</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">268</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">269</span></pre></td><td class="code"><pre><span class="line">            beanInstance = <span class="keyword">this</span>.beanFactory.getInstantiationStrategy().instantiate(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">270</span></pre></td><td class="code"><pre><span class="line">                    mbd, beanName, <span class="keyword">this</span>.beanFactory, constructorToUse, argsToUse);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">271</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">272</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 设置 beanInstance 到 BeanWrapperImpl 对象中</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">273</span></pre></td><td class="code"><pre><span class="line">        bw.setBeanInstance(beanInstance);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">274</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> bw;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">275</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">276</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">catch</span> (Throwable ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">277</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> BeanCreationException(mbd.getResourceDescription(), beanName,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">278</span></pre></td><td class="code"><pre><span class="line">                <span class="string">"Bean instantiation via constructor failed"</span>, ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">279</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">280</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>上面的方法逻辑比较复杂，做了不少事情，该方法的核心逻辑是根据参数值类型筛选合适的构造方法。解析出合适的构造方法后，剩下的工作就是构建 bean 对象了，这个工作交给了实例化策略去做。下面罗列一下这个方法的工作流程吧：</p>
+<ol>
+<li>创建 BeanWrapperImpl 对象</li>
+<li>解析构造方法参数，并算出 minNrOfArgs</li>
+<li>获取构造方法列表，并排序</li>
+<li>遍历排序好的构造方法列表，筛选合适的构造方法<ol>
+<li>获取构造方法参数列表中每个参数的名称</li>
+<li>再次解析参数，此次解析会将value 属性值进行类型转换，由 String 转为合适的类型。</li>
+<li>计算构造方法参数列表与参数值列表之间的类型差异量，以筛选出更为合适的构造方法</li>
+</ol>
+</li>
+<li>缓存已筛选出的构造方法以及参数值列表，若再次创建 bean 实例时，可直接使用，无需再次进行筛选</li>
+<li>使用初始化策略创建 bean 对象</li>
+<li>将 bean 对象放入 BeanWrapperImpl 对象中，并返回该对象</li>
+</ol>
+<p>由上面的流程可以看得出，通过构造方法自动注入的方式构造 bean 对象的过程还是很复杂的。为了看懂这个流程，我进行了多次调试，算是勉强弄懂大致逻辑。由于时间有限，我并未能详细分析 autowireConstructor 方法及其所调用的一些方法，比如 resolveConstructorArguments、 autowireConstructor 等。关于这些方法，这里只写了个大概，有兴趣的朋友自己去探索吧。</p>
+<h2 id="2-3-通过默认构造方法创建-bean-对象"><a href="#2-3-通过默认构造方法创建-bean-对象" class="headerlink" title="2.3 通过默认构造方法创建 bean 对象"></a>2.3 通过默认构造方法创建 bean 对象</h2><p>看完了上面冗长的逻辑，本节来看点轻松的吧 - 通过默认构造方法创建 bean 对象。如下：</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">protected</span> <span class="function">BeanWrapper <span class="title">instantiateBean</span><span class="params">(<span class="keyword">final</span> String beanName, <span class="keyword">final</span> RootBeanDefinition mbd)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        Object beanInstance;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">final</span> BeanFactory parent = <span class="keyword">this</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// if 条件分支里的一大坨是 Java 安全相关的代码，可以忽略，直接看 else 分支</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (System.getSecurityManager() != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            beanInstance = AccessController.doPrivileged(<span class="keyword">new</span> PrivilegedAction&lt;Object&gt;() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">                <span class="meta">@Override</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">public</span> <span class="function">Object <span class="title">run</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">return</span> getInstantiationStrategy().instantiate(mbd, beanName, parent);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">            &#125;, getAccessControlContext());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 调用实例化策略创建实例，默认情况下使用反射创建对象。如果 bean 的配置信息中</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             * 包含 lookup-method 和 replace-method，则通过 CGLIB 创建 bean 对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="comment">             */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">            beanInstance = getInstantiationStrategy().instantiate(mbd, beanName, parent);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 创建 BeanWrapperImpl 对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        BeanWrapper bw = <span class="keyword">new</span> BeanWrapperImpl(beanInstance);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        initBeanWrapper(bw);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> bw;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">catch</span> (Throwable ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> BeanCreationException(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">                mbd.getResourceDescription(), beanName, <span class="string">"Instantiation of bean failed"</span>, ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="function">Object <span class="title">instantiate</span><span class="params">(RootBeanDefinition bd, String beanName, BeanFactory owner)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 检测 bean 配置中是否配置了 lookup-method 或 replace-method，若配置了，则需使用 CGLIB 构建 bean 对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (bd.getMethodOverrides().isEmpty()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">        Constructor&lt;?&gt; constructorToUse;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">synchronized</span> (bd.constructorArgumentLock) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">            constructorToUse = (Constructor&lt;?&gt;) bd.resolvedConstructorOrFactoryMethod;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (constructorToUse == <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">final</span> Class&lt;?&gt; clazz = bd.getBeanClass();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (clazz.isInterface()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">throw</span> <span class="keyword">new</span> BeanInstantiationException(clazz, <span class="string">"Specified class is an interface"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">if</span> (System.getSecurityManager() != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line">                        constructorToUse = AccessController.doPrivileged(<span class="keyword">new</span> PrivilegedExceptionAction&lt;Constructor&lt;?&gt;&gt;() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line">                            <span class="meta">@Override</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line">                            <span class="keyword">public</span> Constructor&lt;?&gt; run() <span class="keyword">throws</span> Exception &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line">                                <span class="keyword">return</span> clazz.getDeclaredConstructor((Class[]) <span class="keyword">null</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line">                            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">49</span></pre></td><td class="code"><pre><span class="line">                        &#125;);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">50</span></pre></td><td class="code"><pre><span class="line">                    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">51</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">52</span></pre></td><td class="code"><pre><span class="line">                        <span class="comment">// 获取默认构造方法</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">53</span></pre></td><td class="code"><pre><span class="line">                        constructorToUse = clazz.getDeclaredConstructor((Class[]) <span class="keyword">null</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">54</span></pre></td><td class="code"><pre><span class="line">                    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">55</span></pre></td><td class="code"><pre><span class="line">                    <span class="comment">// 设置 resolvedConstructorOrFactoryMethod</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">56</span></pre></td><td class="code"><pre><span class="line">                    bd.resolvedConstructorOrFactoryMethod = constructorToUse;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">57</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">58</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">catch</span> (Throwable ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">59</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">throw</span> <span class="keyword">new</span> BeanInstantiationException(clazz, <span class="string">"No default constructor found"</span>, ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">60</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">61</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">62</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">63</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 通过无参构造方法创建 bean 对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">64</span></pre></td><td class="code"><pre><span class="line">        <span class="function"><span class="keyword">return</span> BeanUtils.<span class="title">instantiateClass</span><span class="params">(constructorToUse)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">65</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">66</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">67</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 使用 GCLIG 创建 bean 对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">68</span></pre></td><td class="code"><pre><span class="line">        <span class="function"><span class="keyword">return</span> <span class="title">instantiateWithMethodInjection</span><span class="params">(bd, beanName, owner)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">69</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">70</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>上面就是通过默认构造方法创建 bean 对象的过程，比较简单，就不多说了。最后我们再来看看简单看看通过无参构造方法刚创建 bean 对象的代码（通过 CGLIB 创建 bean 对象的方式就不看了）是怎样的，如下：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public static &lt;T&gt; T instantiate<span class="constructor">Class(Constructor&lt;T&gt; <span class="params">ctor</span>, Object<span class="operator">...</span> <span class="params">args</span>)</span> throws BeanInstantiationException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">Assert</span>.</span></span>not<span class="constructor">Null(<span class="params">ctor</span>, <span class="string">"Constructor must not be null"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 设置构造方法为可访问</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">ReflectionUtils</span>.</span></span>make<span class="constructor">Accessible(<span class="params">ctor</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 通过反射创建 bean 实例，这里的 args 是一个没有元素的空数组</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        return ctor.<span class="keyword">new</span><span class="constructor">Instance(<span class="params">args</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    catch (InstantiationException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        throw <span class="keyword">new</span> <span class="constructor">BeanInstantiationException(<span class="params">ctor</span>, <span class="string">"Is it an abstract class?"</span>, <span class="params">ex</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    catch (IllegalAccessException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        throw <span class="keyword">new</span> <span class="constructor">BeanInstantiationException(<span class="params">ctor</span>, <span class="string">"Is the constructor accessible?"</span>, <span class="params">ex</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    catch (IllegalArgumentException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        throw <span class="keyword">new</span> <span class="constructor">BeanInstantiationException(<span class="params">ctor</span>, <span class="string">"Illegal arguments for constructor"</span>, <span class="params">ex</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    catch (InvocationTargetException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        throw <span class="keyword">new</span> <span class="constructor">BeanInstantiationException(<span class="params">ctor</span>, <span class="string">"Constructor threw exception"</span>, <span class="params">ex</span>.<span class="params">getTargetException</span>()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>到这里，终于看到了创建 bean 对象的代码了。在经历层层调用后，我们总算是追到了调用栈的最深处。看到这里，大家可以休息一下了，本文也差不多要结束了。好了，最后再容我多啰嗦一会，往下看。</p>
+<h1 id="3-写在最后"><a href="#3-写在最后" class="headerlink" title="3.写在最后"></a>3.写在最后</h1><p>写到这里，我也算是松了一口气，终于快写完了。这篇文章写起来感觉挺不容易的，原因是 createBeanInstance 及其调用的方法是在太多了，而且很多方法逻辑还是比较复杂的，尤其是 autowireConstructor 中调用的一些方法。autowireConstructor 中调用的方法我基本上都看了一遍，但并非全部都弄懂了，有些方法只是知道个大概。所以，这篇文章写的我挺纠结的，生怕有些地方分析的不对。由于我后续还有很多东西要看，以至于我暂时没法抽出大量的时间去详细阅读 Spring 的源码。所以如果上面的分析有不对的地方，欢迎指正，我会虚心听之。如果这些不对的地方给你造成了困扰，实在很抱歉，抱歉。<br>好了，本篇文章先到这里。谢谢阅读！</p>
+<h1 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h1><ul>
+<li><a href="https://book.douban.com/subject/25866350/" target="_blank" rel="noopener">《Spring 源码深度解析》- 郝佳</a></li>
+</ul>
+<h1 id="附录：Spring-源码分析文章列表"><a href="#附录：Spring-源码分析文章列表" class="headerlink" title="附录：Spring 源码分析文章列表"></a>附录：Spring 源码分析文章列表</h1><h2 id="Ⅰ-IOC"><a href="#Ⅰ-IOC" class="headerlink" title="Ⅰ. IOC"></a>Ⅰ. IOC</h2><table>
+<thead>
+<tr>
+<th>更新时间</th>
+<th>标题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>2018-05-30</td>
+<td><a href="http://www.coolblog.xyz/2018/05/30/Spring-IOC-容器源码分析系列文章导读/" target="_blank" rel="noopener">Spring IOC 容器源码分析系列文章导读</a></td>
+</tr>
+<tr>
+<td>2018-06-01</td>
+<td><a href="http://www.coolblog.xyz/2018/06/01/Spring-IOC-容器源码分析-获取单例-bean/" target="_blank" rel="noopener">Spring IOC 容器源码分析 - 获取单例 bean</a></td>
+</tr>
+<tr>
+<td>2018-06-04</td>
+<td><a href="http://www.coolblog.xyz/2018/06/04/Spring-IOC-容器源码分析-创建单例-bean/" target="_blank" rel="noopener">Spring IOC 容器源码分析 - 创建单例 bean 的过程</a></td>
+</tr>
+<tr>
+<td>2018-06-06</td>
+<td><a href="http://www.coolblog.xyz/2018/06/06/Spring-IOC-容器源码分析-创建原始-bean-对象/" target="_blank" rel="noopener">Spring IOC 容器源码分析 - 创建原始 bean 对象</a></td>
+</tr>
+<tr>
+<td>2018-06-08</td>
+<td><a href="http://www.coolblog.xyz/2018/06/08/Spring-IOC-容器源码分析-循环依赖的解决办法/" target="_blank" rel="noopener">Spring IOC 容器源码分析 - 循环依赖的解决办法</a></td>
+</tr>
+<tr>
+<td>2018-06-11</td>
+<td><a href="http://www.coolblog.xyz/2018/06/11/Spring-IOC-容器源码分析-填充属性到-bean-原始对象/" target="_blank" rel="noopener">Spring IOC 容器源码分析 - 填充属性到 bean 原始对象</a></td>
+</tr>
+<tr>
+<td>2018-06-11</td>
+<td><a href="http://www.coolblog.xyz/2018/06/11/Spring-IOC-容器源码分析-余下的初始化工作/" target="_blank" rel="noopener">Spring IOC 容器源码分析 - 余下的初始化工作</a></td>
+</tr>
+</tbody></table>
+<h2 id="Ⅱ-AOP"><a href="#Ⅱ-AOP" class="headerlink" title="Ⅱ. AOP"></a>Ⅱ. AOP</h2><table>
+<thead>
+<tr>
+<th>更新时间</th>
+<th>标题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>2018-06-17</td>
+<td><a href="http://www.coolblog.xyz/2018/06/17/Spring-AOP-源码分析系列文章导读/" target="_blank" rel="noopener">Spring AOP 源码分析系列文章导读</a></td>
+</tr>
+<tr>
+<td>2018-06-20</td>
+<td><a href="http://www.coolblog.xyz/2018/06/20/Spring-AOP-源码分析-筛选合适的通知器/" target="_blank" rel="noopener">Spring AOP 源码分析 - 筛选合适的通知器</a></td>
+</tr>
+<tr>
+<td>2018-06-20</td>
+<td><a href="http://www.coolblog.xyz/2018/06/20/Spring-AOP-源码分析-筛选合适的通知器/" target="_blank" rel="noopener">Spring AOP 源码分析 - 创建代理对象</a></td>
+</tr>
+<tr>
+<td>2018-06-22</td>
+<td><a href="http://www.coolblog.xyz/2018/06/22/Spring-AOP-源码分析-拦截器链的执行过程/" target="_blank" rel="noopener">Spring AOP 源码分析 - 拦截器链的执行过程</a></td>
+</tr>
+</tbody></table>
+<h2 id="Ⅲ-MVC"><a href="#Ⅲ-MVC" class="headerlink" title="Ⅲ. MVC"></a>Ⅲ. MVC</h2><table>
+<thead>
+<tr>
+<th>更新时间</th>
+<th>标题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>2018-06-29</td>
+<td><a href="http://www.coolblog.xyz/2018/06/29/Spring-MVC-原理探秘-一个请求的旅行过程/" target="_blank" rel="noopener">Spring MVC 原理探秘 - 一个请求的旅行过程</a></td>
+</tr>
+<tr>
+<td>2018-06-30</td>
+<td><a href="http://www.coolblog.xyz/2018/06/30/Spring-MVC-原理探秘-容器的创建过程/" target="_blank" rel="noopener">Spring MVC 原理探秘 - 容器的创建过程</a></td>
+</tr>
+</tbody></table>
+<blockquote>
+<p>作者：田小波</p>
+<p>来源：<a href="https://www.tianxiaobo.com/2018/06/06/Spring-IOC-%E5%AE%B9%E5%99%A8%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90-%E5%88%9B%E5%BB%BA%E5%8E%9F%E5%A7%8B-bean-%E5%AF%B9%E8%B1%A1/" target="_blank" rel="noopener">https://www.tianxiaobo.com/2018/06/06/Spring-IOC-%E5%AE%B9%E5%99%A8%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90-%E5%88%9B%E5%BB%BA%E5%8E%9F%E5%A7%8B-bean-%E5%AF%B9%E8%B1%A1/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E6%BA%90%E7%A0%81/" rel="tag"># 源码</a>
+              <a href="/tags/IOC/" rel="tag"># IOC</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Spring-IOC-%E5%AE%B9%E5%99%A8%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%882%EF%BC%89%EF%BC%9A%E5%88%9B%E5%BB%BA%E5%8D%95%E4%BE%8B-bean-%E7%9A%84%E8%BF%87%E7%A8%8B/" rel="prev" title="Spring IOC 容器源码分析（2）：创建单例 bean 的过程">
+      <i class="fa fa-chevron-left"></i> Spring IOC 容器源码分析（2）：创建单例 bean 的过程
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Spring-IOC-%E5%AE%B9%E5%99%A8%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%884%EF%BC%89%EF%BC%9A%E5%BE%AA%E7%8E%AF%E4%BE%9D%E8%B5%96%E7%9A%84%E8%A7%A3%E5%86%B3%E5%8A%9E%E6%B3%95/" rel="next" title="Spring IOC 容器源码分析（4）：循环依赖的解决办法">
+      Spring IOC 容器源码分析（4）：循环依赖的解决办法 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#1-简介"><span class="nav-number">1.</span> <span class="nav-text">1. 简介</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#2-源码分析"><span class="nav-number">2.</span> <span class="nav-text">2. 源码分析</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#2-1-创建-bean-对象的过程"><span class="nav-number">2.1.</span> <span class="nav-text">2.1 创建 bean 对象的过程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-2-通过构造方法自动注入的方式创建-bean-实例"><span class="nav-number">2.2.</span> <span class="nav-text">2.2 通过构造方法自动注入的方式创建 bean 实例</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-3-通过默认构造方法创建-bean-对象"><span class="nav-number">2.3.</span> <span class="nav-text">2.3 通过默认构造方法创建 bean 对象</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#3-写在最后"><span class="nav-number">3.</span> <span class="nav-text">3.写在最后</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#参考"><span class="nav-number">4.</span> <span class="nav-text">参考</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#附录：Spring-源码分析文章列表"><span class="nav-number">5.</span> <span class="nav-text">附录：Spring 源码分析文章列表</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#Ⅰ-IOC"><span class="nav-number">5.1.</span> <span class="nav-text">Ⅰ. IOC</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Ⅱ-AOP"><span class="nav-number">5.2.</span> <span class="nav-text">Ⅱ. AOP</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Ⅲ-MVC"><span class="nav-number">5.3.</span> <span class="nav-text">Ⅲ. MVC</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

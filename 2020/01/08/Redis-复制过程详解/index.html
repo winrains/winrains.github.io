@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="Redis 的复制功能分为同步( sync )和命令传播( command propagate )两个步骤：  同步用于将从服务器的数据库状态更新至主服务器当前所处的数据库状态。 命令传播则用于在主服务器的数据库状态被修改，导致主从服务器的数据库状态出现不一致时，让主从服务器的数据库重新回到一致状态。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Redis 复制过程详解">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;Redis-%E5%A4%8D%E5%88%B6%E8%BF%87%E7%A8%8B%E8%AF%A6%E8%A7%A3&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="Redis 的复制功能分为同步( sync )和命令传播( command propagate )两个步骤：  同步用于将从服务器的数据库状态更新至主服务器当前所处的数据库状态。 命令传播则用于在主服务器的数据库状态被修改，导致主从服务器的数据库状态出现不一致时，让主从服务器的数据库重新回到一致状态。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;29396-image1.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;392f7-image2.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;bbade-image3.png">
+<meta property="og:updated_time" content="2020-01-08T05:23:56.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;29396-image1.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/Redis-%E5%A4%8D%E5%88%B6%E8%BF%87%E7%A8%8B%E8%AF%A6%E8%A7%A3/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Redis 复制过程详解 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/Redis-%E5%A4%8D%E5%88%B6%E8%BF%87%E7%A8%8B%E8%AF%A6%E8%A7%A3/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Redis 复制过程详解
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 13:23:56" itemprop="dateCreated datePublished" datetime="2020-01-08T13:23:56+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/Redis/" itemprop="url" rel="index">
+                    <span itemprop="name">Redis</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>Redis 的复制功能分为同步( sync )和命令传播( command propagate )两个步骤：</p>
+<ul>
+<li>同步用于将从服务器的数据库状态更新至主服务器当前所处的数据库状态。</li>
+<li>命令传播则用于在主服务器的数据库状态被修改，导致主从服务器的数据库状态出现不一致时，让主从服务器的数据库重新回到一致状态。</li>
+</ul>
+<a id="more"></a>
+
+<h2 id="同步"><a href="#同步" class="headerlink" title="同步"></a>同步</h2><p>Redis 使用 psync 命令完成主从数据同步，同步过程分为：全量复制和部分复制。<br>全量复制：一般用于初次复制场景，它会把主节点全部数据一次性发送给从节点发送给从节点，当数据量较大时，会对主从节点和网络造成很大的开销。<br>部分复制：用于处理在主从复制中因网络闪断等原因造成的网络丢失场景，当从节点再次连接上主节点后，如果条件允许，主节点会补发丢失数据给从节点。因为补发的数据远远小于全量数据，可以有效避免全量复制的过高开销。<br>psync 命令运行需要以下组件支持：</p>
+<ul>
+<li>主从节点各自复制偏移量</li>
+<li>主节点复制积压缓冲区</li>
+<li>主节点运行 id</li>
+</ul>
+<p>参与复制的从节点都会维护自身复制偏移量。主节点在处理完写命令后，会把命令的字节长度做累加记录，统计在 info replication 中的 master_repl_offset 指标中。<br>从节点在接收到主节点发送的命令后，也会累加记录自身的偏移量，并且会每秒钟上报自身的复制偏移量给主节点。<br>通过对比主从节点的复制偏移量，可以判断主从节点数据是否一致。<br>复制积压缓冲区是保存在主节点的一个固定长度的队列，默认大小为 1MB，当主节点有连接的从节点时被创建。主节点响应写命令时，不但会把命令发送给从节点，还会写入复制积压缓冲区中。<br>复制积压缓冲区大小有限，只能保存最近的复制数据，用于部分复制和复制命令丢失时的数据补救。<br>每个 Redis 节点启动后都会动态分配一个 40 位的十六进制字符串作为运行 ID。运行 ID 的主要作用是用来唯一标识 Redis 节点，比如说从节点保存主节点的运行 ID 来识别自己正在复制的时哪个主节点。</p>
+<h3 id="全量同步"><a href="#全量同步" class="headerlink" title="全量同步"></a>全量同步</h3><p><a href="http://image.winrains.cn/2019/10/29396-image1.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/29396-image1.png" alt="img"></a><br><code>slaveof</code> 命令的执行</p>
+<ul>
+<li>1) 从节点发送 psync 命令进行数据同步，由于是第一次进行复制，从节点没有复制偏移量和主节点的运行ID，所以发送的命令时 PSYNC ? -1。</li>
+<li>2) 主节点根据 PSYNC ? -1 解析出当前为全量复制，回复 + FULLRESYNC 响应。</li>
+<li>3) 从节点接收主节点的响应数据保存运行 ID 和偏移量 offset。</li>
+<li>4) 主节点执行 bgsave 保存 RDB 文件到本地，有关 RDB 的知识可以查看<a href="https://mp.weixin.qq.com/s/NpUV-7bvXTD3iu0_2aRssQ" target="_blank" rel="noopener">《Redis RDB 持久化详解》</a></li>
+<li>5) 主节点发送 RDB 文件给从节点，从节点把接收的 RDB 文件保存在本地并直接作为从节点的数据文件，接收完 RDB 后从节点打印相关日志，可以在日志中查看主节点发送的数据量。</li>
+</ul>
+<p>需要注意，对于数据量较大的主节点，比如生成的 RDB 文件超过 6GB 以上时要格外小心。如果传输 RDB 的时间超过 repl-timeout 所配置的值，从节点将发起接收 RDB 文件并清理已经下载的临时文件，导致全量复制失败。</p>
+<ul>
+<li>6) 对于主节点开始保存 RDB 快照到从节点接收完成期间，主节点仍然响应读命令，因此主节点会把这期间写命令保存在复制客户端缓冲区内，当从节点加载完 RDB 文件后，主节点再把缓冲区内的数据发送给从节点，保证主从之间数据一致性。</li>
+</ul>
+<p>如果主节点创建和传输 RDB 的时间过长，可能会出现主节点复制客户端缓冲区溢出。默认配置为 client-output-buffer-limit slave 256MB 64MB 60，如果60s内缓冲区消耗持续大于64MB或者直接超过256MB时，主节点将直接关闭复制客户端连接，造成全量同步失败。</p>
+<ul>
+<li>7) 从节点接收完主节点传送来的全部数据后会清空自身旧数据，该步骤对应如下日志。</li>
+<li>8) 从节点清空数据后开始加载 RDB 文件，对于加大的 RDB 文件，这一步操作依然比较耗时，可以通过计算日志之间的时间差来判断加载 RDB 的总耗时。</li>
+<li>9) 收到 SYNC 命令的主服务器执行 BGSAVE 命令，在后台生成一个 RDB 文件，并使用一个缓冲区记录从现在开始执行的所有写命令。</li>
+<li>10) 当主服务器的 BGSAVE 命令执行完毕时，主服务器会将 GBSAVE 命令生成的 RDB 文件发送给从服务器，从服务器接收并载入这个 RDB 文件，将自己的数据库状态更新至主服务器执行 BGSAVE 命令时的数据库状态。</li>
+<li>11) 主服务器将记录在缓冲区里边的所有写命令发送给从服务器，从服务器执行这些写命令，将自己的数据库状态更新至主服务器数据库当前所处的状态。</li>
+</ul>
+<p>通过分析全量复制的所有流程，读者会发现全量复制是一个非常耗时费力的操作。它时间开销主要包括：</p>
+<ul>
+<li>主节点 bgsave 时间</li>
+<li>RDB 文件网络传输时间</li>
+<li>从节点清空数据时间</li>
+<li>从节点加载 RDB 的时间</li>
+<li>可能的 AOF 重写时间</li>
+</ul>
+<p>全量同步过程中不仅会消耗大量时间，还会进行多次持久化相关操作和网络数据传输，这期间会大量消耗主从节点所在服务器的 CPU、内存和网络资源。所以，除了第一次复制是采用全量同步无法避免，其他场景应该规避全量复制，采取部分同步功能。</p>
+<h3 id="部分同步"><a href="#部分同步" class="headerlink" title="部分同步"></a>部分同步</h3><p>部分复制主要是 Redis 针对全量复制的过高开销做出的一种优化措施，使用 psync {runId} {offset} 命令实现。当从节点正在复制主节点时，如果出现网络闪断或者命令丢失等异常情况时，从节点会向主节点要求补发丢失的命令数据，如果主节点的复制积压缓冲区存在这部分数据则直接发送给从节点，这样就保证了主从节点复制的一致性。补发的这部分数据一般远远小于全量数据，所以开销很小。<br><a href="http://image.winrains.cn/2019/10/392f7-image2.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/392f7-image2.png" alt="img"></a></p>
+<ul>
+<li>1) 当主从节点之间网络出现中断时，如果超过了 repl-timeout 时间，主节点会认为从节点故障并中断复制连接。</li>
+<li>2) 主从连接中断期间主节点依然响应命令，但因复制连接中断命令无法发送给从节点，不过主节点内部存在复制积压缓冲区( repl-backlog-buffer )，依然可以保存最近一段时间的写命令数据，默认最大缓存 1MB。</li>
+<li>3) 当主从节点网络恢复后，从节点会再次连上主节点。</li>
+<li>4) 当主从连接恢复后，由于从节点之前保存了自身已复制的偏移量和主节点的运行ID。因此会把它们作为 psync 参数发送给主节点，要求进行补发复制操作。</li>
+<li>5) 主节点接到 psync 命令后首先核对参数 runId 是否与自身一致，如果一致，说明之前复制的是当前主节点；之后根据参数 offset 在自身复制积压缓冲区查找，如果偏移量之后的数据存在缓冲区中，则对从节点发送 +CONTINUE 响应，表示可以进行部分复制。</li>
+<li>6) 主节点根据偏移量把复制积压缓冲区里的数据发送给从节点，保证主从复制进入正常状态。</li>
+</ul>
+<h2 id="心跳检测"><a href="#心跳检测" class="headerlink" title="心跳检测"></a>心跳检测</h2><p>主从节点在建立复制后，它们之间维护着长连接并彼此发送心跳命令，如下图所示。<br>主从心跳判断机制如下所示：</p>
+<ul>
+<li>1) 主从节点彼此都有心跳检测机制，各自模拟成对方的客户端进行通信，通过 client list 命令查看复制相关客户端信息，主节点的连接状态为 flags=M，从节点连接状态为 flags=S。</li>
+<li>2) 主节点默认每隔 10 秒对从节点发送 ping 命令，判断从节点的存活性和连接状态。可以通过参数 repl-ping-slave-period 控制发送频率。</li>
+<li>3) 从节点在主线程中每隔 1 秒发送 replconf ack { offset } 命令，给主节点上报自己当前的复制偏移量。</li>
+</ul>
+<p>replconf 命令不仅能实时监测主从节点网络状态，还能上报从节点复制偏移量。主节点会根据从节点上传的偏移量检查复制数据是否丢失，如果从节点数据丢失，再从主节点的复制缓存区中拉取丢失的数据发送给该从节点。</p>
+<h2 id="异步复制和命令传播"><a href="#异步复制和命令传播" class="headerlink" title="异步复制和命令传播"></a>异步复制和命令传播</h2><p>主节点不但负责数据读写，还负责把写命令同步给从节点。写命令的发送过程是异步完成，也就是说主节点自身处理完写命令后直接返回给客户端，并不等待从节点复制完成。<br><a href="http://image.winrains.cn/2019/10/bbade-image3.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/10/bbade-image3.png" alt="img"></a><br>这个异步过程由命令传播来处理，它不仅会将写命令发送给所有从服务器，还会将写命令入队到复制积压缓冲区里边。</p>
+<blockquote>
+<p>作者：程序员历小冰</p>
+<p>来源：<a href="http://remcarpediem.net/article/eb2e63e2/" target="_blank" rel="noopener">http://remcarpediem.net/article/eb2e63e2/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/%E4%BA%86%E8%A7%A3-Redis-%E5%86%85%E5%AD%98%E7%9B%91%E6%8E%A7%E5%92%8C%E5%86%85%E5%AD%98%E6%B6%88%E8%80%97/" rel="prev" title="了解 Redis 内存监控和内存消耗">
+      <i class="fa fa-chevron-left"></i> 了解 Redis 内存监控和内存消耗
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Redis-%E4%BA%8B%E4%BB%B6%E6%9C%BA%E5%88%B6%E8%AF%A6%E8%A7%A3/" rel="next" title="Redis 事件机制详解">
+      Redis 事件机制详解 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#同步"><span class="nav-number">1.</span> <span class="nav-text">同步</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#全量同步"><span class="nav-number">1.1.</span> <span class="nav-text">全量同步</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#部分同步"><span class="nav-number">1.2.</span> <span class="nav-text">部分同步</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#心跳检测"><span class="nav-number">2.</span> <span class="nav-text">心跳检测</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#异步复制和命令传播"><span class="nav-number">3.</span> <span class="nav-text">异步复制和命令传播</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="类的生命周期一共分为七个阶段：  JVM-类加载机制 类加载过程为加载、验证、准备、解析和初始化五个部分，其中验证、准备和解析三个部分又被称为 连接（Linking）。这些过程并不是严格的线性过程，中间会穿插执行。比如加载为完成前，连接过程可能已经开始（比如文件格式的校验）；比如解析可能发生在初始化前也可能在初始化后等等。现在对这 5 个阶段做详细分析。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="深入理解 JVM 类加载机制">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3-JVM-%E7%B1%BB%E5%8A%A0%E8%BD%BD%E6%9C%BA%E5%88%B6&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="类的生命周期一共分为七个阶段：  JVM-类加载机制 类加载过程为加载、验证、准备、解析和初始化五个部分，其中验证、准备和解析三个部分又被称为 连接（Linking）。这些过程并不是严格的线性过程，中间会穿插执行。比如加载为完成前，连接过程可能已经开始（比如文件格式的校验）；比如解析可能发生在初始化前也可能在初始化后等等。现在对这 5 个阶段做详细分析。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109140404-22705.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109140405-db5e9.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109140407-624bb.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109140408-eeb44.png">
+<meta property="og:updated_time" content="2020-01-08T11:10:49.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109140404-22705.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3-JVM-%E7%B1%BB%E5%8A%A0%E8%BD%BD%E6%9C%BA%E5%88%B6/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>深入理解 JVM 类加载机制 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3-JVM-%E7%B1%BB%E5%8A%A0%E8%BD%BD%E6%9C%BA%E5%88%B6/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          深入理解 JVM 类加载机制
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 19:10:49" itemprop="dateCreated datePublished" datetime="2020-01-08T19:10:49+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/" itemprop="url" rel="index">
+                    <span itemprop="name">JVM</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/%E7%B1%BB%E5%8A%A0%E8%BD%BD%E6%9C%BA%E5%88%B6/" itemprop="url" rel="index">
+                    <span itemprop="name">类加载机制</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>类的生命周期一共分为七个阶段：</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109140404-22705.png" alt="img"></p>
+<p>JVM-类加载机制</p>
+<p>类加载过程为加载、验证、准备、解析和初始化五个部分，其中验证、准备和解析三个部分又被称为 <strong>连接（Linking）</strong>。<br>这些过程并不是严格的线性过程，中间会穿插执行。比如加载为完成前，连接过程可能已经开始（比如文件格式的校验）；比如解析可能发生在初始化前也可能在初始化后等等。<br>现在对这 5 个阶段做详细分析。</p>
+<a id="more"></a>
+
+<h2 id="1-加载"><a href="#1-加载" class="headerlink" title="1. 加载"></a>1. 加载</h2><p>把编译后的 Class 文件载入内存，创建一个 <code>java.lang.Class</code> 对象。<br>这个阶段要完成三件事情：</p>
+<ul>
+<li>使用类的 <strong>全限定名</strong> 来获取类的二进制字节流。</li>
+<li>将二进制字节流的 <strong>静态结构</strong> 进行转化，存储为方法区的 <strong>运行时结构</strong>。</li>
+<li>在内存中生成 <code>java.lang.Class</code> 对象，作为访问的入口。经常使用 Java 反射会对 <code>java.lang.Class</code> 对象非常熟悉，因为可以从该对象中获取到很多类的信息，比如字段、方法等。</li>
+</ul>
+<p>Class 文件的来源可以多种多样，由不同的类加载器实现不同来源加载，比如：</p>
+<ul>
+<li>本地的 Class 文件直接加载。比如 classpath 路径下的 <code>.class</code> 文件。</li>
+<li>网络加载。</li>
+<li>压缩包中加载，zip、jar 或者 war 加载。比如第三方类库打包压缩在 jar 中，部署到 tomcat 的 Class 文件打包在 war 中。</li>
+<li>运行时创建。Java 提供了一些工具类来实现，比如<code>java.lang.reflect</code> 包中的 Proxy 工具，可以直接在内存中创建动态代理对象。</li>
+<li>由其他文件生成，比如 JSP 文件。</li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/11/20191109140405-db5e9.png" alt="img"></p>
+<p>JVM-类加载机制-加载</p>
+<p>我们可以也自定义类加载器来实现从其他渠道加载 Class 文件。<br>载入内存后，生成 <code>java.lang.Class</code> 对象非常特别，因为它被存放在方法区中而不是堆中。</p>
+<h2 id="2-验证"><a href="#2-验证" class="headerlink" title="2. 验证"></a>2. 验证</h2><p>验证是连接的第一步。对 Class 文件的格式检查，确保满足 JVM 规范，避免产生虚拟机的安全问题。<br>因为上面说到 Class 文件不一定是 <code>javac</code> 编译产生的，有各种方式可以创建，对于编译时做的数组越界、对象类型转换错误等问题，类加载过程还需要再次校验。<br>不过验证还是挺耗性能的，如果 Class 文件已经被反复验证多次，可以使用 <code>-Xverify:none</code> 来缩短类加载时间。<br>验证主要有四种验证：文件格式验证、元数据验证、字节码验证和符号引用验证。</p>
+<h4 id="2-1-文件格式验证"><a href="#2-1-文件格式验证" class="headerlink" title="2.1. 文件格式验证"></a>2.1. 文件格式验证</h4><p><strong>文件格式验证</strong>，确保符合 Class 文件规范，能被当前版本的虚拟机处理。比如：</p>
+<ul>
+<li>检查魔数（Magic Number）是否是 Class 文件（<strong>0xCAFEBABY</strong>）。</li>
+<li>检查主次版本对不对。</li>
+<li>检查常量池的类型和索引是否正确。……</li>
+</ul>
+<p>在经历过这个阶段后，字节流才会被存储到方法区中。所以文件校验发生在 <strong>加载</strong> 阶段还未结束前。经过文件格式校验后，后续的校验都是基于方法区执行的。</p>
+<h4 id="2-2-元数据验证"><a href="#2-2-元数据验证" class="headerlink" title="2.2. 元数据验证"></a>2.2. 元数据验证</h4><p><strong>元数据验证</strong>，字节码语义分析，看是否符合语法规范。比如：</p>
+<ul>
+<li>是否有父类。除了 <code>java.lang.Object</code>，所有的类都要有父类。</li>
+<li>是否继承了不允许被继承的类。比如被 <code>final</code> 修饰类不允许被继承。</li>
+<li>如果不是抽象类，是否实现了父类或接口要求实现的方法。</li>
+<li>是否类的字段和方法和父类有矛盾。比如覆盖了父类的 <code>final</code> 字段。……</li>
+</ul>
+<p>这些语法规范如果是编译的 Class 文件，在编译期间也会做校验。但因为 Class 文件来源多样，并不能确保遵循语法规范，所以这里还要再进行一次验证。</p>
+<h4 id="2-3-字节码验证"><a href="#2-3-字节码验证" class="headerlink" title="2.3. 字节码验证"></a>2.3. 字节码验证</h4><p><strong>字节码校验</strong>。对字节码 <strong>数据流</strong> 和 <strong>控制流</strong> 进行分析，确定语义正确。这个是所有校验最复杂的阶段。比如：</p>
+<ul>
+<li>正确的操作指令。操作操作局部变量表和操作数栈的数据，指令类型要正确。</li>
+<li>正确的跳转指令。跳转到正确的字节码。</li>
+<li>正确的类型转换。比如子类可以赋值给父类，但父类不允许赋值子类。……</li>
+</ul>
+<p>这里举个校验的例子。<br>在执行字节码执行的时候，对局部变量表和操作数栈的数据进行操作时，需要使用正确的指令类型。比如局部变量表索引 1 是 int 类型，加载它需要用 <code>iload_1</code> 字节码，而不是 <code>lload_1</code> 、<code>fload_1</code> 和 <code>dload_1</code> 。在元数据校验阶段就可以做强制约束，排除错误使用。</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="built_in">int</span> add(<span class="built_in">int</span>, <span class="built_in">int</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  descriptor: (II)I</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  flags: ACC_PUBLIC</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  Code:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    stack=<span class="number">2</span>, locals=<span class="number">3</span>, args_size=<span class="number">3</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">       <span class="number">0</span>: iload_1                     # 因为局部变量类型为 <span class="built_in">int</span>，使用 iload 加载</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">       <span class="number">1</span>: iload_2</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">       <span class="number">2</span>: iadd</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">       <span class="number">3</span>: ireturn</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    LineNumberTable:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">      line <span class="number">32</span>: <span class="number">0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    LocalVariableTable:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">      Start  Length  Slot  Name   Signature</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">          <span class="number">0</span>       <span class="number">4</span>     <span class="number">0</span>  <span class="keyword">this</span>   Loblee/demo/jvm/stack/SimpleObject;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">          <span class="number">0</span>       <span class="number">4</span>     <span class="number">1</span>     a   I   # 局部变量类型为 <span class="built_in">int</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">          <span class="number">0</span>       <span class="number">4</span>     <span class="number">2</span>     b   I   # 局部变量类型为 <span class="built_in">int</span></span></pre></td></tr></table></figure>
+
+<p>经过了复杂的字节码验证，其实还是无法确保运行的安全。属于著名的 <strong>“Halting Problem”</strong>。<br>复杂的验证也十分消耗性能，HotSpot 虚拟机做了很多优化。</p>
+<h4 id="2-4-符号引用验证"><a href="#2-4-符号引用验证" class="headerlink" title="2.4. 符号引用验证"></a>2.4. 符号引用验证</h4><p><strong>符号引用校验</strong>。这个发生在符号引用转换为直接引用的时候，属于 <strong>解析</strong> 阶段的验证，用来确认引用一定会被访问到。比如：</p>
+<ul>
+<li>符号引用的全限定名是否能找到对应的类。</li>
+<li>符号引用的字段描述符或方法描述符是否能在类中找到对应字段和方法。</li>
+<li>符号引用的类、字段和方法的作用域（public、protected、private、default）是否可以被当前类访问。……</li>
+</ul>
+<p>符号引用验证也说明了这几个阶段不是线性的，而是会会穿插执行。<br>无法通过符号引用验证的话，会抛出相关的异常，比如 <code>java.lang.IllegalAccessError</code> 、 <code>java.lang.NoSuchFieldError</code> 、<code>java.lang.NoSuchMethodError</code> 等等。</p>
+<h2 id="3-准备"><a href="#3-准备" class="headerlink" title="3. 准备"></a>3. 准备</h2><p>为 <strong>类变量</strong> 分配内存，设置初始值。<br>分配的初始值具体是多少？各个数据的默认零值，有 0、0L、null、false 等。<br>比如下面的类变量 a：</p>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">SimpleObject</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">String</span> a = <span class="string">"hello world"</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">String</span> b = <span class="number">2</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p><strong>准备</strong> 阶段给 a 的初始值是 null，而不是 <code>“hello world”</code> 字符串，给 b 的初始值是 0 而不是 2。a 和 b 的真实赋值发生在 <strong>初始化</strong> 阶段，放在了类构造器 <code>()</code> 中，使用 <code>putstatic</code> 指令实现。<br>上面是类变量的处理过程，常量并非如此。如果是字符串或者基础数据类型（int、long、float 等等）的常量类型，准备阶段会直接分配具体数据。<br>还是 <code>SimpleObject</code> 对象，我们使用 <strong><code>final</code></strong> 关键字将 a 和 b 修饰为类常量：</p>
+<figure class="highlight actionscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">SimpleObject</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> String a = <span class="string">"hello world"</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> String b = <span class="number">2</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>准备阶段，会直接从运行时常量池中取出 “hello world” 字符串给 a 赋值，从常量池中取出 2 对 b 赋值（这时候 2 被加入到常量池中）。<br>注意，准备阶段只是处理 <strong>类变量</strong>，而不是 <strong>实例变量</strong>。实例变量的在类实例化后一同和实例对象分配在堆中。</p>
+<h2 id="4-解析"><a href="#4-解析" class="headerlink" title="4. 解析"></a>4. 解析</h2><p>解析的过程，就是将符号引用转为直接引用的过程。<br>符号引用中主要有：</p>
+<ul>
+<li>类和接口的全限定名。</li>
+<li>字段名称和描述符。</li>
+<li>方法名称和描述符。</li>
+</ul>
+<p>对应在 class 文件中的常量类型为 <code>CONSTANT_Class_info</code>、<code>CONSTANT_Fieldref_info</code>、<code>CONSTANT_Methodref_info</code> 。编译后在 class 文件的静态常量池中，类加载后进入运行时常量池。之所以需要符号引用，是因为 <code>javac</code> 将代码编译成 class 文件时，是不知道这些类、字段和方法在内存中的位置的，需要有一个符号来代替。<br>比如我们有一个类 <code>ObjectA</code> ，引用了 <code>ObjectB</code> 作为成员变量：</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span>  <span class="title">ObjectA</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> ObjectB b;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">setB</span><span class="params">(ObjectB b)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">this</span>.b = b;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> ObjectB <span class="title">getB</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> b;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>使用 <code>javap</code> 查看这个类的符号引用：</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109140407-624bb.jpeg" alt="img"></p>
+<p>JVM-类加载机制-符号引用</p>
+<p>直接引用主要有：</p>
+<ul>
+<li><strong>目标指针</strong>，比如 Class 对象、类变量、类方法在方法区的指针。</li>
+<li><strong>相对偏移量</strong>，比如实例变量在堆中的相对偏移量。</li>
+<li>能间接定位到目标的 <strong>句柄</strong>。</li>
+</ul>
+<p>可以直接引用对应的目标已经在内存中了。直接引用和虚拟机的内存布局相关，在不同虚拟机的直接引用是不一样的。<br>这些在未解析前都是字符串，存在方法区的运行时常量池里（HotSpot 1.8 方法区实现做了调整，符号引用被放到了由本地内存组成的元空间中），字节码解释器在执行字节码的时候是无法直接使用符号引用的，所以需要翻译成直接引用，可以是内存中的<br>这个解析过程不一定在 <strong>初始化</strong> 前执行，也有可能延迟到一个符号引用需要使用到的时候，在栈帧进行动态链接。</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109140408-eeb44.png" alt="img"></p>
+<p>JVM-虚拟机栈-栈帧-动态链接</p>
+<p>初始化前的解析的被称为 <strong>静态绑定</strong> ，栈帧里的解析被称为 <strong>动态绑定</strong>。<br>解析完成后，符号引用对应的直接引用会被记录在运行时常量池中，后续如果重复解析，直接返回对应的直接引用。</p>
+<h2 id="5-初始化"><a href="#5-初始化" class="headerlink" title="5. 初始化"></a>5. 初始化</h2><p>经过了加载和连接（校验、准备和解析），类已经载入内存并且分配了初始内存，开始进行初始化。<br>加载过程我们可以自定义类加载器（比如 <code>ClassLoader</code>） 来接管加载，连接完全是虚拟机自动处理的，而初始化才开始正式执行字节码。<br>初始化就是执行类构造器 <code>()</code> 的过程。<code>()</code> 由类变量赋值加上 <code>static{}</code> 语句块的代码合并而成，这个并不是必须的，如果没有静态变量赋值过程的话，是不会生成 <code>()</code> 的。<br>在 `` 调用一些指令来实现静态变量的赋值操作， 比如使用 <code>putstatic</code> 。<br>准备类 <code>SimpleObject</code> 如下：</p>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">SimpleObject</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">String</span>  a = <span class="string">"hello world"</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">int</span>     b = <span class="number">100</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> ObjectC c = <span class="keyword">new</span> ObjectC();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> Class   d = ObjectD.class;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">int</span>     e = ObjectE.e;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">int</span>     f = ObjectF.getF();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">int</span>     h = <span class="number">10</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">String</span>  i = ObjectI.I;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">int</span>     k = ObjectJ.k;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">static</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        ObjectH.h = h;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>使用 <code>javap</code> 查看 <code>SimpleObject</code> 的类构造器 ``：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">static &#123;&#125;;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  descriptor: ()V</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  flags: ACC_STATIC</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  Code:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    stack=<span class="number">2</span>, locals=<span class="number">0</span>, args_size=<span class="number">0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">       <span class="number">0</span>: ldc           #<span class="number">2</span>                  <span class="comment">// String hello world</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">       <span class="number">2</span>: putstatic     #<span class="number">3</span>                  <span class="comment">// Field a:Ljava/lang/String;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">       <span class="number">5</span>: bipush        <span class="number">100</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">       <span class="number">7</span>: putstatic     #<span class="number">4</span>                  <span class="comment">// Field b:I</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">      <span class="number">10</span>: new           #<span class="number">5</span>                  <span class="comment">// class oblee/demo/jvm/pre/ObjectC</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">      <span class="number">13</span>: dup</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">      <span class="number">14</span>: invokespecial #<span class="number">6</span>                  <span class="comment">// Method oblee/demo/jvm/pre/ObjectC."&lt;init&gt;":()V</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">      <span class="number">17</span>: putstatic     #<span class="number">7</span>                  <span class="comment">// Field c:Loblee/demo/jvm/pre/ObjectC;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">      <span class="number">20</span>: ldc           #<span class="number">8</span>                  <span class="comment">// class oblee/demo/jvm/pre/ObjectD</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">      <span class="number">22</span>: putstatic     #<span class="number">9</span>                  <span class="comment">// Field d:Ljava/lang/Class;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">      <span class="number">25</span>: getstatic     #<span class="number">10</span>                 <span class="comment">// Field oblee/demo/jvm/pre/ObjectE.e:I</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">      <span class="number">28</span>: putstatic     #<span class="number">11</span>                 <span class="comment">// Field e:I</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">      <span class="number">31</span>: invokestatic  #<span class="number">12</span>                 <span class="comment">// Method oblee/demo/jvm/pre/ObjectF.getF:()I</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">      <span class="number">34</span>: putstatic     #<span class="number">13</span>                 <span class="comment">// Field f:I</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">      <span class="number">37</span>: bipush        <span class="number">10</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">      <span class="number">39</span>: putstatic     #<span class="number">14</span>                 <span class="comment">// Field h:I</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">      <span class="number">42</span>: ldc           #<span class="number">16</span>                 <span class="comment">// String objectI</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">      <span class="number">44</span>: putstatic     #<span class="number">17</span>                 <span class="comment">// Field i:Ljava/lang/String;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">      <span class="number">47</span>: getstatic     #<span class="number">18</span>                 <span class="comment">// Field oblee/demo/jvm/pre/ObjectJ.k:I</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">      <span class="number">50</span>: putstatic     #<span class="number">19</span>                 <span class="comment">// Field k:I</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">      <span class="number">53</span>: getstatic     #<span class="number">14</span>                 <span class="comment">// Field h:I</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">      <span class="number">56</span>: putstatic     #<span class="number">20</span>                 <span class="comment">// Field oblee/demo/jvm/pre/ObjectH.h:I</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">      <span class="number">59</span>: <span class="keyword">return</span></span></pre></td></tr></table></figure>
+
+<p>如果静态变量是 <strong>字符串类型</strong>，作为字面量加入了常量池，初始化时从常量池中取出赋值。比如上面的 “hello world” 直接从常量池取出赋值给 a。<br>如果静态变量是 <strong>基础数据类型</strong>，直接使用指令载入。比如上面的 <code>bipush</code> 指令。<br>如果静态变量是个 <strong>类实例的引用类型</strong>，但是类还未加载，会再次触发这个类的类加载流程。<br>初始化不是在类加载后就马上执行的，有一定的触发条件。JVM 规范没有规定什么时候开始进行类加载流程，但对类初始化有进行严格的规定，有四条字节码指令 <code>new</code> 、 <code>getstatic</code> 、<code>putstatic</code> 、<code>invokestatic</code> 这 4 条指令，如果没有初始化会先触发初始化。<br>常见的场景有：</p>
+<ul>
+<li><strong>使用 new 关键词实例化对象</strong>。上面对静态变量 c 赋值，需要对类 <code>ObjectC</code> 进行实例化，所以会触发 <code>ObjectC</code> 的初始化。</li>
+<li><strong>读取类的静态变量</strong>。上面赋值静态变量 e， <code>getstatic #10</code> ，触发 <code>ObjectE</code> 的初始化。</li>
+<li><strong>设置类的静态变量</strong>。上面设置 <code>ObjectH</code> 的静态变量 h，<code>putstatic #20</code> ，触发 <code>ObjectH</code> 的初始化。</li>
+<li><strong>调用类的静态方法</strong>。上面调用 <code>ObjectF</code> 的静态方法 <code>getF()</code> ，<code>invokestatic #12</code> ，触发 <code>ObjectF</code> 的初始化。</li>
+</ul>
+<p>比如下面几种情况不会执行类初始化：</p>
+<ul>
+<li>通过子类引用父类的静态字段，只触发父类的初始化，不会触发子类的初始化。</li>
+<li>使用对象数组，不会触发该类初始化。</li>
+<li>常量被存入常量池中，没有直接引用常量的类，不会触发定义常量的类的初始化。</li>
+<li>通过类名获取 Class 对象，不会触发初始化。比如上面使用 <code>ObjectD.class</code> 并不会触发 <code>ObjectD</code> 类的初始化。</li>
+<li>使用 <code>Class.forName()</code> 加载类，参数 initialize 为 false 不会触发初始化。</li>
+<li>通过 ClassLoader 默认的 <code>loadClass</code> 方法加载类不会触发初始化。</li>
+</ul>
+<blockquote>
+<p>作者：Oblee</p>
+<p>来源：<a href="https://www.jianshu.com/p/3ceaa1a92aa5" target="_blank" rel="noopener">https://www.jianshu.com/p/3ceaa1a92aa5</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/%E6%8F%AD%E7%A7%98-Spring-%E7%9A%84-Bean-%E7%9A%84%E5%8A%A0%E8%BD%BD%E8%BF%87%E7%A8%8B/" rel="prev" title="揭秘 Spring 的 Bean 的加载过程">
+      <i class="fa fa-chevron-left"></i> 揭秘 Spring 的 Bean 的加载过程
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/MySQL-%E6%8A%80%E5%B7%A7%EF%BC%9A%E5%A6%82%E4%BD%95%E5%AE%9E%E7%8E%B0%E4%B9%90%E8%A7%82%E9%94%81/" rel="next" title="MySQL 技巧：如何实现乐观锁">
+      MySQL 技巧：如何实现乐观锁 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#1-加载"><span class="nav-number">1.</span> <span class="nav-text">1. 加载</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-验证"><span class="nav-number">2.</span> <span class="nav-text">2. 验证</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#2-1-文件格式验证"><span class="nav-number">2.0.1.</span> <span class="nav-text">2.1. 文件格式验证</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#2-2-元数据验证"><span class="nav-number">2.0.2.</span> <span class="nav-text">2.2. 元数据验证</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#2-3-字节码验证"><span class="nav-number">2.0.3.</span> <span class="nav-text">2.3. 字节码验证</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#2-4-符号引用验证"><span class="nav-number">2.0.4.</span> <span class="nav-text">2.4. 符号引用验证</span></a></li></ol></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3-准备"><span class="nav-number">3.</span> <span class="nav-text">3. 准备</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#4-解析"><span class="nav-number">4.</span> <span class="nav-text">4. 解析</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#5-初始化"><span class="nav-number">5.</span> <span class="nav-text">5. 初始化</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

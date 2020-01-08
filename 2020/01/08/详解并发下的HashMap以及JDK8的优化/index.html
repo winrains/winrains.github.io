@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="HashMap使用链表法避免哈希冲突（相同hash值），当链表长度大于TREEIFY_THRESHOLD（默认为8）时，将链表转换为红黑树。当小于等于UNTREEIFY_THRESHOLD（默认为6）时，又会退化回链表以达到性能均衡。 下图为HashMap的数据结构（数组+链表+红黑树 ）  HashMap的数据结构">
+<meta name="keywords" content="并发">
+<meta property="og:type" content="article">
+<meta property="og:title" content="详解并发下的HashMap以及JDK8的优化">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;%E8%AF%A6%E8%A7%A3%E5%B9%B6%E5%8F%91%E4%B8%8B%E7%9A%84HashMap%E4%BB%A5%E5%8F%8AJDK8%E7%9A%84%E4%BC%98%E5%8C%96&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="HashMap使用链表法避免哈希冲突（相同hash值），当链表长度大于TREEIFY_THRESHOLD（默认为8）时，将链表转换为红黑树。当小于等于UNTREEIFY_THRESHOLD（默认为6）时，又会退化回链表以达到性能均衡。 下图为HashMap的数据结构（数组+链表+红黑树 ）  HashMap的数据结构">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109145154-1e355.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109145155-a0e8c.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109145157-98416.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109145157-65802.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109145158-7f554.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109145158-3b466.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109145158-96e05.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109145159-b9df2.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109145200-7c13e.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109145201-3ed5d.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109145203-929af.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109145205-d2432.png">
+<meta property="og:updated_time" content="2020-01-08T11:14:07.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109145154-1e355.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/%E8%AF%A6%E8%A7%A3%E5%B9%B6%E5%8F%91%E4%B8%8B%E7%9A%84HashMap%E4%BB%A5%E5%8F%8AJDK8%E7%9A%84%E4%BC%98%E5%8C%96/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>详解并发下的HashMap以及JDK8的优化 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/%E8%AF%A6%E8%A7%A3%E5%B9%B6%E5%8F%91%E4%B8%8B%E7%9A%84HashMap%E4%BB%A5%E5%8F%8AJDK8%E7%9A%84%E4%BC%98%E5%8C%96/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          详解并发下的HashMap以及JDK8的优化
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 19:14:07" itemprop="dateCreated datePublished" datetime="2020-01-08T19:14:07+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>HashMap使用链表法避免哈希冲突（相同hash值），当链表长度大于TREEIFY_THRESHOLD（默认为8）时，将链表转换为红黑树。当小于等于UNTREEIFY_THRESHOLD（默认为6）时，又会退化回链表以达到性能均衡。 下图为HashMap的数据结构（数组+链表+红黑树 ）</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109145154-1e355.png" alt="img"></p>
+<p>HashMap的数据结构</p>
+<a id="more"></a>
+
+<h2 id="HashMap在并发时出现的问题"><a href="#HashMap在并发时出现的问题" class="headerlink" title="HashMap在并发时出现的问题"></a>HashMap在并发时出现的问题</h2><h3 id="1-多线程put的时候可能导致元素丢失"><a href="#1-多线程put的时候可能导致元素丢失" class="headerlink" title="1.多线程put的时候可能导致元素丢失"></a>1.多线程put的时候可能导致元素丢失</h3><p>主要问题出在addEntry方法的new Entry (hash, key, value, e)，如果两个线程都同时取得了e,则他们下一个元素都是e，然后赋值给table元素的时候有一个成功有一个丢失。</p>
+<h3 id="2-多线程put后可能导致get死循环"><a href="#2-多线程put后可能导致get死循环" class="headerlink" title="2.多线程put后可能导致get死循环"></a>2.多线程put后可能导致get死循环</h3><p>造成死循环的原因是多线程进行put操作时，触发了HashMap的扩容（resize函数），出现链表的两个结点形成闭环，导致死循环。下图为JDK8中的put操作流程，详情请自行查看源码。</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109145155-a0e8c.png" alt="img"></p>
+<p>JDK8的put操作</p>
+<h2 id="单线程resize过程"><a href="#单线程resize过程" class="headerlink" title="单线程resize过程"></a>单线程resize过程</h2><p><img src="http://image.winrains.cn/2019/11/20191109145157-98416.png" alt="img"></p>
+<p>HashMap的Resize过程</p>
+<p>首先我们把resize函数中的transfer()的关键代码贴出来：</p>
+<figure class="highlight q"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">while</span>(<span class="built_in">null</span> != e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    Entry&lt;K,V&gt; <span class="built_in">next</span> = e.<span class="built_in">next</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    if (rehash) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        e.hash = <span class="built_in">null</span> == e.<span class="built_in">key</span> ? <span class="number">0</span> : hash(e.<span class="built_in">key</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="type">int</span> i = indexFor(e.hash, newCapacity);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    e.<span class="built_in">next</span> = newTable[i];</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    newTable[i] = e;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    e = <span class="built_in">next</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>我们可以再简化一下，因为中间的i就是判断新表的位置，我们可以跳过。简化后代码：</p>
+<figure class="highlight gradle"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">while</span>(<span class="keyword">null</span> != e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    Entry&lt;K,V&gt; <span class="keyword">next</span> = e.<span class="keyword">next</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    e.<span class="keyword">next</span> = newTable[i]; <span class="comment">//假设线程一执行完这里就被调度挂起了</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    newTable[i] = e;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    e = <span class="keyword">next</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>去掉了一些与本过程冗余的代码，意思就非常清晰了：</p>
+<ol>
+<li>Entry&lt;K,V&gt; next = e.next;// 因为是单链表，如果要转移头指针，一定要保存下一个结点，不然转移后链表就丢了</li>
+<li>e.next = newTable[i];// e要插入到链表的头部，所以要先用e.next指向新的 Hash表第一个元素（为什么不加到新链表最后？因为复杂度是 O（N））</li>
+<li>newTable[i] = e;// 现在新Hash表的头指针仍然指向e没转移前的第一个元素，所以需要将新Hash表的头指针指向e</li>
+<li>e = next;// 转移e的下一个结点</li>
+</ol>
+<h3 id="并发时resize过程"><a href="#并发时resize过程" class="headerlink" title="并发时resize过程"></a>并发时resize过程</h3><ol>
+<li>假设我们线程一执行完<code>e.next = newTable[i];</code>就被调度挂起了</li>
+</ol>
+<p><img src="http://image.winrains.cn/2019/11/20191109145157-65802.jpeg" alt="img"></p>
+<p>并发的resize过程</p>
+<p>而我们的线程二执行完成了。于是我们有下面的这个样子。</p>
+<blockquote>
+<p>因为Thread1的 e 指向了key(3)，而next指向了key(7)，其在线程二rehash后，指向了线程二重组后的链表。我们可以看到链表的顺序被反转后。</p>
+</blockquote>
+<ol>
+<li>线程一被调度回来执行。<ol>
+<li>执行 newTalbe[i] = e。</li>
+<li>执行e = next，导致了e指向了key(7)。</li>
+<li>下一次循环的next = e.next导致了next指向了key(3)。</li>
+</ol>
+</li>
+</ol>
+<p><img src="http://image.winrains.cn/2019/11/20191109145158-7f554.jpeg" alt="img"></p>
+<p>并发的resize过程</p>
+<ol>
+<li>一切安好。<br>线程一接着工作。把key(7)摘下来，放到newTable[i]的第一个，然后把e和next往下移。</li>
+</ol>
+<p><img src="http://image.winrains.cn/2019/11/20191109145158-3b466.jpeg" alt="img"></p>
+<p>并发的resize过程</p>
+<ol>
+<li>环形链接出现。<br>e.next = newTable[i] 导致 key(3).next 指向了 key(7)。注意：此时的key(7).next 已经指向了key(3)， 环形链表就这样出现了。</li>
+</ol>
+<p><img src="http://image.winrains.cn/2019/11/20191109145158-96e05.jpeg" alt="img"></p>
+<p>并发的resize过程</p>
+<p>于是，当我们的线程一调用到，HashTable.get(11)时，悲剧就出现了——Infinite Loop。</p>
+<h2 id="JDK8中HashMap的优化"><a href="#JDK8中HashMap的优化" class="headerlink" title="JDK8中HashMap的优化"></a>JDK8中HashMap的优化</h2><h3 id="1-长链表的优化"><a href="#1-长链表的优化" class="headerlink" title="1.长链表的优化"></a>1.长链表的优化</h3><p>在JDK8中，如果链表的长度大于等于8 ，那么链表将转化为红黑树；当长度小于等于6时，又会变成一个链表</p>
+<blockquote>
+<p>红黑树的平均查找长度是log(n)，长度为8的时候，平均查找长度为3，如果继续使用链表，平均查找长度为8/2=4，这才有转换为树的必要。链表长度如果是小于等于6，6/2=3，虽然速度也很快的，但是转化为树结构和生成树的时间并不会太短。<br>还有选择6和8，中间有个差值7可以有效防止链表和树频繁转换。假设一下，如果设计成链表个数超过8则链表转换成树结构，链表个数小于8则树结构转换成链表，如果一个HashMap不停的插入、删除元素，链表个数在8左右徘徊，就会频繁的发生树转链表、链表转树，效率会很低。</p>
+</blockquote>
+<blockquote>
+<p>注意，当数组长度小于64（常量定义）的时候，扩张数组长度一倍，否则的话把链表转为树。并不是每次都直接树化的。</p>
+</blockquote>
+<p>此外，在JDK7中，hash计算的时候会对操作数进行右移操作，计算复杂，目的是将高位也参与运算，减少hash碰撞；在JDK8中，链表可以转变成红黑树，所以hash计算也变得简单。下面的图为JDK8中的hash计算和索引计算。</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109145159-b9df2.png" alt="img"></p>
+<p>JDK8的hash计算和索引计算</p>
+<h3 id="2-hash碰撞的插入方式的优化"><a href="#2-hash碰撞的插入方式的优化" class="headerlink" title="2.hash碰撞的插入方式的优化"></a>2.hash碰撞的插入方式的优化</h3><p>发生hash碰撞时，JDK7会在链表头部插入，而JDK8会在链表尾部插入。头插法是操作速度最快的，找到数组位置就直接找到插入位置了，但JDK8之前hashmap这种插入方法在并发场景下会出现死循环。JDK8开始hashmap链表在节点长度达到8之后会变成红黑树，这样一来在数组后节点长度不断增加时，遍历一次的次数就会少很多（否则每次要遍历所有），而且也可以避免之前的循环列表问题。同时如果变成红黑树，也不可能做头插法了。</p>
+<h3 id="3-扩容机制的优化"><a href="#3-扩容机制的优化" class="headerlink" title="3.扩容机制的优化"></a>3.扩容机制的优化</h3><p>在JDK7中，对所有链表进行rehash计算；在JDK8中，实际上也是通过取余找到元素所在的数组的位置，取余的方式在putVal里面：<code>i = (n - 1) &amp; hash</code>。我们假设，在扩容之前，key取余之后留下了n位。扩容之后，容量变为2倍，所以key取余得到的就有n+1位。在这n+1位里面，如果第1位是0，那么扩容前后这个key的位置还是在相同的位置（因为hash相同，并且余数的第1位是0，和之前n位的时候一样，所以余数还是一样，位置就一样了）；如果这n+1位的第一位是1，那么就和之前的不同，那么这个key就应该放在之前的位置再加上之前整个数组的长度的位置。这样子就减少了移动所有数据带来的消耗。（慢慢读两遍，想明白了，就觉得这个其实不看图更好理解）</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109145200-7c13e.png" alt="img"></p>
+<p>JDK8的rehash计算</p>
+<h2 id="常见FAQ"><a href="#常见FAQ" class="headerlink" title="常见FAQ"></a>常见FAQ</h2><h3 id="HashMap扩容条件"><a href="#HashMap扩容条件" class="headerlink" title="HashMap扩容条件"></a>HashMap扩容条件</h3><p>查看JDK7源码的put函数，然后跳转到addEntry函数。然后你会发现JDK7中hashmap扩容是要同时满足两个条件：</p>
+<ol>
+<li>当前数据存储的数量（即size()）大小必须大于等于阈值</li>
+<li>当前加入的数据是否发生了hash冲突</li>
+</ol>
+<p>因为上面这两个条件，所以存在下面两种情况：</p>
+<ol>
+<li>就是hashmap在存值的时候（默认大小为16，负载因子0.75，阈值12），可能达到最后存满16个值的时候，再存入第17个值才会发生扩容现象，因为前16个值，每个值在底层数组中分别占据一个位置，并没有发生hash碰撞。</li>
+<li>当然也有可能存储更多值（超多16个值，最多可以存26个值）都还没有扩容。原理：前11个值全部hash碰撞，存到数组的同一个位置（这时元素个数小于阈值12，不会扩容），后面所有存入的15个值全部分散到数组剩下的15个位置（这时元素个数大于等于阈值，但是每次存入的元素并没有发生hash碰撞，所以不会扩容），前面11+15=26，所以在存入第27个值的时候才同时满足上面两个条件，这时候才会发生扩容现象。</li>
+</ol>
+<p>而在JDK8中，扩容的条件只有一个，就是当前容量大于阈值（阈值等于当前hashmap最大容量乘以负载因子）</p>
+<h3 id="HashMap在JDK7中扩容计算新索引的方法"><a href="#HashMap在JDK7中扩容计算新索引的方法" class="headerlink" title="HashMap在JDK7中扩容计算新索引的方法"></a>HashMap在JDK7中扩容计算新索引的方法</h3><p>通过transfer方法将旧数组中的元素复制到新数组，在这个方法中进行了包括释放旧的Entry中的对象引用，该过程中如果需要重新计算hash值就重新计算，然后根据indexfor（）方法计算索引值。而索引值的计算方法为: <code>h &amp; (length-1)</code><br>，即hashcode计算出的hash值和数组长度进行与运算。</p>
+<blockquote>
+<p>一般认为，Java的%、/操作比&amp;慢10倍左右，因此采用&amp;运算而不是<code>h % length</code>会提高性能。</p>
+</blockquote>
+<h3 id="HashMap在JDK8中计算索引的方法"><a href="#HashMap在JDK8中计算索引的方法" class="headerlink" title="HashMap在JDK8中计算索引的方法"></a>HashMap在JDK8中计算索引的方法</h3><p>这个设计确实非常的巧妙，既省去了重新计算hash值的时间，也就是说1.8不用重新计算hash值而且同时，由于新增的1bit是0还是1可以认为是随机的，因此resize的过程，均匀的把之前的冲突的节点分散到新的bucket了。这一块就是JDK1.8新增的优化点。有一点注意区别，JDK1.7中rehash的时候，旧链表迁移新链表的时候，如果在新表的数组索引位置相同，则链表元素会倒置，因为他采用的是头插法，先拿出旧链表头元素。但是从下图可以看出，JDK1.8不会倒置，采用的尾插法。</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109145201-3ed5d.png" alt="img"></p>
+<p>JDK8的rehash计算</p>
+<h3 id="为什么-HashMap中-String、Integer-这样的包装类适合作为-key键"><a href="#为什么-HashMap中-String、Integer-这样的包装类适合作为-key键" class="headerlink" title="为什么 HashMap中 String、Integer 这样的包装类适合作为 key键"></a>为什么 HashMap中 String、Integer 这样的包装类适合作为 key键</h3><p><img src="http://image.winrains.cn/2019/11/20191109145203-929af.png" alt="img"></p>
+<p>Key的选择</p>
+<h3 id="HashMap中的key如果是Object类型，则需实现哪些方法？"><a href="#HashMap中的key如果是Object类型，则需实现哪些方法？" class="headerlink" title="HashMap中的key如果是Object类型，则需实现哪些方法？"></a>HashMap中的key如果是Object类型，则需实现哪些方法？</h3><p><img src="http://image.winrains.cn/2019/11/20191109145205-d2432.png" alt="img"></p>
+<p>重写方法的重要性</p>
+<blockquote>
+<p>作者：全菜工程师小辉</p>
+<p>来源：<a href="https://www.jianshu.com/p/e1c020d37c6a" target="_blank" rel="noopener">https://www.jianshu.com/p/e1c020d37c6a</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E5%B9%B6%E5%8F%91/" rel="tag"># 并发</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/%E7%AE%80%E5%8D%95%E6%98%93%E6%87%82%E7%90%86%E8%A7%A3Git%E7%9A%84%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86%EF%BC%882%EF%BC%89%EF%BC%9AIndex%E7%A9%BA%E9%97%B4/" rel="prev" title="简单易懂理解Git的工作原理（2）：Index空间">
+      <i class="fa fa-chevron-left"></i> 简单易懂理解Git的工作原理（2）：Index空间
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/NIO%E6%95%88%E7%8E%87%E9%AB%98%E7%9A%84%E5%8E%9F%E7%90%86%E4%B9%8B%E9%9B%B6%E6%8B%B7%E8%B4%9D%E4%B8%8E%E7%9B%B4%E6%8E%A5%E5%86%85%E5%AD%98%E6%98%A0%E5%B0%84/" rel="next" title="NIO效率高的原理之零拷贝与直接内存映射">
+      NIO效率高的原理之零拷贝与直接内存映射 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#HashMap在并发时出现的问题"><span class="nav-number">1.</span> <span class="nav-text">HashMap在并发时出现的问题</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1-多线程put的时候可能导致元素丢失"><span class="nav-number">1.1.</span> <span class="nav-text">1.多线程put的时候可能导致元素丢失</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-多线程put后可能导致get死循环"><span class="nav-number">1.2.</span> <span class="nav-text">2.多线程put后可能导致get死循环</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#单线程resize过程"><span class="nav-number">2.</span> <span class="nav-text">单线程resize过程</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#并发时resize过程"><span class="nav-number">2.1.</span> <span class="nav-text">并发时resize过程</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#JDK8中HashMap的优化"><span class="nav-number">3.</span> <span class="nav-text">JDK8中HashMap的优化</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1-长链表的优化"><span class="nav-number">3.1.</span> <span class="nav-text">1.长链表的优化</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-hash碰撞的插入方式的优化"><span class="nav-number">3.2.</span> <span class="nav-text">2.hash碰撞的插入方式的优化</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#3-扩容机制的优化"><span class="nav-number">3.3.</span> <span class="nav-text">3.扩容机制的优化</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#常见FAQ"><span class="nav-number">4.</span> <span class="nav-text">常见FAQ</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#HashMap扩容条件"><span class="nav-number">4.1.</span> <span class="nav-text">HashMap扩容条件</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#HashMap在JDK7中扩容计算新索引的方法"><span class="nav-number">4.2.</span> <span class="nav-text">HashMap在JDK7中扩容计算新索引的方法</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#HashMap在JDK8中计算索引的方法"><span class="nav-number">4.3.</span> <span class="nav-text">HashMap在JDK8中计算索引的方法</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#为什么-HashMap中-String、Integer-这样的包装类适合作为-key键"><span class="nav-number">4.4.</span> <span class="nav-text">为什么 HashMap中 String、Integer 这样的包装类适合作为 key键</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#HashMap中的key如果是Object类型，则需实现哪些方法？"><span class="nav-number">4.5.</span> <span class="nav-text">HashMap中的key如果是Object类型，则需实现哪些方法？</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

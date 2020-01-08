@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="0 前言这篇文章不会讲解索引的基础知识，主要是关于MySQL数据库的B+树索引的相关原理，里面的一些知识都参考了MySQL技术内幕这本书，也算对于这些知识的总结。对于B树和B+树相关的知识，可以参考我的这篇博客：面试官问你B树和B+树，就把这篇文章丢给他">
+<meta name="keywords" content="B+树,索引">
+<meta property="og:type" content="article">
+<meta property="og:title" content="MySQL的B+树索引的概念、使用、优化及使用场景">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;MySQL%E7%9A%84B-%E6%A0%91%E7%B4%A2%E5%BC%95%E7%9A%84%E6%A6%82%E5%BF%B5%E3%80%81%E4%BD%BF%E7%94%A8%E3%80%81%E4%BC%98%E5%8C%96%E5%8F%8A%E4%BD%BF%E7%94%A8%E5%9C%BA%E6%99%AF&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="0 前言这篇文章不会讲解索引的基础知识，主要是关于MySQL数据库的B+树索引的相关原理，里面的一些知识都参考了MySQL技术内幕这本书，也算对于这些知识的总结。对于B树和B+树相关的知识，可以参考我的这篇博客：面试官问你B树和B+树，就把这篇文章丢给他">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021150702-99c0f.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021150703-981e0.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021150703-6e8d0.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021150703-92489.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021150703-4dcf3.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021150703-ba1ea.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021150703-2da9f.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021150704-8fa61.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021150704-7b58b.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021150704-8ad48.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021150704-84a9f.png">
+<meta property="og:updated_time" content="2020-01-08T01:48:12.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191021150702-99c0f.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/MySQL%E7%9A%84B-%E6%A0%91%E7%B4%A2%E5%BC%95%E7%9A%84%E6%A6%82%E5%BF%B5%E3%80%81%E4%BD%BF%E7%94%A8%E3%80%81%E4%BC%98%E5%8C%96%E5%8F%8A%E4%BD%BF%E7%94%A8%E5%9C%BA%E6%99%AF/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>MySQL的B+树索引的概念、使用、优化及使用场景 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/MySQL%E7%9A%84B-%E6%A0%91%E7%B4%A2%E5%BC%95%E7%9A%84%E6%A6%82%E5%BF%B5%E3%80%81%E4%BD%BF%E7%94%A8%E3%80%81%E4%BC%98%E5%8C%96%E5%8F%8A%E4%BD%BF%E7%94%A8%E5%9C%BA%E6%99%AF/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          MySQL的B+树索引的概念、使用、优化及使用场景
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 09:48:12" itemprop="dateCreated datePublished" datetime="2020-01-08T09:48:12+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/MySQL/" itemprop="url" rel="index">
+                    <span itemprop="name">MySQL</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="0-前言"><a href="#0-前言" class="headerlink" title="0 前言"></a>0 前言</h1><p>这篇文章不会讲解索引的基础知识，主要是关于MySQL数据库的B+树索引的相关原理，里面的一些知识都参考了MySQL技术内幕这本书，也算对于这些知识的总结。对于B树和B+树相关的知识，可以参考我的这篇博客：<a href="https://blog.ouyangsihai.cn/mian-shi-guan-wen-ni-b-shu-he-b-shu-jiu-ba-zhe-pian-wen-zhang-diu-gei-ta.html" target="_blank" rel="noopener">面试官问你B树和B+树，就把这篇文章丢给他</a></p>
+<a id="more"></a>
+
+<h1 id="1-索引的管理"><a href="#1-索引的管理" class="headerlink" title="1 索引的管理"></a>1 索引的管理</h1><p>索引有很多中类型：普通索引、唯一索引、主键索引、组合索引、全文索引，下面我们看看如何创建和删除下面这些类型的索引。</p>
+<h2 id="1-1-索引的创建方式"><a href="#1-1-索引的创建方式" class="headerlink" title="1.1 索引的创建方式"></a>1.1 索引的创建方式</h2><p>索引的创建是可以在很多种情况下进行的。</p>
+<ul>
+<li><ul>
+<li>直接创建索引</li>
+</ul>
+</li>
+</ul>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> [<span class="keyword">UNIQUE</span>|FULLLTEXT] <span class="keyword">INDEX</span> index_name <span class="keyword">ON</span> <span class="built_in">table_name</span>(<span class="built_in">column_name</span>(length))</span></pre></td></tr></table></figure>
+
+<p><code>[UNIQUE|FULLLTEXT]</code>：表示可选择的索引类型，唯一索引还是全文索引，不加话就是普通索引。<br><code>table_name</code>：表的名称，表示为哪个表添加索引。<br><code>column_name(length)</code>：column_name是表的列名，length表示为这一列的前length行记录添加索引。</p>
+<ul>
+<li>修改表结构的方式添加索引</li>
+</ul>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">ALTER</span> <span class="keyword">TABLE</span> <span class="built_in">table_name</span> <span class="keyword">ADD</span> [<span class="keyword">UNIQUE</span>|FULLLTEXT] <span class="keyword">INDEX</span> index_name (<span class="keyword">column</span>(length))</span></pre></td></tr></table></figure>
+
+<ul>
+<li>创建表的时候同时创建索引</li>
+</ul>
+<figure class="highlight n1ql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> TABLE <span class="symbol">`table`</span> (</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="symbol">`id`</span> int(<span class="number">11</span>) <span class="keyword">NOT</span> <span class="literal">NULL</span> AUTO_INCREMENT ,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="symbol">`title`</span> char(<span class="number">255</span>) CHARACTER <span class="keyword">NOT</span> <span class="literal">NULL</span> ,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">PRIMARY</span> <span class="keyword">KEY</span> (<span class="symbol">`id`</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    [<span class="keyword">UNIQUE</span>|FULLLTEXT] <span class="keyword">INDEX</span> index_name (<span class="built_in">title</span>(<span class="built_in">length</span>))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">)</span></pre></td></tr></table></figure>
+
+<h2 id="1-2-主键索引和组合索引创建的方式"><a href="#1-2-主键索引和组合索引创建的方式" class="headerlink" title="1.2 主键索引和组合索引创建的方式"></a>1.2 主键索引和组合索引创建的方式</h2><p>前面讲的都是<strong>普通索引、唯一索引和全文索引</strong>创建的方式，但是，<strong>主键索引和组合索引</strong>创建的方式却是有点不一样的，所以单独拿出来讲一下。<br><strong>组合索引创建方式</strong></p>
+<ul>
+<li>创建表的时候同时创建索引</li>
+</ul>
+<figure class="highlight n1ql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> TABLE <span class="symbol">`table`</span> (</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="symbol">`id`</span> int(<span class="number">11</span>) <span class="keyword">NOT</span> <span class="literal">NULL</span> AUTO_INCREMENT ,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="symbol">`title`</span> char(<span class="number">255</span>) CHARACTER <span class="keyword">NOT</span> <span class="literal">NULL</span> ,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">PRIMARY</span> <span class="keyword">KEY</span> (<span class="symbol">`id`</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">INDEX</span> index_name(id,<span class="built_in">title</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">)</span></pre></td></tr></table></figure>
+
+<ul>
+<li>修改表结构的方式添加索引</li>
+</ul>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">ALTER</span> <span class="keyword">TABLE</span> <span class="built_in">table_name</span> <span class="keyword">ADD</span> <span class="keyword">INDEX</span> name_city_age (<span class="type">name</span>,city,age);</span></pre></td></tr></table></figure>
+
+<p><strong>主键索引创建方式</strong><br>主键索引是一种特殊的唯一索引，一个表只能有一个主键，不允许有空值。一般是在建表的时候同时创建主键索引。</p>
+<figure class="highlight n1ql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">CREATE</span> TABLE <span class="symbol">`table`</span> (</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="symbol">`id`</span> int(<span class="number">11</span>) <span class="keyword">NOT</span> <span class="literal">NULL</span> AUTO_INCREMENT ,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="symbol">`title`</span> char(<span class="number">255</span>) CHARACTER <span class="keyword">NOT</span> <span class="literal">NULL</span> ,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">PRIMARY</span> <span class="keyword">KEY</span> (<span class="symbol">`id`</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">)</span></pre></td></tr></table></figure>
+
+<h2 id="1-3-删除索引"><a href="#1-3-删除索引" class="headerlink" title="1.3 删除索引"></a>1.3 删除索引</h2><p>删除索引可利用<code>ALTER TABLE</code>或<code>DROP INDEX</code>语句来删除索引。类似于<code>CREATE INDEX</code>语句，<code>DROP INDEX</code>可以在<code>ALTER TABLE</code>内部作为一条语句处理，语法如下。<br>(1) DROP INDEX index_name ON talbe_name<br>(2) ALTER TABLE table_name DROP INDEX index_name<br>(3) ALTER TABLE table_name DROP PRIMARY KEY<br>第3条语句只在删除<code>PRIMARY KEY</code>索引时使用，因为一个表只可能有一个<code>PRIMARY KEY</code>索引，因此不需要指定索引名。</p>
+<h2 id="1-4-索引实例"><a href="#1-4-索引实例" class="headerlink" title="1.4 索引实例"></a>1.4 索引实例</h2><p>上面讲了一下基本的知识，接下来，还是通过一个具体的例子来体会一下。</p>
+<ul>
+<li><strong>step1：创建表</strong></li>
+</ul>
+<figure class="highlight sas"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"> <span class="meta">create</span> <span class="meta">table</span> <span class="meta">table</span><span class="meta">_index(</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    id<span class="meta"> int(</span>11) <span class="meta">not</span> <span class="meta">null</span> auto_increment,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">title</span> char(255) <span class="meta">not</span> <span class="meta">null</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">primary</span> <span class="meta">key</span>(id)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">);</span></pre></td></tr></table></figure>
+
+<ul>
+<li><strong>step2：添加索引</strong></li>
+</ul>
+<p>首先，我们使用直接添加索引的方式添加一个普通索引。</p>
+<figure class="highlight sas"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="meta">CREATE</span> <span class="meta">INDEX</span> idx_a <span class="meta">ON</span> <span class="meta">table</span><span class="meta">_index(</span><span class="meta">title</span>);</span></pre></td></tr></table></figure>
+
+<p>接着，我们用修改表结构的时候添加索引。</p>
+<figure class="highlight sas"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="meta">ALTER</span> <span class="meta">TABLE</span> table_index <span class="meta">ADD</span> <span class="meta">UNIQUE</span> <span class="meta">INDEX</span> idx_b (<span class="meta">title</span>(100));</span></pre></td></tr></table></figure>
+
+<p>最后，我们再添加一个组合索引。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">ALTER</span> <span class="keyword">TABLE</span> table_index <span class="keyword">ADD</span> <span class="keyword">INDEX</span> idx_id_title (<span class="keyword">id</span>,title);</span></pre></td></tr></table></figure>
+
+<p>这样，我们就把前面索引的方式都用上一遍了，我相信你也熟悉这些操作了。</p>
+<ul>
+<li><strong>step3：使用<code>SHOW INDEX</code>命令查看索引信息</strong></li>
+</ul>
+<p>如果想要查看表中的索引信息，可以使用命令<code>SHOW INDEX</code>,下面的例子，我们查看表<code>table_index</code>的索引信息。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SHOW</span> <span class="keyword">INDEX</span> <span class="keyword">FROM</span> table_index\G;</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/10/20191021150702-99c0f.png" alt="img"></p>
+<p>得到上面的信息，上面的信息什么意思呢？我们逐一介绍！</p>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>解释</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Table</td>
+<td>索引所在的表</td>
+</tr>
+<tr>
+<td>Non_unique</td>
+<td>非唯一索引，如果是0，代表唯一的，也就是说如果该列索引中不包括重复的值则为0 否则为1</td>
+</tr>
+<tr>
+<td>Key_name</td>
+<td>索引的名字，如果是主键的话 则为PRIMARY</td>
+</tr>
+<tr>
+<td>Seq_in_index</td>
+<td>索引中该列的位置，从1开始,如果是组合索引 那么按照字段在建立索引时的顺序排列</td>
+</tr>
+<tr>
+<td>Collation</td>
+<td>列是以什么方式存储在索引中的。可以是A或者NULL，B+树索引总是A，排序的，</td>
+</tr>
+<tr>
+<td>Sub_part</td>
+<td>是否列的部分被索引，如果只是前100行索引，就显示100，如果是整列，就显示NULL</td>
+</tr>
+<tr>
+<td>Packed</td>
+<td>关键字是否被压缩，如果没有，为NULL</td>
+</tr>
+<tr>
+<td>Index_type</td>
+<td>索引的类型，对于InnoDB只支持B+树索引，所以都是显示BTREE</td>
+</tr>
+</tbody></table>
+<ul>
+<li><strong>step4：删除索引</strong></li>
+</ul>
+<p>直接删除索引方式</p>
+<figure class="highlight n1ql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">DROP</span> <span class="keyword">INDEX</span> idx_a <span class="keyword">ON</span> table_index;</span></pre></td></tr></table></figure>
+
+<p>修改表结构时删除索引</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">ALTER</span> <span class="keyword">TABLE</span> table_index <span class="keyword">DROP</span> <span class="keyword">INDEX</span> idx_b;</span></pre></td></tr></table></figure>
+
+<h2 id="1-5-Cardinality关键字解析"><a href="#1-5-Cardinality关键字解析" class="headerlink" title="1.5 Cardinality关键字解析"></a>1.5 Cardinality关键字解析</h2><p>在上面介绍了那么多个关键字的意思，但是<code>Cardinality</code>这个关键字非常的关键，优化器会根据这个值来判断是否使用这个索引。在B+树索引中，只有高选择性的字段才是有意义的，<strong>高选择性</strong>就是这个字段的取值范围很广，比如姓名字段，会有很多的名字，可选择性就高了。<br>一般来说，判断是否需要使用索引，就可以通过<code>Cardinality</code>关键字来判断，如果非常接近1，说明有必要使用，如果非常小，那么就要考虑是否使用索引了。<br>需要注意的一个问题时，这个关键字不是及时更新的，需要更新的话，需要使用<code>ANALYZE TABLE</code>，例如。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">analyze</span> <span class="keyword">table</span> table_index;</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/10/20191021150703-981e0.png" alt="img"></p>
+<p>因为目前没有数据，所以，你会发现，这个值一直都是0，没有变化。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191021150703-6e8d0.png" alt="img"></p>
+<p><strong>InoDB存储引擎Cardinality的策略</strong></p>
+<p>在InnoDB存储引擎中，这个关键字的更新发生在两个操作中：insert和update。但是，并不是每次都会更新，这样会增加负荷，所以，对于这个关键字的更新有它的策略：</p>
+<ul>
+<li>表中<code>1/16</code>的数据发生变化</li>
+<li>InnoDB存储引擎的计数器<code>stat_modified_conter</code>&gt;2000000000</li>
+</ul>
+<p>默认InnoDB存储引擎会对8个叶子节点进行采样，采样过程如下：</p>
+<ul>
+<li>B+树索引中叶子节点数量，记做<code>A</code></li>
+<li><strong>随机</strong>取得B+树索引中的<code>8</code>个叶子节点。统计每个页不同的记录个数，分别为p1-p8</li>
+<li>根据采样信息得到Cardinality的预估值：<code>(p1+p2+p3+...+p8)*A/8</code></li>
+</ul>
+<p>因为随机采样，所以，每次的Cardinality值都是不一样的，只有一种情况会一样的，就是表中的叶子节点<strong>小于或者等于8</strong>，这时候，怎么随机采样都是这8个，所以也就一样的。</p>
+<h2 id="1-6-Fast-Index-Creation"><a href="#1-6-Fast-Index-Creation" class="headerlink" title="1.6 Fast Index Creation"></a>1.6 Fast Index Creation</h2><p>在MySQL 5.5之前，<strong>对于索引的添加或者删除，每次都需要创建一张临时表，然后导入数据到临时表，接着删除原表</strong>，如果一张大表进行这样的操作，会非常的耗时，这是一个很大的缺陷。<br>InnoDB存储引擎从1.0.x版本开始加入了一种Fast Index Creation（快速索引创建）的索引创建方式。<br>这种方式的策略为：<strong>每次为创建索引的表加上一个S锁（共享锁），在创建的时候，不需要重新建表，删除辅助索引只需要更新内部视图，并将辅助索引空间标记为可用</strong>，所以，这种效率就大大提高了。</p>
+<h2 id="1-7-在线数据定义"><a href="#1-7-在线数据定义" class="headerlink" title="1.7 在线数据定义"></a>1.7 在线数据定义</h2><p>MySQL5.6开始支持的在线数据定义操作就是：允许辅助索引创建的同时，还允许其他insert、update、delete这类DM操作，这就极大提高了数据库的可用性。<br>所以，我们可以使用新的语法进行创建索引：</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">ALTER</span> <span class="keyword">TABLE</span> <span class="built_in">table_name</span> <span class="keyword">ADD</span> [<span class="keyword">UNIQUE</span>|FULLLTEXT] <span class="keyword">INDEX</span> index_name (<span class="keyword">column</span>(length))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">[ALGORITHM = &#123;<span class="keyword">DEFAULT</span>|INPLACE|<span class="keyword">COPY</span>&#125;]</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">[<span class="keyword">LOCK</span> = &#123;<span class="keyword">DEFAULT</span>|<span class="keyword">NONE</span>|SHARED|EXLUSIVE&#125;]</span></pre></td></tr></table></figure>
+
+<p><code>ALGORITHM</code>指定创建或者删除索引的算法</p>
+<ul>
+<li>COPY：创建临时表的方式</li>
+<li>INPLACE：不需要创建临时表</li>
+<li>DEFAULT：根据参数<code>old_alter_table</code>参数判断，如果是<code>OFF</code>,采用<code>INPLACE</code>的方式</li>
+</ul>
+<p>LOCK表示对表添加锁的情况</p>
+<ul>
+<li>NONE：不加任何锁</li>
+<li>SHARE：加一个S锁，并发读可以进行，写操作需要等待</li>
+<li>EXCLUSIVE：加一个X锁，读写都不能并发进行</li>
+<li>DEFAULT：先判断是否可以使用<code>NONE</code>，如不能，判断是否可以使用<code>SHARE</code>，如不能，再判断是否可以使用<code>EXCLUSIVE</code>模式。</li>
+</ul>
+<h1 id="2-B-树索引的使用"><a href="#2-B-树索引的使用" class="headerlink" title="2 B+ 树索引的使用"></a>2 B+ 树索引的使用</h1><h2 id="2-1-联合索引"><a href="#2-1-联合索引" class="headerlink" title="2.1 联合索引"></a>2.1 联合索引</h2><p>联合索引是指对表上的多个列进行索引，这一部分我们将通过几个例子来讲解联合索引的相关知识点。<br>首先，我们先创建一张表以及为这张表创建联合索引。</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">create table t_index(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    a char(2) <span class="keyword">not</span> <span class="literal">null</span><span class="built_in"> default </span><span class="string">''</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    b char(2) <span class="keyword">not</span> <span class="literal">null</span><span class="built_in"> default </span><span class="string">''</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    c char(2) <span class="keyword">not</span> <span class="literal">null</span><span class="built_in"> default </span><span class="string">''</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    d char(2) <span class="keyword">not</span> <span class="literal">null</span><span class="built_in"> default </span><span class="string">''</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">)engine myisam charset utf8;</span></pre></td></tr></table></figure>
+
+<p>创建联合索引</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">alter</span> <span class="keyword">table</span> t_index <span class="keyword">add</span> <span class="keyword">index</span> abcd(a,b,c,d);</span></pre></td></tr></table></figure>
+
+<p>插入几条测试数据</p>
+<figure class="highlight less"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">insert</span> <span class="selector-tag">into</span> <span class="selector-tag">t_index</span> <span class="selector-tag">values</span>(<span class="string">'a'</span>,<span class="string">'b'</span>,<span class="string">'c'</span>,<span class="string">'d'</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">(<span class="string">'a2'</span>,<span class="string">'b2'</span>,<span class="string">'c2'</span>,<span class="string">'d2'</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">(<span class="string">'a3'</span>,<span class="string">'b3'</span>,<span class="string">'c3'</span>,<span class="string">'d3'</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">(<span class="string">'a4'</span>,<span class="string">'b4'</span>,<span class="string">'c4'</span>,<span class="string">'d4'</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">(<span class="string">'a5'</span>,<span class="string">'b5'</span>,<span class="string">'c5'</span>,<span class="string">'d5'</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">(<span class="string">'a6'</span>,<span class="string">'b6'</span>,<span class="string">'c6'</span>,<span class="string">'d6'</span>);</span></pre></td></tr></table></figure>
+
+<p>到这一步，我们已经基本准备好了需要的数据，我们可以进行更深一步的联合索引的探讨。</p>
+<p><strong>我们什么时候需要创建联合索引呢</strong></p>
+<p>索引建立的主要目的就是为了提高查询的效率，那么联合索引的目的也是类似的，联合索引的目的就是为了提高存在多个查询条件的情况下的效率，就如上面建立的表一样，有多个字段，当我们需要利用多个字段进行查询的时候，我们就需要利用到联合索引了。</p>
+<p><strong>什么时候联合索引才会发挥作用呢</strong></p>
+<p>有时候，我们会用联合索引，但是，我们并不清楚其原理，不知道什么时候联合索引会起到作用，什么时候又是会失效的？<br>带着这个问题，我们了解一下联合索引的<strong>最左匹配原则</strong>。<br><strong>最左匹配原则</strong>：这个原则的意思就是<strong>创建组合索引，以最左边的为准，只要查询条件中带有最左边的列，那么查询就会使用到索引。</strong><br>下面，我们用几个例子来看看这个原则。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">EXPLAIN</span> <span class="keyword">SELECT</span> * <span class="keyword">FROM</span> t_index <span class="keyword">WHERE</span> a = <span class="string">'a'</span> \G;</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/10/20191021150703-92489.png" alt="img"></p>
+<p>我们看看这条语句的结果，首先，我们看到使用了索引，因为<strong>查询条件中带有最左边的列a</strong>，那么利用了几个索引呢？这个我们需要看<code>key_len</code>这个字段，我们知道utf8编码的一个字符3个字节，而我们使用的数据类型是<code>char(2)</code>，占两个字节，索引就是2*3等于6个字节，所以只有一个索引起到了作用。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">EXPLAIN</span> <span class="keyword">SELECT</span> * <span class="keyword">FROM</span> t_index <span class="keyword">WHERE</span> b = <span class="string">'b2'</span> \G;</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/10/20191021150703-4dcf3.png" alt="img"></p>
+<p>这个语句我们可以看出，这个没有使用索引，因为<code>possible_keys</code>为空，而且，从查询的行数<code>rows</code>可以看出为6（我们测试数据总共6条），说明进行了全盘扫描的，说明这种情况是不符合<strong>最左匹配原则</strong>，所以不会使用索引查询。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">EXPLAIN</span> <span class="keyword">SELECT</span> * <span class="keyword">FROM</span> t_index <span class="keyword">WHERE</span> a = <span class="string">'a2'</span> <span class="keyword">AND</span> b = <span class="string">'b2'</span> <span class="keyword">ORDER</span> <span class="keyword">BY</span> d \G;</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/10/20191021150703-ba1ea.png" alt="img"></p>
+<p>这种情况又有点不一样了，我们使用了一个排序，可以看出使用了索引，通过<code>key_len</code>为12可以得到使用了2个索引<code>a、b</code>，另外在Extra选项中可以看到使用了<code>Using filesort</code>，也就是文件排序，这里使用文件排序的原因是这样的：上面的查询使用了a、b索引，但是当我们用d字段来排序时，（a，d）或者（b，d）这两个索引是没有排序的，<strong>联合索引的使用有一个好处，就是索引的下一个字段是会自动排序的</strong>，在这里的这种情况来说，c字段就是排序的，但是d是不会，如果我们用c来排序就会得到不一样的结果。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">EXPLAIN</span> <span class="keyword">SELECT</span> * <span class="keyword">FROM</span> t_index <span class="keyword">WHERE</span> a = <span class="string">'a2'</span> <span class="keyword">AND</span> b = <span class="string">'b2'</span> <span class="keyword">ORDER</span> <span class="keyword">BY</span> c \G;</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/10/20191021150703-2da9f.png" alt="img"></p>
+<p>是不是可以看到，当我们用c进行排序的时候，因为使用了a、b索引，所以c就自动排序了，所以也就不用<code>filesort</code>了。<br>讲到这里，我相信通过上面的几个例子，对于联合索引的相关知识已经非常的透彻清晰了，最后，我们再来聊几个常见的问题。</p>
+<p><strong>Q1：为什么不对表中的每一个列创建一个索引呢</strong></p>
+<p>第一，创建索引和维护索引要耗费时间，这种时间随着数据量的增加而增加。<br>第二，索引需要占物理空间，除了数据表占数据空间之外，每一个索引还要占一定的物理空间，如果要建立聚簇索引，那么需要的空间就会更大。<br>第三，当对表中的数据进行增加、删除和修改的时候，索引也要动态的维护，这样就降低了数据的维护速度。</p>
+<p><strong>Q2：为什么需要使用联合索引</strong></p>
+<p><strong>减少开销</strong>。建一个联合索引<code>(col1,col2,col3)</code>，实际相当于建了<code>(col1),(col1,col2),(col1,col2,col3)</code>三个索引。每多一个索引，都会增加写操作的开销和磁盘空间的开销。对于大量数据的表，使用联合索引会大大的减少开销！<br><strong>覆盖索引</strong>。对联合索引<code>(col1,col2,col3)</code>，如果有如下的sql: <code>select col1,col2,col3 from test where col1=1 and col2=2</code>。那么MySQL可以直接通过遍历索引取得数据，而无需回表，这减少了很多的随机io操作。减少io操作，特别的随机io其实是dba主要的优化策略。所以，在真正的实际应用中，覆盖索引是主要的提升性能的优化手段之一。<br><strong>效率高</strong>。索引列越多，通过索引筛选出的数据越少。有1000W条数据的表，有如下sql:<code>select from table where col1=1 and col2=2 and col3=3</code>,假设假设每个条件可以筛选出10%的数据，如果只有单值索引，那么通过该索引能筛选出1000W10%=100w条数据，然后再回表从100w条数据中找到符合col2=2 and col3= 3的数据，然后再排序，再分页；如果是联合索引，通过索引筛选出1000w10% 10% *10%=1w，效率提升可想而知！</p>
+<blockquote>
+<p><strong>覆盖索引</strong><br>覆盖索引是一种从辅助索引中就可以得到查询的记录，而不需要查询聚集索引中的记录，使用覆盖索引的一个好处是辅助索引不包含整行记录的所有信息，所以大小远小于聚集索引，因此可以大大减少IO操作。覆盖索引的另外一个好处就是对于统计问题有优化，我们看下面的一个例子。</p>
+</blockquote>
+<figure class="highlight n1ql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">explain</span> <span class="keyword">select</span> <span class="built_in">count</span>(*) <span class="keyword">from</span> t_index \G;</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/10/20191021150704-8fa61.png" alt="img"></p>
+<p>如果是myisam引擎，Extra列会输出<code>Select tables optimized away</code>语句，myisam引擎已经保存了记录的总数，直接返回结果，就不需要覆盖索引优化了。<br>如果是InnoDB引擎，Extra列会输出<code>Using index</code>语句，说明InnoDB引擎优化器使用了覆盖索引操作。</p>
+<h2 id="2-2-索引提示"><a href="#2-2-索引提示" class="headerlink" title="2.2 索引提示"></a>2.2 索引提示</h2><p>MySQL数据库支持索引提示功能，索引提示功能就是我们可以显示的告诉优化器使用哪个索引，一般有下面两种情况可能使用到索引提示功能（INDEX HINT）：</p>
+<ul>
+<li>MySQL数据库的优化器错误的选择了某个索引，导致SQL运行很慢</li>
+<li>某SQL语句可以选择的索引非常的多，这时优化器选择执行计划时间的开销可能会大于SQL语句本身。</li>
+</ul>
+<p>这里我们接着上面的例子来讲解，首先，我们先为上面的<code>t_index</code>表添加几个索引；</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">alter</span> <span class="keyword">table</span> t_index <span class="keyword">add</span> <span class="keyword">index</span> a (a);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">alter</span> <span class="keyword">table</span> t_index <span class="keyword">add</span> <span class="keyword">index</span> b (b);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">alter</span> <span class="keyword">table</span> t_index <span class="keyword">add</span> <span class="keyword">index</span> c (c);</span></pre></td></tr></table></figure>
+
+<p>接着，我们执行下面的语句；</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">EXPLAIN</span> <span class="keyword">SELECT</span> * <span class="keyword">FROM</span> t_index <span class="keyword">WHERE</span> a = <span class="string">'a'</span> <span class="keyword">AND</span> b = <span class="string">'b'</span> <span class="keyword">AND</span> c = <span class="string">'c'</span> \G;</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/10/20191021150704-7b58b.png" alt="img"></p>
+<p>你会发现这条语句就可以使用三个索引，这个时候，我们可以显示的使用索引提示来使用a这个索引，如下：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">EXPLAIN</span> <span class="keyword">SELECT</span> * <span class="keyword">FROM</span> t_index <span class="keyword">USE</span> <span class="keyword">INDEX</span>(a) <span class="keyword">WHERE</span> a = <span class="string">'a'</span> <span class="keyword">AND</span> b = <span class="string">'b'</span> <span class="keyword">AND</span> c = <span class="string">'c'</span> \G;</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/10/20191021150704-8ad48.png" alt="img"></p>
+<p>这样就显示的使用索引a了，如果这种方式有时候优化器还是没有选择你想要的索引，那么，我们可以另外一种方式<code>FORCE INDEX</code>。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">EXPLAIN</span> <span class="keyword">SELECT</span> * <span class="keyword">FROM</span> t_index <span class="keyword">FORCE</span> <span class="keyword">INDEX</span>(a) <span class="keyword">WHERE</span> a = <span class="string">'a'</span> <span class="keyword">AND</span> b = <span class="string">'b'</span> <span class="keyword">AND</span> c = <span class="string">'c'</span> \G;</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/10/20191021150704-84a9f.png" alt="img"></p>
+<p>这种方式则一定会选择你想要的索引。</p>
+<h2 id="2-3-索引优化"><a href="#2-3-索引优化" class="headerlink" title="2.3 索引优化"></a>2.3 索引优化</h2><p><strong>Multi-Range Read 优化</strong></p>
+<p>MySQL5.6开始支持，这种优化的目的是为了减少磁盘的随机访问，并且将随机访问转化为较为顺序的数据访问，这种优化适用于range、ref、eq_ref类型的查询。<br>Multi-Range Read 优化的好处：</p>
+<ul>
+<li>让数据访问变得较为顺序。</li>
+<li>减少缓冲区中页被替换的次数。</li>
+<li>批量处理对键值的查询操作。</li>
+</ul>
+<p>我们可以使用参数<code>optimizer_switch</code>中的标记来控制是否开启Multi-Range Read 优化。下面的方式将设置为总是开启状态：</p>
+<figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">SET</span> @@<span class="keyword">optimizer_switch</span>='<span class="keyword">mrr</span>=<span class="keyword">on</span>,<span class="keyword">mrr_cost_based</span>=<span class="keyword">off</span>';</span></pre></td></tr></table></figure>
+
+<p><strong>Index Condition Pushdown（ICP） 优化</strong></p>
+<p>这种优化方式也是从MySQL5.6开始支持的，不支持这种方式之前，当进行索引查询时，首先我们先根据索引查找记录，然后再根据where条件来过滤记录。然而，当支持ICP优化后，MySQL数据库会在取出索引的同时，判断是否可以进行where条件过滤，也就是将where过滤部分放在了存储引擎层，大大减少了上层SQL对记录的索取。<br>ICP支持<code>range</code>、<code>ref</code>、<code>eq_ref</code>、<code>ref_or_null</code>类型的查询，当前支持MyISAM和InnoDB存储引擎。<br>我们可以使用下面语句开启ICP：</p>
+<figure class="highlight dart"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">set</span> @<span class="meta">@optimizer</span>_switch = <span class="string">"index_condition_pushdown=on"</span></span></pre></td></tr></table></figure>
+
+<p>或者关闭：</p>
+<figure class="highlight dart"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">set</span> @<span class="meta">@optimizer</span>_switch = <span class="string">"index_condition_pushdown=off"</span></span></pre></td></tr></table></figure>
+
+<p>当开启了ICP之后，在执行计划Extra可以看到<code>Using index condition</code>提示。</p>
+<h1 id="3-索引的特点、优点、缺点及适用场景"><a href="#3-索引的特点、优点、缺点及适用场景" class="headerlink" title="3 索引的特点、优点、缺点及适用场景"></a>3 索引的特点、优点、缺点及适用场景</h1><p><strong>索引的特点</strong></p>
+<ul>
+<li>可以加快数据库的检索速度</li>
+<li>降低数据库插入、修改、删除等维护的速度</li>
+<li>只能创建在表上，不能创建在视图上</li>
+<li>既可以直接创建也可以间接创建</li>
+</ul>
+<p><strong>索引的优点</strong></p>
+<ul>
+<li>创建唯一性索引，保证数据库表中的每一行数据的唯一性</li>
+<li>大大加快数据的检索速度</li>
+<li>加快数据库表之间的连接，特别是在实现数据的参考完整性方面特别有意义</li>
+<li>在使用分组和排序字句进行数据检索时，同样可以显著减少查询的时间</li>
+<li>通过使用索引，可以在查询中使用优化隐藏器，提高系统性能</li>
+</ul>
+<p><strong>索引的缺点</strong></p>
+<ul>
+<li>第一，创建索引和维护索引要耗费时间，这种时间随着数据量的增加而增加。</li>
+<li>第二，索引需要占物理空间，除了数据表占数据空间之外，每一个索引还要占一定的物理空间，如果要建立聚簇索引，那么需要的空间就会更大。</li>
+<li>第三，当对表中的数据进行增加、删除和修改的时候，索引也要动态的维护，这样就降低了数据的维护速度。</li>
+</ul>
+<p><strong>索引的适用场景</strong></p>
+<ul>
+<li>匹配全值</li>
+</ul>
+<p>对索引中所有列都指定具体值，即是对索引中的所有列都有等值匹配的条件。</p>
+<ul>
+<li>匹配值的范围查询</li>
+</ul>
+<p>对索引的值能够进行范围查找。</p>
+<ul>
+<li>匹配最左前缀</li>
+</ul>
+<p>仅仅使用索引中的最左边列进行查询，比如在 col1 + col2 + col3 字段上的联合索引能够被包含 col1、(col1 + col2)、（col1 + col2 + col3）的等值查询利用到，可是不能够被 col2、（col2、col3）的等值查询利用到。<br>最左匹配原则可以算是 MySQL 中 B-Tree 索引使用的首要原则。</p>
+<ul>
+<li>仅仅对索引进行查询</li>
+</ul>
+<p>当查询的列都在索引的字段中时，查询的效率更高，所以应该尽量避免使用 select *，需要哪些字段，就只查哪些字段。</p>
+<ul>
+<li>匹配列前缀</li>
+</ul>
+<p>仅仅使用索引中的第一列，并且只包含索引第一列的开头一部分进行查找。</p>
+<ul>
+<li>能够实现索引匹配部分精确而其他部分进行范围匹配</li>
+<li>如果列名是索引，那么使用 <code>column_name is null</code> 就会使用索引，例如下面的就会使用索引：</li>
+</ul>
+<figure class="highlight n1ql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">explain</span> <span class="keyword">select</span> * <span class="keyword">from</span> t_index <span class="keyword">where</span> a <span class="keyword">is</span> <span class="literal">null</span> \G</span></pre></td></tr></table></figure>
+
+<ul>
+<li>经常出现在关键字order by、group by、distinct后面的字段</li>
+<li>在union等集合操作的结果集字段</li>
+<li>经常用作表连接的字段</li>
+<li>考虑使用索引覆盖，对数据很少被更新，如果用户经常值查询其中你的几个字段，可以考虑在这几个字段上建立索引，从而将表的扫描变为索引的扫描</li>
+</ul>
+<p><strong>索引失效情况</strong></p>
+<ul>
+<li>以%开头的 like 查询不能利用 B-Tree 索引，执行计划中 key 的值为 null 表示没有使用索引</li>
+<li>数据类型出现隐式转换的时候也不会使用索引，例如，<code>where &#39;age&#39;+10=30</code></li>
+<li>对索引列进行函数运算，原因同上</li>
+<li>正则表达式不会使用索引</li>
+<li>字符串和数据比较不会使用索引</li>
+<li>复合索引的情况下，假如查询条件不包含索引列最左边部分，即不满足最左原则 leftmost，是不会使用复合索引的</li>
+<li>如果 MySQL 估计使用索引比全表扫描更慢，则不使用索引</li>
+<li>用 or 分割开的条件，如果 or 前的条件中的列有索引，而后面的列中没有索引，那么涉及的索引都不会被用到</li>
+<li>使用负向查询（not ，not in， not like ，&lt;&gt; ,!= ,!&gt; ,!&lt; ） 不会使用索引</li>
+</ul>
+<h1 id="参考文章"><a href="#参考文章" class="headerlink" title="参考文章"></a>参考文章</h1><ul>
+<li><a href="http://www.yuanrengu.com/index.php/2017-01-13.html" target="_blank" rel="noopener">http://www.yuanrengu.com/index.php/2017-01-13.html</a></li>
+<li><a href="https://segmentfault.com/a/1190000009717352" target="_blank" rel="noopener">https://segmentfault.com/a/1190000009717352</a></li>
+<li><a href="https://www.jb51.net/article/157920.htm" target="_blank" rel="noopener">https://www.jb51.net/article/157920.htm</a></li>
+<li><a href="https://www.cnblogs.com/xiaoxi/p/8269289.html" target="_blank" rel="noopener">https://www.cnblogs.com/xiaoxi/p/8269289.html</a></li>
+<li>《MySQL技术内幕》</li>
+</ul>
+<blockquote>
+<p>作者：欧阳思海</p>
+<p>来源：<a href="https://blog.ouyangsihai.cn/mysql-de-b-shu-suo-yin.html" target="_blank" rel="noopener">https://blog.ouyangsihai.cn/mysql-de-b-shu-suo-yin.html</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/B-%E6%A0%91/" rel="tag"># B+树</a>
+              <a href="/tags/%E7%B4%A2%E5%BC%95/" rel="tag"># 索引</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/B%E6%A0%91%E5%92%8CB-%E6%A0%91%E4%BB%8B%E7%BB%8D/" rel="prev" title="B树和B+树介绍">
+      <i class="fa fa-chevron-left"></i> B树和B+树介绍
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/%E5%BE%AE%E6%9C%8D%E5%8A%A1-Dubbo-%E5%8A%9F%E8%83%BD%E4%BB%8B%E7%BB%8D/" rel="next" title="微服务 Dubbo 功能介绍">
+      微服务 Dubbo 功能介绍 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#0-前言"><span class="nav-number">1.</span> <span class="nav-text">0 前言</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#1-索引的管理"><span class="nav-number">2.</span> <span class="nav-text">1 索引的管理</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#1-1-索引的创建方式"><span class="nav-number">2.1.</span> <span class="nav-text">1.1 索引的创建方式</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#1-2-主键索引和组合索引创建的方式"><span class="nav-number">2.2.</span> <span class="nav-text">1.2 主键索引和组合索引创建的方式</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#1-3-删除索引"><span class="nav-number">2.3.</span> <span class="nav-text">1.3 删除索引</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#1-4-索引实例"><span class="nav-number">2.4.</span> <span class="nav-text">1.4 索引实例</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#1-5-Cardinality关键字解析"><span class="nav-number">2.5.</span> <span class="nav-text">1.5 Cardinality关键字解析</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#1-6-Fast-Index-Creation"><span class="nav-number">2.6.</span> <span class="nav-text">1.6 Fast Index Creation</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#1-7-在线数据定义"><span class="nav-number">2.7.</span> <span class="nav-text">1.7 在线数据定义</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#2-B-树索引的使用"><span class="nav-number">3.</span> <span class="nav-text">2 B+ 树索引的使用</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#2-1-联合索引"><span class="nav-number">3.1.</span> <span class="nav-text">2.1 联合索引</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-2-索引提示"><span class="nav-number">3.2.</span> <span class="nav-text">2.2 索引提示</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-3-索引优化"><span class="nav-number">3.3.</span> <span class="nav-text">2.3 索引优化</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#3-索引的特点、优点、缺点及适用场景"><span class="nav-number">4.</span> <span class="nav-text">3 索引的特点、优点、缺点及适用场景</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#参考文章"><span class="nav-number">5.</span> <span class="nav-text">参考文章</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

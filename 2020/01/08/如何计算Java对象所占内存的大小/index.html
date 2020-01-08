@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="摘要本文以如何计算Java对象占用内存大小为切入点，在讨论计算Java对象占用堆内存大小的方法的基础上，详细讨论了Java对象头格式并结合JDK源码对对象头中的协议字段做了介绍，涉及内存模型、锁原理、分代GC、OOP-Klass模型等内容。最后推荐JDK自带的Hotspot Debug工具——HSDB，来查看对象在内存中的具体存在形式，以论证文中所述内容。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="如何计算Java对象所占内存的大小">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;%E5%A6%82%E4%BD%95%E8%AE%A1%E7%AE%97Java%E5%AF%B9%E8%B1%A1%E6%89%80%E5%8D%A0%E5%86%85%E5%AD%98%E7%9A%84%E5%A4%A7%E5%B0%8F&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="摘要本文以如何计算Java对象占用内存大小为切入点，在讨论计算Java对象占用堆内存大小的方法的基础上，详细讨论了Java对象头格式并结合JDK源码对对象头中的协议字段做了介绍，涉及内存模型、锁原理、分代GC、OOP-Klass模型等内容。最后推荐JDK自带的Hotspot Debug工具——HSDB，来查看对象在内存中的具体存在形式，以论证文中所述内容。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101205-469bd.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101629-c1d4e.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101630-3594d.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101632-dec50.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101633-e743f.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101633-8652a.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101634-b0fbf.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101634-e31e0.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101635-c6a0b.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101635-698ee.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101637-a1bb1.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101637-3e5a8.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101640-5f012.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101642-d7741.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101644-60a32.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101645-c926e.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101645-eb579.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101646-afc27.png">
+<meta property="og:updated_time" content="2020-01-08T03:14:10.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191029101205-469bd.jpeg">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/%E5%A6%82%E4%BD%95%E8%AE%A1%E7%AE%97Java%E5%AF%B9%E8%B1%A1%E6%89%80%E5%8D%A0%E5%86%85%E5%AD%98%E7%9A%84%E5%A4%A7%E5%B0%8F/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>如何计算Java对象所占内存的大小 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/%E5%A6%82%E4%BD%95%E8%AE%A1%E7%AE%97Java%E5%AF%B9%E8%B1%A1%E6%89%80%E5%8D%A0%E5%86%85%E5%AD%98%E7%9A%84%E5%A4%A7%E5%B0%8F/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          如何计算Java对象所占内存的大小
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 11:14:10" itemprop="dateCreated datePublished" datetime="2020-01-08T11:14:10+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h2 id="摘要"><a href="#摘要" class="headerlink" title="摘要"></a>摘要</h2><p>本文以如何计算Java对象占用内存大小为切入点，在讨论计算Java对象占用堆内存大小的方法的基础上，详细讨论了Java对象头格式并结合JDK源码对对象头中的协议字段做了介绍，涉及内存模型、锁原理、分代GC、OOP-Klass模型等内容。最后推荐JDK自带的Hotspot Debug工具——HSDB，来查看对象在内存中的具体存在形式，以论证文中所述内容。</p>
+<a id="more"></a>
+
+<h2 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h2><p>目前我们系统的业务代码中大量使用了LocalCache的方式做本地缓存，而且cache的maxSize通常设的比较大，比如10000。我们的业务系统中就使用了size为10000的15个本地缓存，所以最坏情况下将可缓存15万个对象。这会消耗掉不菲的本地堆内存，而至于实际上到底应该设多大容量的缓存、运行时这大量的本地缓存会给堆内存带来多少压力，实际占用多少内存大小，会不会有较高的缓存穿透风险，目前并不方便知悉。考虑到对缓存实际占用内存的大小能有个更直观和量化的参考，需要对运行时指定对象的内存占用进行评估和计算。<br>要计算Java对象占用内存的大小，首先需要了解Java对象在内存中的实际存储方式和存储格式。<br>另一方面，大家都了解Java对象的存储总得来说会占用JVM内存的堆内存、栈内存及方法区，但由于栈内存中存放的数据可以看做是运行时的临时数据，主要表现为本地变量、操作数、对象引用地址等。这些数据会在方法执行结束后立即回收掉，不会驻留。对存储空间空间的占用也只是执行函数指令时所必须的空间。通常不会造成内存的瓶颈。而方法区中存储的则是对象所对应的类信息、函数表、构造函数、静态常量等，这些信息在类加载时(按需)只会在方法区中存储一份，不会产生额外的存储空间。因此本文所要讨论的主要目标是Java对象对堆内存的占用。</p>
+<h2 id="内存占用计算方法"><a href="#内存占用计算方法" class="headerlink" title="内存占用计算方法"></a>内存占用计算方法</h2><p>如果读者关心对象在JVM中的存储原理，可阅读本文后边几个小节中关于对象存储原理的介绍。如果不关心对象存储原理，而只想直接计算内存占用的话，其实并不难，笔者这里总结了三种方法以供参考：</p>
+<h3 id="1-Instrumentation"><a href="#1-Instrumentation" class="headerlink" title="1. Instrumentation"></a>1. Instrumentation</h3><p>使用java.lang.instrument.Instrumentation.getObjectSize()方法，可以很方便的计算任何一个运行时对象的大小，返回该对象本身及其间接引用的对象在内存中的大小。不过，这个类的唯一实现类InstrumentationImpl的构造方法是私有的，在创建时，需要依赖一个nativeAgent，和运行环境所支持的一些预定义类信息，我们在代码中无法直接实例化它，需要在JVM启动时，通过指定代理的方式，让JVM来实例化它。<br>具体来讲，就是需要声明一个premain方法，它和main方法的方法签名有点相似，只不过方法名叫“premain”，同时方法参数也不一样，它接收一个String类型和instrumentation参数，而String参数实际上和String[]是一样的，只不过用String统一来表达的。在premain函数中，将instrumentation参数赋给一个静态变量，其它地方就可以使用了。如：</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * <span class="doctag">@author</span> yepei</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * <span class="doctag">@date</span> 2018/04/23</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * <span class="doctag">@description</span></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">SizeTool</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">static</span> Instrumentation instrumentation;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="function"><span class="keyword">void</span> <span class="title">premain</span><span class="params">(String args, Instrumentation inst)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        instrumentation = inst;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="function"><span class="keyword">long</span> <span class="title">getObjectSize</span><span class="params">(Object o)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="function"><span class="keyword">return</span> instrumentation.<span class="title">getObjectSize</span><span class="params">(o)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>从方法名可以猜到，这里的premain是要先于main执行的，而先于main执行，这个动作只能由JVM来完成了。即在JVM启动时，先启动一个agent，操作如下：<br>假设main方法所在的jar包为：A.jar，premain方法所在的jar包为B.jar。注意为main所在的代码打包时，和其它工具类打包一样，需要声明一个MANIFEST.MF清单文件，如下所求：</p>
+<figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">Manifest-Version</span>: 1<span class="selector-class">.0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">Main-Class</span>: <span class="selector-tag">yp</span><span class="selector-class">.tools</span><span class="selector-class">.Main</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">Premain-Class</span>: <span class="selector-tag">yp</span><span class="selector-class">.tools</span><span class="selector-class">.SizeTool</span></span></pre></td></tr></table></figure>
+
+<p>然后执行java命令执行jar文件：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">java -javaagent:<span class="module-access"><span class="module"><span class="identifier">B</span>.</span></span>jar -jar <span class="module-access"><span class="module"><span class="identifier">A</span>.</span></span>jar</span></pre></td></tr></table></figure>
+
+<p>点评：这种方法的优点是编码简单，缺点就是必须启动一个javaagent，因此要求修改Java的启动参数。</p>
+<h3 id="2-使用Unsafe"><a href="#2-使用Unsafe" class="headerlink" title="2. 使用Unsafe"></a>2. 使用Unsafe</h3><p>java中的sun.misc.Unsafe类，有一个objectFieldOffset(Field f)方法，表示获取指定字段在所在实例中的起始地址偏移量，如此可以计算出指定的对象中每个字段的偏移量，值为最大的那个就是最后一个字段的首地址，加上该字段的实际大小，就能知道该对象整体的大小。如现有一Person类：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> <span class="symbol">Person</span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">int</span> age;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    String name;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">bool</span>ean married;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>假设该类的一个实例p，通过Unsafe.objectFieldOffset()方法计算到得age/birthday/married三个字段的偏移量分别是16，21, 17，则表明p1对象中的最后一个字段是name，它的首地址是21，由于它是一个引用，所以它的大小默认为4(开启指针压缩)，则该对象本身的大小就是21+4+ 7= 32字节。其中7表示padding，即为了使结果变成8的整数倍而做的padding。<br>但上述计算，只是计算了对象本身的大小，并没有计算其所引用的引用类型的最终大小，这就需要手工写代码进行递归计算了。<br>点评：使用Unsafe可以完全不care对象内的复杂构成，可以很精确的计算出对象头的大小(即第一个字段的偏移)及每个字段的偏移。缺点是Unsafe通常禁止开发者直接使用，需要通过反射获取其实例，另外，最后一个字段的大小需要手工计算。其次需要手工写代码递归计算才能得到对象及其所引用的对象的综合大小，相对比较麻烦。</p>
+<h3 id="3-使用第三方工具"><a href="#3-使用第三方工具" class="headerlink" title="3. 使用第三方工具"></a>3. 使用第三方工具</h3><p>这里要介绍的是lucene提供的专门用于计算堆内存占用大小的工具类：RamUsageEstimator，maven坐标：</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">dependency</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">      <span class="tag">&lt;<span class="name">groupId</span>&gt;</span>org.apache.lucene<span class="tag">&lt;/<span class="name">groupId</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">      <span class="tag">&lt;<span class="name">artifactId</span>&gt;</span>lucene-core<span class="tag">&lt;/<span class="name">artifactId</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">      <span class="tag">&lt;<span class="name">version</span>&gt;</span>4.0.0<span class="tag">&lt;/<span class="name">version</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;/<span class="name">dependency</span>&gt;</span></span></pre></td></tr></table></figure>
+
+<p>RamUsageEstimator就是根据java对象在堆内存中的存储格式，通过计算Java对象头、实例数据、引用等的大小，相加而得，如果有引用，还能递归计算引用对象的大小。RamUsageEstimator的源码并不多，几百行，清晰可读。这里不进行一一解读了。它在初始化的时候会根据当前JVM运行环境、CPU架构、运行参数、是否开启指针压缩、JDK版本等综合计算对象头的大小，而实例数据部分则按照java基础数据类型的标准大小进行计算。思路简单，同时也在一定程度上反映出了Java对象格式的奥秘！<br>常用方法如下：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//计算指定对象及其引用树上的所有对象的综合大小，单位字节</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">long <span class="module-access"><span class="module"><span class="identifier">RamUsageEstimator</span>.</span></span>size<span class="constructor">Of(Object <span class="params">obj</span>)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//计算指定对象本身在堆空间的大小，单位字节</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">long <span class="module-access"><span class="module"><span class="identifier">RamUsageEstimator</span>.</span></span>shallow<span class="constructor">SizeOf(Object <span class="params">obj</span>)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//计算指定对象及其引用树上的所有对象的综合大小，返回可读的结果，如：2KB</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">String <span class="module-access"><span class="module"><span class="identifier">RamUsageEstimator</span>.</span></span>human<span class="constructor">SizeOf(Object <span class="params">obj</span>)</span></span></pre></td></tr></table></figure>
+
+<p>点评：使用该第三方工具比较简单直接，主要依靠JVM本身环境、参数及CPU架构计算头信息，再依据数据类型的标准计算实例字段大小，计算速度很快，另外使用较方便。如果非要说这种方式有什么缺点的话，那就是这种方式计算所得的对象头大小是基于JVM声明规范的，并不是通过运行时内存地址计算而得，存在与实际大小不符的这种可能性。</p>
+<h1 id="Java对象格式"><a href="#Java对象格式" class="headerlink" title="Java对象格式"></a>Java对象格式</h1><p>在HotSpot虚拟机中，Java对象的存储格式也是一个协议或者数据结构，底层是用C++代码定义的。Java对象结构大致如下图所示——</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101205-469bd.jpeg" alt="img"></p>
+<p>即，Java对象从整体上可以分为三个部分，对象头、实例数据和对齐填充<br><strong>对象头：Instance Header</strong>，Java对象最复杂的一部分，采用C++定义了头的协议格式，存储了Java对象hash、GC年龄、锁标记、class指针、数组长度等信息，稍后做出详细解说。<br><strong>实例数据：Instance Data</strong>，这部分数据才是真正具有业务意义的数据，实际上就是当前对象中的实例字段。在VM中，对象的字段是由基本数据类型和引用类型组成的。其所占用空间的大小如下所示：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101629-c1d4e.png" alt="img"></p>
+<p>说明：其中ref表示引用类型，引用类型实际上是一个地址指针，32bit机器上，占用4字节，64bit机器上，在jdk1.6之后，如果开启了指针压缩(默认开启: <code>-XX:UseCompressedOops</code>，仅支持64位机器)，则占用4字节。Java对象的所有字段类型都可映射为上述类型之一，因此实例数据部分的大小，实际上就是这些字段类型的大小之和。当然，实际情况可能比这个稍微复杂一点，如字段排序、内部padding以及父类字段大小的计算等。<br><strong>对齐填充：Padding</strong>，VM要求对象大小须是8的整体数，该部分是为了让整体对象在内存中的地址空间大小达到8的整数倍而额外占用的字节数。</p>
+<h2 id="对象头"><a href="#对象头" class="headerlink" title="对象头"></a>对象头</h2><p>对象头是理解JVM中对象存储方式的最核心的部分，甚至是理解java多线程、分代GC、锁等理论的基础，也是窥探JVM底层诸多实现细节的出发点。做为一个java程序猿，这是不可不了解的一部分。那么这里提到的对象头到底是什么呢？<br>参考<a href="https://github.com/openjdk-mirror/jdk7u-hotspot/tree/50bdefc3afe944ca74c3093e7448d6b889cd20d1/src" target="_blank" rel="noopener">OpenJDK中JVM源码</a>部分，对对象头的C++定义如下：</p>
+<figure class="highlight crystal"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">oopDesc</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  friend <span class="class"><span class="keyword">class</span> <span class="title">VMStructs</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"> <span class="symbol">private:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  volatile markOop  _mark;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="class"><span class="keyword">union</span> <span class="title">_metadata</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    wideKlassOop    _klass;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    narrowOop       _compressed_klass;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  &#125; _metadata;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">  ...</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>源码里的 <code>_mark</code> 和 <code>_metadata</code>两个字段就是对象头的定义，分别表示对象头中的两个基本组成部分，_mark用于存储hash、gc年龄、锁标记、偏向锁、自旋时间等，而_metadata是个共用体(<code>union</code>)，即_klass字段或<code>_compressed_klass</code>，存储当前对象到所在class的引用，而这个引用的要么由“_klass”来存储，要么由“<code>_compressed_klass</code>”来存储，其中<code>_compressed_klass</code>表示压缩的class指针，即当JVM开启了 <code>-XX:UseCompressedOops</code>选项时，就表示启用指针压缩选项，自然就使用<code>_commpressed_klass</code>来存储class引用了，否则使用<code>_klass</code>。<br>注意到，<code>_mark</code>的类型是 <code>markOop</code>，而<code>_metadata</code>的类型是<code>union</code>，<code>_metadata</code>内部两个字段：<code>_klass</code>和<code>_compressed_klass</code>类型分别为<code>wideKlassOop</code>和<code>narrowOop</code>，分别表示什么意思呢？这里顺便说一个union联合体的概念，这是在C++中的一种结构声明，类似struct，称作：“联合”，它是一种特殊的类，也是一种构造类型的数据结构。在一个“联合”内可以定义多种不同的数据类型， 一个被说明为该“联合”类型的变量中，允许装入该“联合”所定义的任何一种数据，这些数据共享同一段内存，已达到节省空间的目的。由此可见，刚刚所说的使用<code>-XX:UseCompressedOops</code>后，就自动使用<code>_metadata</code>中的<code>_compressed_klass</code>来作为指向当前对象的class引用，它的类型是<code>narrowOop</code>。可以看到，对象头中的两个字段的定义都包含了“Oop”字眼，不难猜出，这是一种在JVM层定义好的“类型”。</p>
+<h2 id="OOP-Klass模型"><a href="#OOP-Klass模型" class="headerlink" title="OOP-Klass模型"></a>OOP-Klass模型</h2><p>实际上，Java的面向对象在语言层是通过java的class定义实现的，而在JVM层，也有对应的实现，那就是Oop模型。所谓Oop模型，全称：<code>Ordinary Object Pointer</code>，即普通对象指针。JVM层用于定义Java对象模型及一些元数据格式的模型就是：Oop，可以认为是JVM层中的“类”。通过<a href="https://yq.aliyun.com/go/articleRenderRedirect?url=https%3A%2F%2Fgithub.com%2Fopenjdk-mirror%2Fjdk7u-hotspot%2Ftree%2F50bdefc3afe944ca74c3093e7448d6b889cd20d1%2Fsrc%2Fshare%2Fvm%2Foops" target="_blank" rel="noopener">JDK源码</a>可以看到，有很多模型定义的名称都是以Oop结尾：<code>arrayOop</code>/<code>markOop</code>/<code>instanceOop</code>/<code>methodOop</code>/<code>objectArrayOop</code>等，什么意思呢？</p>
+<p>​    HotSpot是基于c++语言实现的，它最核心的地方是设计了两种模型,分别是<code>OOP</code>和<code>Klass</code>，称之为<code>OOP-Klass Model</code>.  其中<code>OOP</code>用来将指针对象化，比C++底层使用的”<code>*</code>“更好用，<strong>每一个类型的OOP都代表一个在JVM内部使用的特定对象的类型</strong>。而<code>Klass</code>则用来描述JVM层面中对象实例的具体类型，它是java实现语言层面类型的基础，或者说是<strong>对java语言层类型的VM层描述</strong>。所以看到openJDK源码中的定义基本都以Oop或Klass结尾，如图所示：</p>
+<p>​    由上述定义可以简单的说，Oop就是JVM内部对象类型，而Klass就是java类在JVM中的映射。其中关于Oop和Klass体系，参考定义：<a href="https://yq.aliyun.com/go/articleRenderRedirect?url=https%3A%2F%2Fgithub.com%2Fopenjdk-mirror%2Fjdk7u-hotspot%2Fblob%2F50bdefc3afe944ca74c3093e7448d6b889cd20d1%2Fsrc%2Fshare%2Fvm%2Foops%2Foop.hpp" target="_blank" rel="noopener">https://github.com/openjdk-mirror/jdk7u-hotspot/blob/50bdefc3afe944ca74c3093e7448d6b889cd20d1/src/share/vm/oops/oop.hpp</a>；JVM中把我们上层可见的Java对象在底层实际上表示为两部分，分别是oop和<code>klass</code>，其中<code>oop</code>专注于表示对象的实例数据，不关心对象中的实例方法(包括继承、重载等)所对应的函数表。而klass则维护对象到java class及函数表的功能，它是java class及实现多态的基础。这里列举几个基础的Oop和Klass——</p>
+<p>Oop:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//定义了oops共同基类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">oopDesc</span>*                            <span class="title">oop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示一个Java类型实例</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">instanceOopDesc</span>*            <span class="title">instanceOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示一个Java方法</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">methodOopDesc</span>*                    <span class="title">methodOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//定义了数组OOPS的抽象基类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">arrayOopDesc</span>*                    <span class="title">arrayOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示持有一个OOPS数组</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">objArrayOopDesc</span>*            <span class="title">objArrayOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示容纳基本类型的数组</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">typeArrayOopDesc</span>*            <span class="title">typeArrayOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示在Class文件中描述的常量池</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">constantPoolOopDesc</span>*            <span class="title">constantPoolOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//常量池告诉缓存</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">constantPoolCacheOopDesc</span>*   <span class="title">constantPoolCacheOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//描述一个与Java类对等的C++类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">klassOopDesc</span>*                    <span class="title">klassOop</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示对象头</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">class</span>   <span class="title">markOopDesc</span>*                    <span class="title">markOop</span>;</span></span></pre></td></tr></table></figure>
+
+<p>Klass:</p>
+<figure class="highlight cpp"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//klassOop的一部分，用来描述语言层的类型</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>  <span class="title">Klass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//在虚拟机层面描述一个Java类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>   <span class="title">instanceKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//专有instantKlass，表示java.lang.Class的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>     <span class="title">instanceMirrorKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示methodOop的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>   <span class="title">methodKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//最为klass链的端点，klassKlass的Klass就是它自身</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>   <span class="title">klassKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示array类型的抽象基类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>   <span class="title">arrayKlass</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//表示constantPoolOop的Klass</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span>   <span class="title">constantPoolKlass</span>;</span></span></pre></td></tr></table></figure>
+
+<p>结合上述JVM层与java语言层，java对象的表示关系如下所示：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101630-3594d.png" alt="img"></p>
+<p>其中<code>OopDesc</code>是对象实例的基类(Java实例在VM中表现为<code>instanceOopDesc</code>)，Klass是类信息的基类(Java类在VM中表现为<code>instanceKlass</code>)，<code>klassKlass</code>则是对<code>Klass</code>本身的描述(Java类的<code>class</code>对象在VM中表现为<code>klassKlass</code>)。有了对上述结构的认识，对应到内存中的存储区域，那么对象是怎么存储的，就了比较清楚的认识：对象实例(<code>instanceOopDesc</code>)保存在堆上，对象的元数据(<code>instanceKlass</code>)保存在方法区，对象的引用则保存在栈上。<br>因此，关于本小节，对OOP-Klass Model的讨论，可以用一句简洁明了的话来总结其意义：一个Java类在被VM加载时，JVM会为其在方法区创建一个<code>instanceKlass</code>，来表示该类的class信息。当我们在代码中基于此类用new创建一个新对象时，实际上JVM会去堆上创建一个instanceOopDesc对象，该对象保含对象头markWord和klass指针，klass指针指向方法区中的instanceKlass,markWord则保存一些锁、GC等相关的运行时数据。而在堆上创建的这个instanceOopDesc所对应的地址会被用来创建一个引用，赋给当前线程运行时栈上的一个变量。</p>
+<h2 id="关于Mark-Word"><a href="#关于Mark-Word" class="headerlink" title="关于Mark Word"></a>关于Mark Word</h2><p>mark word是对象头中较为神秘的一部分，也是本文讲述的重点，<a href="https://github.com/openjdk-mirror/jdk7u-hotspot/blob/50bdefc3afe944ca74c3093e7448d6b889cd20d1/src/share/vm/oops/oop.hpp" target="_blank" rel="noopener">JDK oop.hpp源码</a>文件中，有几行重要的注释，揭示了32位机器和64位机器下，对象头的格式：</p>
+<figure class="highlight jboss-cli"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span> Bit-format of an object header <span class="params">(most significant first, big endian layout below)</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>  32 bits:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>  <span class="params">--------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>             hash<span class="function">:25</span> <span class="params">------------</span>&gt;| age<span class="function">:4</span>    biased_lock<span class="function">:1</span> lock<span class="function">:2</span> <span class="params">(normal object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>             JavaThread*<span class="function">:23</span> epoch<span class="function">:2</span> age<span class="function">:4</span>    biased_lock<span class="function">:1</span> lock<span class="function">:2</span> <span class="params">(biased object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>             size<span class="function">:32</span> <span class="params">------------------------------------------</span>&gt;| <span class="params">(CMS free block)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>             PromotedObject*<span class="function">:29</span> <span class="params">----------</span>&gt;| promo_bits<span class="function">:3</span> <span class="params">-----</span>&gt;| <span class="params">(CMS promoted object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>  64 bits:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>  <span class="params">--------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>  unused<span class="function">:25</span> hash<span class="function">:31</span> --&gt;| unused<span class="function">:1</span>   age<span class="function">:4</span>    biased_lock<span class="function">:1</span> lock<span class="function">:2</span> <span class="params">(normal object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>  JavaThread*<span class="function">:54</span> epoch<span class="function">:2</span> unused<span class="function">:1</span>   age<span class="function">:4</span>    biased_lock<span class="function">:1</span> lock<span class="function">:2</span> <span class="params">(biased object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>  PromotedObject*<span class="function">:61</span> <span class="params">---------------------</span>&gt;| promo_bits<span class="function">:3</span> <span class="params">-----</span>&gt;| <span class="params">(CMS promoted object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>  size<span class="function">:64</span> <span class="params">-----------------------------------------------------</span>&gt;| <span class="params">(CMS free block)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>  unused<span class="function">:25</span> hash<span class="function">:31</span> --&gt;| cms_free<span class="function">:1</span> age<span class="function">:4</span>    biased_lock<span class="function">:1</span> lock<span class="function">:2</span> <span class="params">(COOPs &amp;&amp; normal object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>  JavaThread*<span class="function">:54</span> epoch<span class="function">:2</span> cms_free<span class="function">:1</span> age<span class="function">:4</span>    biased_lock<span class="function">:1</span> lock<span class="function">:2</span> <span class="params">(COOPs &amp;&amp; biased object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>  narrowOop<span class="function">:32</span> unused<span class="function">:24</span> cms_free<span class="function">:1</span> unused<span class="function">:4</span> promo_bits<span class="function">:3</span> <span class="params">-----</span>&gt;| <span class="params">(COOPs &amp;&amp; CMS promoted object)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="string">//</span>  unused<span class="function">:21</span> size<span class="function">:35</span> --&gt;| cms_free<span class="function">:1</span> unused<span class="function">:7</span> <span class="params">------------------</span>&gt;| <span class="params">(COOPs &amp;&amp; CMS free block)</span></span></pre></td></tr></table></figure>
+
+<p>在oop.hpp源码文件中，有对Oop基类中mark word结构的定义，如下：</p>
+<figure class="highlight crystal"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">oopDesc</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  friend <span class="class"><span class="keyword">class</span> <span class="title">VMStructs</span>;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"> <span class="symbol">private:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  volatile markOop  _mark;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="class"><span class="keyword">union</span> <span class="title">_metadata</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    wideKlassOop    _klass;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    narrowOop       _compressed_klass;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  &#125; _metadata;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">  ...</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>其中的mark word即上述 _mark字段，它在JVM中的表示类型是markOop, 部分关键源码如下所示，源码中展示了markWord各个字段的意义及占用大小(与机器字宽有关系)，如GC分代年龄、锁状态标记、哈希码、epoch、是否可偏向等信息：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">...</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">class</span> <span class="symbol">markOopDesc: <span class="symbol">public</span></span> <span class="symbol">oopDesc</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"> <span class="keyword">private</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// Conversion</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="built_in">uint</span>ptr_t value() <span class="keyword">const</span> &#123; <span class="keyword">return</span> (<span class="built_in">uint</span>ptr_t) <span class="keyword">this</span>; &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"> <span class="keyword">public</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// Constants</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">enum</span> &#123; age_bits                 = <span class="number">4</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">         lock_bits                = <span class="number">2</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">         biased_lock_bits         = <span class="number">1</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">         max_hash_bits            = BitsPerWord - age_bits - lock_bits - biased_lock_bits,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">         hash_bits                = max_hash_bits &gt; <span class="number">31</span> ? <span class="number">31</span> : max_hash_bits,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">         cms_bits                 = LP64_ONLY(<span class="number">1</span>) NOT_LP64(<span class="number">0</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">         epoch_bits               = <span class="number">2</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">  &#125;;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// The biased locking code currently requires that the age bits be</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// contiguous to the lock bits.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">  <span class="keyword">enum</span> &#123; lock_shift               = <span class="number">0</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">         biased_lock_shift        = lock_bits,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">         age_shift                = lock_bits + biased_lock_bits,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">         cms_shift                = age_shift + age_bits,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">         hash_shift               = cms_shift + cms_bits,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">         epoch_shift              = hash_shift</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">  &#125;;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">...</span></pre></td></tr></table></figure>
+
+<p>因为对象头信息只是对象运行时自身的一部分数据，相比实例数据部分，头部分属于与业务无关的额外存储成功。为了提高对象对堆空间的复用效率，Mark Word被设计成一个非固定的数据结构以便在极小的空间内存储尽量多的信息，它会根据对象的状态复用自己的存储空间。<br>对于上述源码，mark word中字段枚举意义解释如下：</p>
+<blockquote>
+<p>hash： 保存对象的哈希码<br>age： 保存对象的分代年龄<br>biased_lock： 偏向锁标识位<br>lock： 锁状态标识位<br>JavaThread*： 保存持有偏向锁的线程ID<br>epoch： 保存偏向时间戳</p>
+</blockquote>
+<p>锁标记枚举的意义解释如下：</p>
+<blockquote>
+<pre style="box-sizing: border-box; overflow: auto; font-family: Menlo, Monaco, Consolas, "Courier New", monospace; font-size: 13px; display: block; padding: 0px; margin: 0px; line-height: 1.42857; color: rgb(51, 51, 51); word-break: break-all; word-wrap: break-word; background-color: rgb(245, 245, 245); border: 1px solid rgb(204, 204, 204); border-radius: 4px;">locked_value = 0,//00 轻量级锁unlocked_value = 1,//01 无锁monitor_value = 2,//10 监视器锁，也叫膨胀锁，也叫重量级锁marked_value = 3,//11 GC标记biased_lock_pattern = 5 //101 偏向锁</pre>
+</blockquote>
+<p>实际上，markword的设计非常像网络协议报文头：将mark word划分为多个比特位区间，并在不同的对象状态下赋予不同的含义, 下图是来自网络上的一张协议图。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101632-dec50.png" alt="img"></p>
+<p>上述协议字段正对应着源码中所列的枚举字段，这里简要进行说明一下。</p>
+<h3 id="hash"><a href="#hash" class="headerlink" title="hash"></a>hash</h3><p>对象的hash码，hash代表的并不一定是对象的（虚拟）内存地址，但依赖于内存地址，具体取决于运行时库和JVM的具体实现，底层由C++实现，实现细节参考<a href="https://github.com/openjdk-mirror/jdk7u-hotspot/blob/50bdefc3afe944ca74c3093e7448d6b889cd20d1/src/share/vm/runtime/synchronizer.cpp" target="_blank" rel="noopener">OpenJDK源码</a>。但可以简单的理解为对象的内存地址的整型值。</p>
+<h3 id="age"><a href="#age" class="headerlink" title="age"></a>age</h3><p>对象分代GC的年龄。分代GC的年龄是指Java对象在分代垃圾回收模型下(现在JVM实现基本都使用的这种模型)，对象上标记的分代年龄，当该年轻代内存区域空间满后，或者到达GC最达年龄时，会被扔进老年代等待老年代区域满后被FullGC收集掉，这里的最大年龄是通过JVM参数设定的：-XX:MaxTenuringThreshold ，默认值是15。那这个年龄具体是怎么计算的呢？<br>下图展示了该年龄递增的过程：<br>\1. 首先，在对象被new出来后，放在Eden区，年龄都是0</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101633-e743f.jpeg" alt="img"></p>
+<p>\2. 经过一轮GC后，B0和F0被回收，其它对象被拷贝到S1区，年龄增加1，注：如果S1不能同时容纳A0,C0,D0,E0和G0，将被直接丢入Old区</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101633-8652a.jpeg" alt="http://image.winrains.cn/2019/10/20191029101633-8652a.jpeg"></p>
+<p>\3. 再经一轮GC，Eden区中新生的对象M0,P0及S1中的B1,E1,G1不被引用将被回收，而H0,K0,N0及S1中的A1,D1被拷贝到S2区中，对应年龄增加1</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101634-b0fbf.jpeg" alt="img"></p>
+<p>\4. 如此经过2、3过滤循环进行，当S1或S2满，或者对象的年龄达到最大年龄(15)后仍然有引用存在，则对象将被转移至Old区。</p>
+<h3 id="锁标记：lock-biased-lock-epoch-JavaThread"><a href="#锁标记：lock-biased-lock-epoch-JavaThread" class="headerlink" title="锁标记：lock/biased_lock/epoch/JavaThread*"></a>锁标记：lock/biased_lock/epoch/JavaThread*</h3><p>锁标记位，此锁为重量级锁，即对象监视器锁。Java在使用<code>synchronized</code>关键字对方法或块进行加锁时，会触发一个名为“<code>objectMonitor</code>”的监视器对目标代码块执行加锁的操作。当然<code>synchronized</code>方法和<code>synchronized</code>代码块的底层处理机制稍有不同。<code>synchronized</code>方法编译后，会被打上“<code>ACC_SYNCHRONIZED</code>”标记符。而<code>synchronized</code>代码块编译之后，会在同步代码的前后分别加上“<code>monitorenter</code>”和“<code>monitorexit</code>”的指令。当程序执行时遇到到<code>monitorenter</code>或<code>ACC_SYNCHRONIZED</code>时，会检测对象头上的lock标记位，该标记位被如果被线程初次成功访问并设值，则置为1，表示取锁成功，如果再次取锁再执行<code>++</code>操作。在代码块执行结束等待返回或遇到异常等待抛出时，会执行<code>monitorexit</code>或相应的放锁操作，锁标记位执行<code>--</code>操作，如果减到0，则锁被完全释放掉。关于<code>objectMonitor</code>的实现细节，参考<a href="https://github.com/openjdk-mirror/jdk7u-hotspot/blob/50bdefc3afe944ca74c3093e7448d6b889cd20d1/src/share/vm/runtime/objectMonitor.hpp#L193" target="_blank" rel="noopener">JDK源码</a><br>注意，在jdk1.6之前，<code>synchronized</code>加锁或取锁等待操作最终会被转换为操作系统中线程操作原语，如激活、阻塞等。这些操作会导致CPU线程上下文的切换，开销较大，因此称之为重量级锁。但后续JDK版本中对其实现做了大幅优化，相继出现了<strong>轻量级锁，偏向锁，</strong>自旋锁，自适应自旋锁，锁粗化及锁消除等策略。这里仅做简单介绍，不进行展开。<br>如图所示，展示了这几种锁的关系：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101634-e31e0.jpeg" alt="img"></p>
+<p>轻量级锁，如上图所示，是当某个资源在没有竞争或极少竞争的情况下，JVM会优先使用CAS操作，让线程在用户态去尝试修改对象头上的锁标记位，从而避免进入内核态。这里CAS尝试修改锁标记是指尝试对指向当前栈中保存的lock record的线程指针的修改，即对biased_lock标记做CAS修改操作。如果发现存在多个线程竞争(表现为CAS多次失败)，则膨胀为重量级锁，修改对应的lock标记位并进入内核态执行锁操作。注意，这种膨胀并非属于性能的恶化，相反，如果竞争较多时，CAS方式的弊端就很明显，因为它会占用较长的CPU时间做无谓的操作。此时重量级锁的优势更明显。<br>偏向锁，是针对只会有一个线程执行同步代码块时的优化，如果一个同步块只会被一个线程访问，则偏向锁标记会记录该线程id，当该线程进入时，只用check 线程id是否一致，而无须进行同步。锁偏向后，会依据epoch(偏向时间戳)及设定的最大epoch判断是否撤销锁偏向。<br>自旋锁大意是指线程不进入阻塞等待，而只是做自旋等待前一个线程释放锁。不在对象头讨论范围之列，这里不做讨论。</p>
+<h2 id="实例数据"><a href="#实例数据" class="headerlink" title="实例数据"></a>实例数据</h2><p>实例数据instance Data是占用堆内存的主要部分，它们都是对象的实例字段。那么计算这些字段的大小，主要思路就是根据这些字段的类型大小进行求和的。字段类型的标准大小，如Java对象格式概述中表格描述的，除了引用类型会受CPU架构及是否开启指针压缩影响外，其它都是固定的。因此计算起来比较简单。但实际情其实并不这么简单，例如如下对象：</p>
+<figure class="highlight scala"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">People</span></span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">   int age = <span class="number">20</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">   <span class="type">String</span> name = <span class="string">"Xiaoming"</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">Person</span> <span class="keyword">extends</span> <span class="title">People</span></span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    boolean married = <span class="literal">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    long birthday = <span class="number">128902093242</span>L;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    char tag = 'c';</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    double sallary = <span class="number">1200.00</span>d;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>Person对象实例数据的大小应该是多少呢？这里假设使用64位机器，采用指针压缩，则对象头的大小为：8(_mark)+4(_klass) = 12<br>然后实例数据的大小为： 4(age)+4(name) + 8(birthday) + 8(sallary) + 2(tag) + 1(married) = 27<br>因此最终的对象本身大小为：12+27+1(padding) = 40字节<br>注意，为了尽量减少内存空间的占用，这里在计算的过程中需要遵循以下几个规则：</p>
+<figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="string">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="string">*</span> <span class="attr">1:</span> <span class="string">除了对象整体需要按8字节对齐外，每个成员变量都尽量使本身的大小在内存中尽量对齐。比如</span> <span class="string">int</span> <span class="string">按</span> <span class="number">4</span> <span class="string">位对齐，long</span> <span class="string">按</span> <span class="number">8</span> <span class="string">位对齐。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="string">*</span> <span class="number">2</span><span class="string">：类属性按照如下优先级进行排列：长整型和双精度类型；整型和浮点型；字符和短整型；字节类型和布尔类型，最后是引用类型。这些属性都按照各自的单位对齐。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="string">*</span> <span class="number">3</span><span class="string">：优先按照规则一和二处理父类中的成员，接着才是子类的成员。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="string">*</span> <span class="number">4</span><span class="string">：当父类中最后一个成员和子类第一个成员的间隔如果不够4个字节的话，就必须扩展到4个字节的基本单位。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="string">*</span> <span class="number">5</span><span class="string">：如果子类第一个成员是一个双精度或者长整型，并且父类并没有用完8个字节，JVM会破坏规则2，按照整形（int），短整型（short），字节型（byte），引用类型（reference）的顺序，向未填满的空间填充。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="string">*/</span></span></pre></td></tr></table></figure>
+
+<p>最后计算引用类型字段的实际大小：”Xiaoming”，按字符串对象的字段进行计算，对象头12字节，hash字段4字节，char[] 4字节，共12+4+4+4(padding) = 24字节，其中char[]又是引用类型，且是数组类型，其大小为：对象头12+4(length) + 9(arrLength) * 2(char) +4(padding) = 40字节。<br>所以综上所述，一个Person对象占用内存的大小为104字节。</p>
+<h3 id="关于指针压缩"><a href="#关于指针压缩" class="headerlink" title="关于指针压缩"></a>关于指针压缩</h3><p>一个比较明显的问题是，在64位机器上，如果开启了指针压缩后，则引用只占用4个字节，4字节的最大寻址空间为2^32=4GB, 那么如何保证能满足寻址空间大于4G的需求呢？<br>开启指针压缩后，实际上会压缩的对象包括：每个Class的属性指针(静态成员变量)及每个引用类型的字段(包括数组)指针，而本地变量，堆栈元素，入参，返回值，NULL这些指针不会被压缩。在开启指针压缩后，如前文源码所述，markWord中的存储指针将是_compressed_klass，对应的类型是narrowOop，不再是wideKlassOop了，有什么区别呢？<br><code>wideKlassOop</code>和<code>narrowOop</code>都指向InstanceKlass对象，其中narrowOop指向的是经过压缩的对象。简单来说，wideKlassOop可以达到整个寻址空间。而narrowOop虽然达不到整个寻址空间，但它面对也不再是个单纯的byte地址，而是一个object，也就是说使用narrowOop后，压缩后的这4个字节表示的4GB实际上是4G个对象的指针，大概是32GB。JVM会对对应的指针对象进行解码, JDK源码中，<a href="https://github.com/openjdk-mirror/jdk7u-hotspot/blob/50bdefc3afe944ca74c3093e7448d6b889cd20d1/src/share/vm/oops/oop.hpp" target="_blank" rel="noopener">oop.hpp源码</a>文件中定义了抽象的编解码方法，用于将narrowOop解码为一个正常的引用指针，或将一下正常的引用指针编码为narrowOop：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// Decode an oop pointer from a narrowOop if compressed.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// These are overloaded for oop and narrowOop as are the other functions</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// below so that they can be called in template functions.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">static oop decode<span class="constructor">_heap_oop_not_null(<span class="params">oop</span> <span class="params">v</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">static oop decode<span class="constructor">_heap_oop_not_null(<span class="params">narrowOop</span> <span class="params">v</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">static oop decode<span class="constructor">_heap_oop(<span class="params">oop</span> <span class="params">v</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">static oop decode<span class="constructor">_heap_oop(<span class="params">narrowOop</span> <span class="params">v</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// Encode an oop pointer to a narrow oop.  The or_null versions accept</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// null oop pointer, others do not in order to eliminate the</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// null checking branches.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">static narrowOop encode<span class="constructor">_heap_oop_not_null(<span class="params">oop</span> <span class="params">v</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">static narrowOop encode<span class="constructor">_heap_oop(<span class="params">oop</span> <span class="params">v</span>)</span>;</span></pre></td></tr></table></figure>
+
+<h2 id="对齐填充"><a href="#对齐填充" class="headerlink" title="对齐填充"></a>对齐填充</h2><p>对齐填充是底层CPU数据总线读取内存数据时的要求，例如，通常CPU按照字单位读取，如果一个完整的数据体不需要对齐，那么在内存中存储时，其地址有极大可能横跨两个字，例如某数据块地址未对齐，存储为1-4，而cpu按字读取，需要把0-3字块读取出来，再把4-7字块读出来，最后合并舍弃掉多余的部分。这种操作会很多很多，且很频繁，但如果进行了对齐，则一次性即可取出目标数据，将会大大节省CPU资源。<br>在hotSpot虚拟机中，默认的对齐位数是8，与CPU架构无关，如下代码中的<code>objectAlignment</code>：</p>
+<figure class="highlight processing"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// Try to get the object alignment (the default seems to be 8 on Hotspot,</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// regardless of the architecture).</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="built_in">int</span> objectAlignment = <span class="number">8</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">final</span> Class&lt;?&gt; beanClazz = Class.forName(<span class="string">"com.sun.management.HotSpotDiagnosticMXBean"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">final</span> <span class="keyword">Object</span> hotSpotBean = ManagementFactory.newPlatformMXBeanProxy(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        ManagementFactory.getPlatformMBeanServer(),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="string">"com.sun.management:type=HotSpotDiagnostic"</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        beanClazz</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    );</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">final</span> Method getVMOptionMethod = beanClazz.getMethod(<span class="string">"getVMOption"</span>, <span class="keyword">String</span>.class);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">final</span> <span class="keyword">Object</span> vmOption = getVMOptionMethod.invoke(hotSpotBean, <span class="string">"ObjectAlignmentInBytes"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    objectAlignment = Integer.parseInt(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        vmOption.getClass().getMethod(<span class="string">"getValue"</span>).invoke(vmOption).toString()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    );</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    supportedFeatures.<span class="built_in">add</span>(JvmFeature.OBJECT_ALIGNMENT);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">&#125; <span class="keyword">catch</span> (Exception e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">  <span class="comment">// Ignore.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">NUM_BYTES_OBJECT_ALIGNMENT = objectAlignment;</span></pre></td></tr></table></figure>
+
+<p>可以看出，通过<code>HotSpotDiagnosticMXBean.getVMOption(&quot;ObjectAlignmentBytes&quot;).getValue()</code>方法可以拿到当前JVM环境下的对齐位数。<br>注意，这里的<code>HotSpotDiagnosticMXBean</code>是JVM提供的JMX中一种可被管理的资源，即HotSpot信息资源。</p>
+<h1 id="使用SA-Hotspot-Debuger-HSDB-查看oops结构"><a href="#使用SA-Hotspot-Debuger-HSDB-查看oops结构" class="headerlink" title="使用SA Hotspot Debuger(HSDB)查看oops结构"></a>使用SA Hotspot Debuger(HSDB)查看oops结构</h1><p>前文所述都是源码+理论，其实Hotspot为我们提供了一种工具可以方便的用来查询运行时对象的Oops结构，即<code>SA Hotspot Debuger</code>，简称HSDB. 其中SA指“<code>Serviceability Agent</code>”，它是一个JVM服务工具集的Agent，它原本是sun公司用来debug Hotspot的工具，现在开放给开发者使用，能够查看Java对象的oops、查看类信息、线程栈信息、堆信息、方法字节码和JIT编译后的汇编代码等。SA提供的入口在$JAVA_HOME/lib/sa-jdi.jar中，包含了很多工具，其中最常用的工具就是HSDB。<br>下面演示一下HSDB的使用——<br>\1. 先准备如下代码并运行：</p>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">Obj</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">int</span> age;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">long</span> <span class="built_in">height</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">boolean</span> married;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">String</span> name;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">String</span> addr;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">String</span> sex;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    ...</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">get</span>/<span class="built_in">set</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">package yp.tools;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * @author yepei</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * @date 2018/05/14</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * @description</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">HSDBTest</span> &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">main</span><span class="params">(<span class="keyword">String</span>[] args)</span> throws InterruptedException </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        Obj o = <span class="keyword">new</span> Obj(<span class="number">20</span>, <span class="number">175</span>, <span class="literal">false</span>, <span class="string">"小明"</span>, <span class="string">"浙江杭洲"</span>, <span class="string">"男"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        Thread.sleep(<span class="number">1000</span> * <span class="number">3600</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        System.out.<span class="built_in">println</span>(o);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>\2. 执行jps命令，获取当前运行的Java进程号：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101635-c6a0b.jpeg" alt="img"></p>
+<p>\3. 启动HSDB，并添加目标进程:</p>
+<figure class="highlight stylus"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">`sudo java -cp <span class="variable">$JAVA_HOME</span>/lib/sa-jdi<span class="selector-class">.jar</span> sun<span class="selector-class">.jvm</span><span class="selector-class">.hotspot</span>.HSDB`</span></pre></td></tr></table></figure>
+
+<p><img src="http://image.winrains.cn/2019/10/20191029101635-698ee.png" alt="img"></p>
+<p>可以看到当前Java进程中的线程信息：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101637-a1bb1.png" alt="img"></p>
+<p>双击指定线程，可以查看到当前线程对象的Oop结构信息，可以看到线程对象头也是包含_mark和_metadata两个协议字段的：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101637-3e5a8.png" alt="img"></p>
+<p>点击上方的栈图标，可以查询当前线程的栈内存：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101640-5f012.png" alt="img"></p>
+<p><strong>那么如何查看当前线程中用户定义的类结存储信息呢？</strong><br>先到方法区去看一下类信息吧<br>Tools——Class Browser，搜索目标类</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101642-d7741.png" alt="img"></p>
+<p>可以看到该类对应的对象的各个字段的偏移量，最大的是36，String类型，意味着该对象本身的大小就是36+4 = 40字节。同时，下方可以看到这个类相关的函数表、常量池信息。<br>要查看对象信息，从Tools菜单，打开Object Histogram</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101644-60a32.png" alt="img"></p>
+<p>在打开的窗口中搜索目标类：yp.tools.Obj</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101645-c926e.png" alt="img"></p>
+<p>双击打开：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101645-eb579.png" alt="img"></p>
+<p>点击Inspect查看该对象的Oop结构信息：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191029101646-afc27.png" alt="img"></p>
+<p>如上图所示即是对象Obj的Oop结构，对象头包含_mark与代表class指针的_metadata。示例中的类没有并发或锁的存在，所以mark值是001，代表无锁状态。<br>除此之外，HSDB还有其它一些不错的功能，如查看反编译信息、根据地址查找对象、crash分析、死锁分析等。</p>
+<h1 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h1><p>本文围绕“计算Java对象占用内存大小”这一话题，简要介绍了直接计算指定对象在内存中大小的三种方法：使用Instrumentation、Unsafe或第三方工具(RamUsageEstimator)的方式，其中Instrumentation和Unsafe计算精确，但使用起来不太方便，Instrumentation需要以javaagent代理的方式启动，而Unsafe只能计算指定对象的每个字段的地址起始位置偏移量，需要手工递归并增加padding才能完整计算对象大小，使用RamUsageEstimator可以很方便的计算对象本身或对象引用树整体的大小，但其并非直接基于对象的真实内存地址而计算的，而是通过已知JVM规则和数据类型的标准大小推算的，存在计算误差的可能性。<br>为了揭开Java对象在堆内存中存储格式的面纱，结合OpenJDK源码，本文着重讨论了Java对象的格式：对象头、实例数据及对齐填充三部分。其中对象头最为复杂，包含_mark、_klass以及_length(仅数组类型)的协议字段。其中的mark word字段较为复杂，甚至涉及了OOP-Klass模型、hash、gc、锁的原理及指针压缩等知识。<br>最后，从实践的方面入手，介绍了JDK自带的Hotspot Debuger工具——HSDB的使用，透过它能够让我们更直观的查看运行中的java对象在内存中的存在形式和状态，如对象的oops、类信息、线程栈信息、堆信息、方法字节码和JIT编译后的汇编代码等。<br>本文查询了一些资料，并参考了OpenJDK源码。可能会有些不正确的地方敬请指正，欢迎探讨。<br>本文作者：一人浅醉</p>
+<blockquote>
+<p>作者：阿里云云栖号</p>
+<p>来源：<a href="https://www.jianshu.com/p/9d729c9c94c4" target="_blank" rel="noopener">https://www.jianshu.com/p/9d729c9c94c4</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/DNS%E5%8A%AB%E6%8C%81/" rel="prev" title="DNS劫持">
+      <i class="fa fa-chevron-left"></i> DNS劫持
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Tomcat-7-%E6%BA%90%E4%BB%A3%E7%A0%81%E8%BF%90%E8%A1%8C%E7%8E%AF%E5%A2%83%E6%90%AD%E5%BB%BA/" rel="next" title="Tomcat 7 源代码运行环境搭建">
+      Tomcat 7 源代码运行环境搭建 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#摘要"><span class="nav-number">1.</span> <span class="nav-text">摘要</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#背景"><span class="nav-number">2.</span> <span class="nav-text">背景</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#内存占用计算方法"><span class="nav-number">3.</span> <span class="nav-text">内存占用计算方法</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1-Instrumentation"><span class="nav-number">3.1.</span> <span class="nav-text">1. Instrumentation</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-使用Unsafe"><span class="nav-number">3.2.</span> <span class="nav-text">2. 使用Unsafe</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#3-使用第三方工具"><span class="nav-number">3.3.</span> <span class="nav-text">3. 使用第三方工具</span></a></li></ol></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#Java对象格式"><span class="nav-number"></span> <span class="nav-text">Java对象格式</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#对象头"><span class="nav-number">1.</span> <span class="nav-text">对象头</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#OOP-Klass模型"><span class="nav-number">2.</span> <span class="nav-text">OOP-Klass模型</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#关于Mark-Word"><span class="nav-number">3.</span> <span class="nav-text">关于Mark Word</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#hash"><span class="nav-number">3.1.</span> <span class="nav-text">hash</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#age"><span class="nav-number">3.2.</span> <span class="nav-text">age</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#锁标记：lock-biased-lock-epoch-JavaThread"><span class="nav-number">3.3.</span> <span class="nav-text">锁标记：lock/biased_lock/epoch/JavaThread*</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#实例数据"><span class="nav-number">4.</span> <span class="nav-text">实例数据</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#关于指针压缩"><span class="nav-number">4.1.</span> <span class="nav-text">关于指针压缩</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#对齐填充"><span class="nav-number">5.</span> <span class="nav-text">对齐填充</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#使用SA-Hotspot-Debuger-HSDB-查看oops结构"><span class="nav-number"></span> <span class="nav-text">使用SA Hotspot Debuger(HSDB)查看oops结构</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#总结"><span class="nav-number"></span> <span class="nav-text">总结</span></a></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

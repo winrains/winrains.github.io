@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="接着上文《JVM源码分析之如何触发并执行GC线程》，本文对GC线程的执行过程进行分析，当新生代的可用内存不足时，会触发YGC操作，回收新生代的垃圾对象，具体实现是创建一个VM_GenCollectForAllocation类型的VM_Operation，并交由VMThread进行调度执行。">
+<meta name="keywords" content="源码">
+<meta property="og:type" content="article">
+<meta property="og:title" content="JVM源码分析（10）：垃圾收集的执行过程">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8810%EF%BC%89%EF%BC%9A%E5%9E%83%E5%9C%BE%E6%94%B6%E9%9B%86%E7%9A%84%E6%89%A7%E8%A1%8C%E8%BF%87%E7%A8%8B&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="接着上文《JVM源码分析之如何触发并执行GC线程》，本文对GC线程的执行过程进行分析，当新生代的可用内存不足时，会触发YGC操作，回收新生代的垃圾对象，具体实现是创建一个VM_GenCollectForAllocation类型的VM_Operation，并交由VMThread进行调度执行。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170245-cad5b.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170246-2ba2c.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170246-b7239.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170246-91473.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170247-57916.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170247-e8628.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170247-9ed89.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170248-41279.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170248-87839.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170248-977f2.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170249-7ba37.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170249-a1f42.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170253-37264.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170253-981ba.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170254-626b8.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170254-e21bb.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170255-7af71.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170256-5db93.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170257-4f3eb.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170257-4feff.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170258-cd411.png">
+<meta property="og:updated_time" content="2020-01-08T03:46:08.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191030170245-cad5b.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8810%EF%BC%89%EF%BC%9A%E5%9E%83%E5%9C%BE%E6%94%B6%E9%9B%86%E7%9A%84%E6%89%A7%E8%A1%8C%E8%BF%87%E7%A8%8B/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>JVM源码分析（10）：垃圾收集的执行过程 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8810%EF%BC%89%EF%BC%9A%E5%9E%83%E5%9C%BE%E6%94%B6%E9%9B%86%E7%9A%84%E6%89%A7%E8%A1%8C%E8%BF%87%E7%A8%8B/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          JVM源码分析（10）：垃圾收集的执行过程
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 11:46:08" itemprop="dateCreated datePublished" datetime="2020-01-08T11:46:08+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/JVM/" itemprop="url" rel="index">
+                    <span itemprop="name">JVM</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>接着上文<a href="https://www.jianshu.com/p/1544d3011ddb" target="_blank" rel="noopener">《JVM源码分析之如何触发并执行GC线程》</a>，本文对GC线程的执行过程进行分析，当新生代的可用内存不足时，会触发YGC操作，回收新生代的垃圾对象，具体实现是创建一个<code>VM_GenCollectForAllocation</code>类型的<code>VM_Operation</code>，并交由<code>VMThread</code>进行调度执行。</p>
+<a id="more"></a>
+
+<h2 id="YGC"><a href="#YGC" class="headerlink" title="YGC"></a>YGC</h2><p>整个YGC的过程如下</p>
+<h3 id="step-1"><a href="#step-1" class="headerlink" title="step 1"></a>step 1</h3><p><img src="http://image.winrains.cn/2019/10/20191030170245-cad5b.png" alt="img"></p>
+<p>通过<code>VMThread</code>调度执行gc操作，最终调用对应的<code>doit</code>方法<br>1、利用<code>SvcGCMarker</code>通知<code>minor gc</code>操作的开始；<br>2、设置触发gc的原因为<code>GCCause::_allocation_failure</code>，即内存分配失败；<br>3、其中<code>GenCollectedHeap</code>的<code>satisfy_failed_allocation</code>方法会调用GC策略的<code>satisfy_failed_allocation</code>方法，处理内存分配失败的情况；</p>
+<h3 id="step-2"><a href="#step-2" class="headerlink" title="step 2"></a>step 2</h3><p>从这一步开始是<code>satisfy_failed_allocation</code>方法的实现</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030170246-2ba2c.png" alt="img"></p>
+<p>如果其它线程触发了gc操作，则通过扩展内存代的容量进行分配，最后不管有没有分配成功都返回，等待其它线程的gc操作结束；</p>
+<h3 id="step-3"><a href="#step-3" class="headerlink" title="step 3"></a>step 3</h3><p><img src="http://image.winrains.cn/2019/10/20191030170246-b7239.png" alt="img"></p>
+<p>如果增量式gc<code>incremental collection</code>可行，则通过<code>do_collection</code>方法执行一次<code>minor gc</code>，即回收新生代的垃圾；</p>
+<h3 id="step-4"><a href="#step-4" class="headerlink" title="step 4"></a>step 4</h3><p><img src="http://image.winrains.cn/2019/10/20191030170246-91473.png" alt="img"></p>
+<p>如果增量式gc不可行，则通过<code>do_collection</code>方法执行一次<code>full gc</code>；</p>
+<h3 id="step-5"><a href="#step-5" class="headerlink" title="step 5"></a>step 5</h3><p><img src="http://image.winrains.cn/2019/10/20191030170247-57916.png" alt="img"></p>
+<p>gc结束之后，再次从内存堆的各个内存代中依次分配指定大小的内存块，如果分配成功则返回，否则继续；</p>
+<h3 id="step-6"><a href="#step-6" class="headerlink" title="step 6"></a>step 6</h3><p><img src="http://image.winrains.cn/2019/10/20191030170247-e8628.png" alt="img"></p>
+<p>如果gc结束后还是分配失败，说明gc失败了（这里写gc失败了，是因为代码注释上说<code>collection failed</code>，但是为什么可以确定是gc失败呢？），则再次尝试通过允许扩展内存代容量的方式来试图分配指定大小的内存块；</p>
+<h3 id="step-7"><a href="#step-7" class="headerlink" title="step 7"></a>step 7</h3><p><img src="http://image.winrains.cn/2019/10/20191030170247-9ed89.png" alt="img"></p>
+<p>如果执行到这一步，说明gc之后还是内存不足，则通过<code>do_collection</code>方法最后再进行一次彻底的gc，回收所有的内存代，对堆内存进行压缩，且清除软引用；</p>
+<h3 id="step-8"><a href="#step-8" class="headerlink" title="step 8"></a>step 8</h3><p><img src="http://image.winrains.cn/2019/10/20191030170248-41279.png" alt="img"></p>
+<p>经过一次彻底的gc之后，最后一次尝试依次从各内存代分配指定大小的内存块；</p>
+<hr>
+<p>从上述分析中可以发现，gc操作的入口都位于<code>GenCollectedHeap::do_collection</code>方法中，不同的参数执行不同类型的gc，定义如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030170248-87839.png" alt="img"></p>
+<p>参数说明：<br>1、参数<code>full</code>标识是否需要进行<code>full gc</code>；<br>2、参数<code>clear_all_soft_refs</code>标识gc过程中是否需要清除软引用；</p>
+<h2 id="do-collection"><a href="#do-collection" class="headerlink" title="do_collection"></a>do_collection</h2><p>方法<code>do_collection</code>的实现过程如下：</p>
+<h3 id="step-1-1"><a href="#step-1-1" class="headerlink" title="step 1"></a>step 1</h3><p><img src="http://image.winrains.cn/2019/10/20191030170248-977f2.png" alt="img"></p>
+<p>执行gc操作必须满足四个条件：<br>1、在一个同步安全点，<code>VMThread</code>在调用gc操作时会通过<code>SafepointSynchronize::begin/end</code>方法实现进出安全区域，调用<code>begin</code>方法时会强制所有线程到达一个安全点；<br>2、当前线程是VM线程或并发的gc线程；<br>3、当前线程已经获得内存堆的全局锁；<br>4、内存堆当前<code>_is_gc_active</code>参数为<code>false</code>，即还未开始gc；</p>
+<h3 id="step-2-1"><a href="#step-2-1" class="headerlink" title="step 2"></a>step 2</h3><p><img src="http://image.winrains.cn/2019/10/20191030170249-7ba37.png" alt="img"></p>
+<p>如果当前有其它线程触发了gc，则终止当前的gc线程，否则继续；</p>
+<h3 id="step-3-1"><a href="#step-3-1" class="headerlink" title="step 3"></a>step 3</h3><p><img src="http://image.winrains.cn/2019/10/20191030170249-a1f42.png" alt="img"></p>
+<p>1、根据参数<code>do_clear_all_soft_refs</code>和GC策略判断本次gc是否需要清除软引用；<br>2、记录当前永久代的使用量<code>perm_prev_used</code>；<br>3、如果启动参数中设置了<code>-XX:+PrintHeapAtGC</code>，则打印GC发生时内存堆的信息。</p>
+<h3 id="step-4-1"><a href="#step-4-1" class="headerlink" title="step 4"></a>step 4</h3><p><img src="http://image.winrains.cn/2019/10/20191030170253-37264.png" alt="img"></p>
+<p>1、设置参数<code>_is_gc_active</code>为真，表示当前线程正式开始gc操作；<br>2、判断当前是否要进行一次<code>full gc</code>，并确定触发<code>full gc</code>的原因，如通过调用<code>System.gc()</code>触发；<br>3、如果设置了<code>PrintGC</code>和<code>PrintGCDateStamps</code>，则在输出日志中添加时间戳；<br>4、如果设置了<code>PrintGCDetails</code>，则打印本次gc的详细CPU耗时，如 <code>user_time</code>、<code>system_time</code>和<code>real_time</code>；<br>5、<code>gc_prologue</code>方法在gc开始前做一些前置处理，如设置每个内存代的<code>_soft_end</code>字段；<br>6、更新发生gc的次数<code>_total_collections</code>，如果当前gc是<code>full gc</code>，则还需更新发生<code>full gc</code>的次数<code>_total_full_collections</code>；</p>
+<h3 id="step-5-1"><a href="#step-5-1" class="headerlink" title="step 5"></a>step 5</h3><p><img src="http://image.winrains.cn/2019/10/20191030170253-981ba.png" alt="img"></p>
+<p>1、获取当前内存堆的使用量<code>gch_prev_used</code>；<br>2、初始化开始回收的内存代序号<code>starting_level</code>，默认为0，即从最年轻的内存代开始；<br>3、如果当前gc是<code>full gc</code>，则从最老的内存代开始向前搜索，找到第一个可收集所有新生代的内存代，稍后从该内存代开始回收；</p>
+<h3 id="step-6-1"><a href="#step-6-1" class="headerlink" title="step 6"></a>step 6</h3><p><img src="http://image.winrains.cn/2019/10/20191030170254-626b8.png" alt="img"></p>
+<p>1、从序号为<code>starting_level</code>的内存代开始回收；<br>2、如果当前内存代不需要进行回收，则处理下一个内存代，否则对当前内存进行回收；<br>3、如果当前内存代所有内存代中最老的，则将本次的gc过程升级为<code>full gc</code>，更新<code>full gc</code>的次数，并执行<code>full gc</code>的前置处理，实现如下：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191030170254-e21bb.png" alt="img"></p>
+<p>在进行<code>FGC</code>之前：<br>1、如果设置了参数<code>HeapDumpBeforeFullGC</code>，则对内存堆进行dump；<br>2、如果设置了参数<code>PrintClassHistogramBeforeFullGC</code>，则打印在进行<code>FGC</code>之前的对象；</p>
+<h3 id="step-7-1"><a href="#step-7-1" class="headerlink" title="step 7"></a>step 7</h3><p><img src="http://image.winrains.cn/2019/10/20191030170255-7af71.png" alt="img"></p>
+<p>1、统计各个内存代进行gc时的数据；<br>2、如果开启了<code>ZapUnusedHeapArea</code>，则在回收每个内存代时都要对内存代的内存上限地址<code>top</code>进行更新；</p>
+<h3 id="step-8-1"><a href="#step-8-1" class="headerlink" title="step 8"></a>step 8</h3><p><img src="http://image.winrains.cn/2019/10/20191030170256-5db93.png" alt="img"></p>
+<p>这一步才开始真正的gc操作：<br>1、设置当前内存代的<code>_saved_mark</code>值，即设置这些内存区域块的上限地址；<br>2、通过每个内存代管理器的<code>collect</code>方法对垃圾对象的进行回收，垃圾收集算法的具体细节会在后文进行分析；</p>
+<h3 id="step-9"><a href="#step-9" class="headerlink" title="step 9"></a>step 9</h3><p><img src="http://image.winrains.cn/2019/10/20191030170257-4f3eb.png" alt="img"></p>
+<p>1、如果当前是<code>FGC</code>，则调用<code>post_full_gc_dump</code>方法通知gc已经完成，可以进行后续操作，如果设置了参数<code>HeapDumpAfterFullGC</code>，则在gc后可以对堆内存进行dump；如果设置了参数<code>PrintClassHistogramAfterFullGC</code>，则在gc后可以打印存活的对象；<br>2、如果设置了参数<code>PrintGCDetails</code>，则在gc后可以打印内存堆的变化情况；如果当前还是<code>FGC</code>，则还可以打印永久代的内存变化情况；</p>
+<h3 id="step-10"><a href="#step-10" class="headerlink" title="step 10"></a>step 10</h3><p><img src="http://image.winrains.cn/2019/10/20191030170257-4feff.png" alt="img"></p>
+<p>1、gc完成后，调整内存堆中各内存代的大小；<br>2、如果是<code>FGC</code>，则还需要调整永久代大小；获取<code>FullGCCount_lock</code>锁，对<code>_full_collections_completed</code>进行更新，并通过锁机制通知本次FGC已经完成；</p>
+<h3 id="step-11"><a href="#step-11" class="headerlink" title="step 11"></a>step 11</h3><p><img src="http://image.winrains.cn/2019/10/20191030170258-cd411.png" alt="img"></p>
+<p>1、打印内存堆的gc总次数和<code>FGC</code>次数；<br>2、<code>ExitAfterGCNum</code>默认是0，如果设置<code>ExitAfterGCNum</code>大于0，且gc的总次数超过<code>ExitAfterGCNum</code>，则终止整个JVM进程。</p>
+<blockquote>
+<p>作者：占小狼</p>
+<p>来源：<a href="https://www.jianshu.com/p/04eff13f3707" target="_blank" rel="noopener">https://www.jianshu.com/p/04eff13f3707</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E6%BA%90%E7%A0%81/" rel="tag"># 源码</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%889%EF%BC%89%EF%BC%9A%E5%A6%82%E4%BD%95%E8%A7%A6%E5%8F%91%E5%B9%B6%E6%89%A7%E8%A1%8CGC%E7%BA%BF%E7%A8%8B/" rel="prev" title="JVM源码分析（9）：如何触发并执行GC线程">
+      <i class="fa fa-chevron-left"></i> JVM源码分析（9）：如何触发并执行GC线程
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/JVM%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%8811%EF%BC%89%EF%BC%9A%E6%96%B0%E7%94%9F%E4%BB%A3DefNewGeneration%E7%9A%84%E5%AE%9E%E7%8E%B0/" rel="next" title="JVM源码分析（11）：新生代DefNewGeneration的实现">
+      JVM源码分析（11）：新生代DefNewGeneration的实现 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#YGC"><span class="nav-number">1.</span> <span class="nav-text">YGC</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#step-1"><span class="nav-number">1.1.</span> <span class="nav-text">step 1</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-2"><span class="nav-number">1.2.</span> <span class="nav-text">step 2</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-3"><span class="nav-number">1.3.</span> <span class="nav-text">step 3</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-4"><span class="nav-number">1.4.</span> <span class="nav-text">step 4</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-5"><span class="nav-number">1.5.</span> <span class="nav-text">step 5</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-6"><span class="nav-number">1.6.</span> <span class="nav-text">step 6</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-7"><span class="nav-number">1.7.</span> <span class="nav-text">step 7</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-8"><span class="nav-number">1.8.</span> <span class="nav-text">step 8</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#do-collection"><span class="nav-number">2.</span> <span class="nav-text">do_collection</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#step-1-1"><span class="nav-number">2.1.</span> <span class="nav-text">step 1</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-2-1"><span class="nav-number">2.2.</span> <span class="nav-text">step 2</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-3-1"><span class="nav-number">2.3.</span> <span class="nav-text">step 3</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-4-1"><span class="nav-number">2.4.</span> <span class="nav-text">step 4</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-5-1"><span class="nav-number">2.5.</span> <span class="nav-text">step 5</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-6-1"><span class="nav-number">2.6.</span> <span class="nav-text">step 6</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-7-1"><span class="nav-number">2.7.</span> <span class="nav-text">step 7</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-8-1"><span class="nav-number">2.8.</span> <span class="nav-text">step 8</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-9"><span class="nav-number">2.9.</span> <span class="nav-text">step 9</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-10"><span class="nav-number">2.10.</span> <span class="nav-text">step 10</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#step-11"><span class="nav-number">2.11.</span> <span class="nav-text">step 11</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

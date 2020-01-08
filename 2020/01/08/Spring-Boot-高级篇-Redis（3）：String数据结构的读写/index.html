@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="Redis目前常用的存储结构有五种，String字符串，List列表，Set集合，Hash散列，ZSet有序集合；本篇则主要集中在String这个数据结构的读写操作之上对于String的操作，除了常见的get&#x2F;set之外，还有一些比较有特色的功能，如用于实现redis分布式锁的setnx&#x2F;getset方法；用于实现计数的incr&#x2F;decr方法；位图算法的经典实用场景之bitmap的使用方法等也有必">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Spring Boot 高级篇--Redis（3）：String数据结构的读写">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;Spring-Boot-%E9%AB%98%E7%BA%A7%E7%AF%87-Redis%EF%BC%883%EF%BC%89%EF%BC%9AString%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84%E7%9A%84%E8%AF%BB%E5%86%99&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="Redis目前常用的存储结构有五种，String字符串，List列表，Set集合，Hash散列，ZSet有序集合；本篇则主要集中在String这个数据结构的读写操作之上对于String的操作，除了常见的get&#x2F;set之外，还有一些比较有特色的功能，如用于实现redis分布式锁的setnx&#x2F;getset方法；用于实现计数的incr&#x2F;decr方法；位图算法的经典实用场景之bitmap的使用方法等也有必">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;57afd-00.gif">
+<meta property="og:updated_time" content="2020-01-08T09:05:07.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;57afd-00.gif">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/Spring-Boot-%E9%AB%98%E7%BA%A7%E7%AF%87-Redis%EF%BC%883%EF%BC%89%EF%BC%9AString%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84%E7%9A%84%E8%AF%BB%E5%86%99/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Spring Boot 高级篇--Redis（3）：String数据结构的读写 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/Spring-Boot-%E9%AB%98%E7%BA%A7%E7%AF%87-Redis%EF%BC%883%EF%BC%89%EF%BC%9AString%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84%E7%9A%84%E8%AF%BB%E5%86%99/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Spring Boot 高级篇--Redis（3）：String数据结构的读写
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 17:05:07" itemprop="dateCreated datePublished" datetime="2020-01-08T17:05:07+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Spring%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Spring技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Spring%E6%8A%80%E6%9C%AF/Spring-Boot/" itemprop="url" rel="index">
+                    <span itemprop="name">Spring Boot</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/Redis/" itemprop="url" rel="index">
+                    <span itemprop="name">Redis</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>Redis目前常用的存储结构有五种，String字符串，List列表，Set集合，Hash散列，ZSet有序集合；本篇则主要集中在String这个数据结构的读写操作之上<br>对于String的操作，除了常见的get/set之外，还有一些比较有特色的功能，如用于实现redis分布式锁的setnx/getset方法；用于实现计数的incr/decr方法；位图算法的经典实用场景之bitmap的使用方法等也有必要了解一下</p>
+<a id="more"></a>
+
+<h2 id="I-使用方法"><a href="#I-使用方法" class="headerlink" title="I. 使用方法"></a>I. 使用方法</h2><h3 id="1-基本配置"><a href="#1-基本配置" class="headerlink" title="1. 基本配置"></a>1. 基本配置</h3><p>在项目中首先需要添加基本的依赖，然后我们使用默认的Redis配置进行操作，即本机启动redis服务，端口号为6379，密码没有</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">dependencies</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="tag">&lt;<span class="name">dependency</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">      <span class="tag">&lt;<span class="name">groupId</span>&gt;</span>org.springframework.boot<span class="tag">&lt;/<span class="name">groupId</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">      <span class="tag">&lt;<span class="name">artifactId</span>&gt;</span>spring-boot-starter-data-redis<span class="tag">&lt;/<span class="name">artifactId</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="tag">&lt;/<span class="name">dependency</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;/<span class="name">dependencies</span>&gt;</span></span></pre></td></tr></table></figure>
+
+<h3 id="2-Get-Set方法"><a href="#2-Get-Set方法" class="headerlink" title="2. Get/Set方法"></a>2. Get/Set方法</h3><p>直接使用默认的RedisTemplate进行redis的读写操作，因为我们没有指定序列化方式，所以本篇使用中，并没有使用更简单的opsForValue进行操作，具体原因可以参考博文</p>
+<ul>
+<li><a href="https://blog.hhui.top/hexblog/2018/06/11/180611-Spring之RedisTemplate配置与使用/" target="_blank" rel="noopener">Spring之RedisTemplate配置与使用</a></li>
+</ul>
+<figure class="highlight processing"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">@Component</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> class KVBean &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">final</span> StringRedisTemplate redisTemplate;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> KVBean(StringRedisTemplate redisTemplate) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">this</span>.redisTemplate = redisTemplate;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// kv数据结构的测试相关</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 设置并获取之间的结果，要求key，value都不能为空；如果之前没有值，返回null</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * @param key</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * @param value</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * @return</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="built_in">byte</span>[] setAndGetOldValue(<span class="keyword">String</span> <span class="built_in">key</span>, <span class="keyword">String</span> value) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> redisTemplate.execute((RedisCallback&lt;<span class="built_in">byte</span>[]&gt;) con -&gt; con.getSet(<span class="built_in">key</span>.getBytes(), value.getBytes()));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> Boolean setValue(<span class="keyword">String</span> <span class="built_in">key</span>, <span class="keyword">String</span> value) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> redisTemplate</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">                .execute((RedisCallback&lt;Boolean&gt;) connection -&gt; connection.<span class="built_in">set</span>(<span class="built_in">key</span>.getBytes(), value.getBytes()));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="built_in">byte</span>[] getValue(<span class="keyword">String</span> <span class="built_in">key</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> redisTemplate.execute((RedisCallback&lt;<span class="built_in">byte</span>[]&gt;) connection -&gt; connection.<span class="built_in">get</span>(<span class="built_in">key</span>.getBytes()));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> Boolean mSetValue(Map&lt;<span class="keyword">String</span>, <span class="keyword">String</span>&gt; values) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">        Map&lt;<span class="built_in">byte</span>[], <span class="built_in">byte</span>[]&gt; <span class="built_in">map</span> = <span class="keyword">new</span> <span class="keyword">HashMap</span>&lt;&gt;(values.<span class="built_in">size</span>());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">for</span> (Map.Entry&lt;<span class="keyword">String</span>, <span class="keyword">String</span>&gt; entry : values.entrySet()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">            <span class="built_in">map</span>.put(entry.getKey().getBytes(), entry.getValue().getBytes());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> redisTemplate.execute((RedisCallback&lt;Boolean&gt;) con -&gt; con.mSet(<span class="built_in">map</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> List&lt;<span class="built_in">byte</span>[]&gt; mGetValue(List&lt;<span class="keyword">String</span>&gt; keys) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> redisTemplate.execute((RedisCallback&lt;List&lt;<span class="built_in">byte</span>[]&gt;&gt;) con -&gt; &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">            <span class="built_in">byte</span>[][] bkeys = <span class="keyword">new</span> <span class="built_in">byte</span>[keys.<span class="built_in">size</span>()][];</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">for</span> (<span class="built_in">int</span> i = <span class="number">0</span>; i &lt; keys.<span class="built_in">size</span>(); i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">                bkeys[i] = keys.<span class="built_in">get</span>(i).getBytes();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">return</span> con.mGet(bkeys);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">        &#125;);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>上面演示了基本的get/set方法的使用，以及批量的读取和写入缓存值；也给出了getSet方法，基本上就是redis命令的一层浅封装；<br>对于getset方法，表示的是用新的值覆盖旧的值，并返回旧的值，如果旧的不存在，则返回null</p>
+<h3 id="3-计数"><a href="#3-计数" class="headerlink" title="3. 计数"></a>3. 计数</h3><p>统计计数，也算是一个比较常见的case了，虽然对于redis而言，存储的都是String，但是从我们的逻辑上来看，存在redis中的值，应该是数字型，然后就可以直接传入一个增量，实现存储数据的运算效果，并返回最终的结果<br>因为redis是单进程方式的，因此采用redis的计数方式，可以较简单的实现分布式的计数效果</p>
+<figure class="highlight zephir"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 自增、自减方式实现计数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * 实现计数的加/减（ value为负数表示减）</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * <span class="doctag">@param</span> key</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * <span class="doctag">@param</span> value</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * <span class="doctag">@return</span> 返回redis中的值</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">Long</span> incr(String key, <span class="keyword">long</span> value) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> redisTemplate.execute((RedisCallback&lt;<span class="keyword">Long</span>&gt;) con -&gt; con.incrBy(key.getBytes(), value));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">Long</span> decr(String key, <span class="keyword">long</span> value) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> redisTemplate.execute((RedisCallback&lt;<span class="keyword">Long</span>&gt;) con -&gt; con.decrBy(key.getBytes(), value));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h3 id="4-bitmap操作"><a href="#4-bitmap操作" class="headerlink" title="4. bitmap操作"></a>4. bitmap操作</h3><p>位图操作，什么地方用得比较多呢？一个经典的case就是统计网站的日活，用户首次登陆时，根据用户id，设置位图中下标为userId的值为1，表示这个用户激活了；然后一天结束之后，只需要统计这个位图中为1的个数就可以知道每日的日活；也可以借此来统计每个用户的活跃状况<br>下面给出几个常用的位图方法</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// bitmap的测试相关</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">public Boolean set<span class="constructor">Bit(String <span class="params">key</span>, Integer <span class="params">index</span>, Boolean <span class="params">tag</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    return redisTemplate.execute((RedisCallback&lt;Boolean&gt;) con -&gt; con.set<span class="constructor">Bit(<span class="params">key</span>.<span class="params">getBytes</span>()</span>, index, tag));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">public Boolean get<span class="constructor">Bit(String <span class="params">key</span>, Integer <span class="params">index</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    return redisTemplate.execute((RedisCallback&lt;Boolean&gt;) con -&gt; con.get<span class="constructor">Bit(<span class="params">key</span>.<span class="params">getBytes</span>()</span>, index));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * 统计bitmap中，value为1的个数，非常适用于统计网站的每日活跃用户数等类似的场景</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> *</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * @param key</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * @return</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">public Long bit<span class="constructor">Count(String <span class="params">key</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    return redisTemplate.execute((RedisCallback&lt;Long&gt;) con -&gt; con.bit<span class="constructor">Count(<span class="params">key</span>.<span class="params">getBytes</span>()</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">public Long bit<span class="constructor">Count(String <span class="params">key</span>, <span class="params">int</span> <span class="params">start</span>, <span class="params">int</span> <span class="params">end</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    return redisTemplate.execute((RedisCallback&lt;Long&gt;) con -&gt; con.bit<span class="constructor">Count(<span class="params">key</span>.<span class="params">getBytes</span>()</span>, start, <span class="keyword">end</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">public Long bit<span class="constructor">Op(RedisStringCommands.BitOperation <span class="params">op</span>, String <span class="params">saveKey</span>, String<span class="operator">...</span> <span class="params">desKey</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">    byte<span class="literal">[]</span><span class="literal">[]</span> <span class="built_in">bytes</span> = <span class="keyword">new</span> byte<span class="literal">[<span class="identifier">desKey</span>.<span class="identifier">length</span>]</span><span class="literal">[]</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    for (<span class="built_in">int</span> i = <span class="number">0</span>; i &lt; desKey.length; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">bytes</span><span class="literal">[<span class="identifier">i</span>]</span> = desKey<span class="literal">[<span class="identifier">i</span>]</span>.get<span class="constructor">Bytes()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">    return redisTemplate.execute((RedisCallback&lt;Long&gt;) con -&gt; con.bit<span class="constructor">Op(<span class="params">op</span>, <span class="params">saveKey</span>.<span class="params">getBytes</span>()</span>, <span class="built_in">bytes</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>前面的setBit和getBit就比较简单了，设置或获取位图中某个小标的值；bitCount主要就是统计为1的个数；下面主要说一下最后一个方法bitOp<br>BITOP 命令支持 AND 、 OR 、 NOT 、 XOR 这四种操作中的任意一种参数：</p>
+<ul>
+<li>BITOP AND destkey srckey1 … srckeyN ，对一个或多个 key 求逻辑与，并将结果保存到 destkey</li>
+<li>BITOP OR destkey srckey1 … srckeyN，对一个或多个 key 求逻辑或，并将结果保存到 destkey</li>
+<li>BITOP XOR destkey srckey1 … srckeyN，对一个或多个 key 求逻辑异或，并将结果保存到 destkey</li>
+<li>BITOP NOT destkey srckey，对给定 key 求逻辑非，并将结果保存到 destkey</li>
+</ul>
+<p><strong>除了 NOT 操作之外，其他操作都可以接受一个或多个 key 作为输入，执行结果将始终保持到destkey里面。</strong></p>
+<h3 id="5-其他"><a href="#5-其他" class="headerlink" title="5. 其他"></a>5. 其他</h3><p>上面的几个操作都是持久化的写入到redis，如果希望写入待失效时间的，可以使用setex，在写入值的同时加上失效时间；也可以调用额外的设置key的失效时间的方式；使用姿势比较简单，不单独列出<br>至于另外一个setnx的使用，则将放在后面的应用篇中，实现一个redis的分布式锁的时候，一并加以说明；而bitmap的更多使用，在也会放在后面的借助bitmap实现某个特殊业务场景的应用篇中详细说明</p>
+<h2 id="II-简单测试"><a href="#II-简单测试" class="headerlink" title="II. 简单测试"></a>II. 简单测试</h2><p>简单演示下基本的使用姿势</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">@RestController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">@<span class="constructor">RequestMapping(<span class="params">path</span> = <span class="string">"rest"</span>)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> DemoRest &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    @Autowired</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> KVBean kvBean;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    @<span class="constructor">GetMapping(<span class="params">path</span> = <span class="string">"show"</span>)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    public String show<span class="constructor">Kv(String <span class="params">key</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        Map&lt;String, String&gt; result = <span class="keyword">new</span> HashMap&lt;&gt;(<span class="number">16</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// kv test</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        String kvKey = <span class="string">"kvKey"</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        String kvVal = <span class="module-access"><span class="module"><span class="identifier">UUID</span>.</span></span>random<span class="constructor">UUID()</span>.<span class="keyword">to</span><span class="constructor">String()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        kvBean.set<span class="constructor">Value(<span class="params">kvKey</span>, <span class="params">kvVal</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        String kvRes = <span class="keyword">new</span> <span class="constructor">String(<span class="params">kvBean</span>.<span class="params">getValue</span>(<span class="params">kvKey</span>)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        result.put(<span class="string">"kv get set"</span>, kvRes + <span class="string">"==&gt;"</span> + kvVal.equals(kvRes));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// kv getSet</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 如果原始数据存在时</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        String kvOldRes = <span class="keyword">new</span> <span class="constructor">String(<span class="params">kvBean</span>.<span class="params">setAndGetOldValue</span>(<span class="params">kvKey</span>, <span class="params">kvVal</span> + <span class="string">"==&gt;new"</span>)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        result.put(<span class="string">"kv setAndGet"</span>, kvOldRes + <span class="string">" # "</span> + <span class="keyword">new</span> <span class="constructor">String(<span class="params">kvBean</span>.<span class="params">getValue</span>(<span class="params">kvKey</span>)</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 如果原始数据不存在时</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        byte<span class="literal">[]</span> kvOldResNull = kvBean.set<span class="constructor">AndGetOldValue(<span class="string">"not exists"</span>, <span class="string">"..."</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        result.put(<span class="string">"kv setAndGet not exists"</span>, kvOldResNull<span class="operator"> == </span>null ? <span class="string">"null"</span> : <span class="keyword">new</span> <span class="constructor">String(<span class="params">kvOldResNull</span>)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 自增</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        String cntKey = <span class="string">"kvIncrKey"</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">        long <span class="keyword">val</span> = <span class="number">10L</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">        long incrRet = kvBean.incr(cntKey, <span class="keyword">val</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">        String incrRes = <span class="keyword">new</span> <span class="constructor">String(<span class="params">kvBean</span>.<span class="params">getValue</span>(<span class="params">cntKey</span>)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">        result.put(<span class="string">"kv incr"</span>, incrRet + <span class="string">"#"</span> + incrRes);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// bitmap 测试</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">        String bitMapKey = <span class="string">"bitmapKey"</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">        kvBean.set<span class="constructor">Bit(<span class="params">bitMapKey</span>, 100, <span class="params">true</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        boolean bitRes = kvBean.get<span class="constructor">Bit(<span class="params">bitMapKey</span>, 100)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">        boolean bitRes2 = kvBean.get<span class="constructor">Bit(<span class="params">bitMapKey</span>, 101)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">        result.put(<span class="string">"bitMap"</span>, bitRes + <span class="string">"&gt;&gt; true | "</span> + bitRes2 + <span class="string">"&gt;&gt; false"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">        return <span class="module-access"><span class="module"><span class="identifier">JSONObject</span>.</span></span><span class="keyword">to</span><span class="constructor">JSONString(<span class="params">result</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>演示结果如下<br><a href="http://image.winrains.cn/2019/11/57afd-00.gif" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/11/57afd-00.gif" alt="show"></a>show</p>
+<blockquote>
+<p>作者：一灰灰Blog</p>
+<p>来源：<a href="http://spring.hhui.top/spring-blog/2018/11/08/181108-SpringBoot%E9%AB%98%E7%BA%A7%E7%AF%87Redis%E4%B9%8BString%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84%E7%9A%84%E8%AF%BB%E5%86%99/" target="_blank" rel="noopener">http://spring.hhui.top/spring-blog/2018/11/08/181108-SpringBoot%E9%AB%98%E7%BA%A7%E7%AF%87Redis%E4%B9%8BString%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84%E7%9A%84%E8%AF%BB%E5%86%99/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Spring-Boot-%E9%AB%98%E7%BA%A7%E7%AF%87-Redis%EF%BC%882%EF%BC%89%EF%BC%9AJedis%E9%85%8D%E7%BD%AE/" rel="prev" title="Spring Boot 高级篇--Redis（2）：Jedis配置">
+      <i class="fa fa-chevron-left"></i> Spring Boot 高级篇--Redis（2）：Jedis配置
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Spring-Boot-%E9%AB%98%E7%BA%A7%E7%AF%87-Redis%EF%BC%884%EF%BC%89%EF%BC%9AList%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84%E4%BD%BF%E7%94%A8%E5%A7%BF%E5%8A%BF/" rel="next" title="Spring Boot 高级篇--Redis（4）：List数据结构使用姿势">
+      Spring Boot 高级篇--Redis（4）：List数据结构使用姿势 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#I-使用方法"><span class="nav-number">1.</span> <span class="nav-text">I. 使用方法</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1-基本配置"><span class="nav-number">1.1.</span> <span class="nav-text">1. 基本配置</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-Get-Set方法"><span class="nav-number">1.2.</span> <span class="nav-text">2. Get/Set方法</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#3-计数"><span class="nav-number">1.3.</span> <span class="nav-text">3. 计数</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#4-bitmap操作"><span class="nav-number">1.4.</span> <span class="nav-text">4. bitmap操作</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#5-其他"><span class="nav-number">1.5.</span> <span class="nav-text">5. 其他</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#II-简单测试"><span class="nav-number">2.</span> <span class="nav-text">II. 简单测试</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

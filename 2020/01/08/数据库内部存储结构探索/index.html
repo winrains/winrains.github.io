@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="本文是左耳耗子推荐的Medium上的一篇关于MySQL的文章Some study on database storage internals，本人觉得文章十分好，就取得了作者的许可，自行进行了翻译，原文链接见文末。本文是一篇介绍性的文字，所以文中并没有对一些概念进行详细介绍，比如说Sorted Strings Table结构和Bloom filters算法等专业概念，感兴趣的小伙伴可以学习参考中给">
+<meta property="og:type" content="article">
+<meta property="og:title" content="数据库内部存储结构探索">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;%E6%95%B0%E6%8D%AE%E5%BA%93%E5%86%85%E9%83%A8%E5%AD%98%E5%82%A8%E7%BB%93%E6%9E%84%E6%8E%A2%E7%B4%A2&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="本文是左耳耗子推荐的Medium上的一篇关于MySQL的文章Some study on database storage internals，本人觉得文章十分好，就取得了作者的许可，自行进行了翻译，原文链接见文末。本文是一篇介绍性的文字，所以文中并没有对一些概念进行详细介绍，比如说Sorted Strings Table结构和Bloom filters算法等专业概念，感兴趣的小伙伴可以学习参考中给">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031180000-8ea7c.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031180002-cb5e8.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031180004-99554.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031180004-caede.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031180006-97d47.png">
+<meta property="og:updated_time" content="2020-01-08T05:28:06.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;10&#x2F;20191031180000-8ea7c.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/%E6%95%B0%E6%8D%AE%E5%BA%93%E5%86%85%E9%83%A8%E5%AD%98%E5%82%A8%E7%BB%93%E6%9E%84%E6%8E%A2%E7%B4%A2/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>数据库内部存储结构探索 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/%E6%95%B0%E6%8D%AE%E5%BA%93%E5%86%85%E9%83%A8%E5%AD%98%E5%82%A8%E7%BB%93%E6%9E%84%E6%8E%A2%E7%B4%A2/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          数据库内部存储结构探索
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 13:28:06" itemprop="dateCreated datePublished" datetime="2020-01-08T13:28:06+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>本文是左耳耗子推荐的Medium上的一篇关于MySQL的文章Some study on database storage internals，本人觉得文章十分好，就取得了作者的许可，自行进行了翻译，原文链接见文末。本文是一篇介绍性的文字，所以文中并没有对一些概念进行详细介绍，比如说Sorted Strings Table结构和Bloom filters算法等专业概念，感兴趣的小伙伴可以学习参考中给出的链接或持续关注本人后续文章。<br>我一直以来都在不断的研究和探索数据库的内部存储原理。我认为这个话题是非常巨大且复杂的，我努力所学也只占其千万分之一。在这篇文章中，我将会讲解一些数据库存储的内部机制，数据库是如何进行优化操作来提供惊人速度及其优势和缺点。</p>
+<a id="more"></a>
+
+<p>当我们谈起数据库内部存储结构时，人们都会想到B树或者B+树，但是我们在这里并不会谈论这些数据结构的原理，我们会展示这些数据结构为什么适合作为数据库存储的内部结构以及使用这些数据结构的目的。<br>传统的关系型数据将数据以B树的形式存储在磁盘上，它们也会在RAM上使用B树维护这些数据的索引，来保证更快的访问速度。插入的行存储在B树的叶子节点上，所有的中间节点用来存储用于导航查询语句的原数据。因此，当有数以百万计的数据被插入到数据库中时，索引和数据存储会变得十分大。因此，为了快速的访问，需要从磁盘中加载所有数据到内存，但是RAM一般没有这么大的空间来存储所有的数据。因此，数据库必须从磁盘中读取部分数据。这种加载数据的场景如下图所示：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031180000-8ea7c.png" alt="img"></p>
+<p>B树示意图</p>
+<p>磁盘I/O花费的时间很长，是影响数据库性能的主要原因之一。B树是支持随机读写，in-place 替换,十分紧凑并且自平衡的数据结构，但是受磁盘I/O速度的限制。随机读意味着当访问磁盘数据时，磁头必须移动到柱面上的指定位置，因此会消耗大量时间。<br>B树被设计为使用block的形式存储数据，因为操作系统读取读取一个block的数据要比读取单独字节数据要快的多。MySQL的InnoDB存储引擎的block大小为16KB。这意味着每次你读取或者写入数据时，大小为16KB的block数据会被从磁盘加载到RAM中，它会被写入新的数据，并且再次写回到磁盘上。假设数据库表的每一行数据为128字节（实际大小会变化），一个block（叶子节点）为16KB，存储了(16 * 1024) / 128 = 128行数据。B树的高度一般小于10，但是每一层的节点数量却很多，由此可以管理数以万计的数据。基于上述特性，B树适合作为数据内部存储结构。<br>因此，在B树上进行读操作是相对来说比较快速的，因为该操作只需要遍历一些节点并且进行较少次数的磁盘I/O请求。而且，范围查询因为可以将数据以block的形式进行获取和操作而速度更快。你可以进行下列操作来让基于B-Tree的数据库性能更好：</p>
+<ul>
+<li>减少索引节点数量：这是提升关系型数据库性能的常用策略。索引越多，插入和更新操作需要管理的索引数量也越多。当数据库数据运行时间越来越久时，就需要删除一些老旧或者无用的索引，并且谨慎地添加新的索引。但是你也要注意，索引越少意味着查询性能越差，你需要在查询性能和插入更新性能之间进行取舍(译者注：可以考虑数据库的读写比率)。</li>
+<li>顺序插入：如果你能以主键大小为基础进行大量数据的顺序插入，那么插入数据的速度会十分的快。因为在插入过程中，插入行所属的block已经在内存中，所以数据库可以直接将行插入到内存的数据结构中，然后通过一次磁盘I/O提交到数磁盘中。当然，这些都取决于数据库的具体实现，但是我认为现代的数据库一般都会进行类似的优化。</li>
+</ul>
+<p>但是B树并不是适合所有情景的最优存储结构。对B树结构的写操作性能很差，比随机读还要差，因为数据库必须从磁盘中加载数据对应的页，然后修改它并冲洗新写入到磁盘中。随机写入时平均有100字节每秒写入速度，这个限制是由于磁盘的基本工作原理。事实上，简单依赖于缓存的使用，索引搜索和更多的内存可以处理更多的读操作，但是应付更多的写操作就比较麻烦。当你需要写入或更新大量的数据时，B树结构并不是最正确的选择。长久以来，传统数据库进行了大量的优化，比如说InnoDB尝试使用缓冲来减少磁盘I/O操作。具体操作如下所示：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031180002-cb5e8.png" alt="img"></p>
+<p>操作缓存示意图</p>
+<p>数据库写操作可以通过提升磁盘的带宽来提升速度，但是目前关系型数据库都没有这样做。而且关系型数据库管理系统一般都是十分复杂的，因为他们使用锁，并发，ACID事务等操作，这使得写入操作更加复杂。<br>当今信息时代，在比如消息、聊天、实时通讯和物联网等客户为中心的服务和大量无结构化数据的分布式系统中，每小时都会进行数百万计的写入操作。因此，这些系统是以写为主的系统，为了迎合这些系统的需要，数据库需要能够拥有快速插入数据的能力。典型的数据库并不能很好的满足类似的场景，因为它们无法应付高可用性，尽可能的最终一致性，无格式数据的灵活性和低延迟等要求。<br>LSM树(Log Structured Merge Tree)应运而生。LSM并不是一种类似于B树的数据结构，而是一个系统。在LSM系统中，并没有对数据的in-place替换；一旦数据被写入磁盘，它就再也不会被修改。显然，它是一种只能在末尾添加(append only)的写入系统。一些日志结构的文件系统比如ext3/4也使用类似的原理。因此，该系统就如同顺序的记录数据日志一般。基本上，LSM系统利用了顺序写的优势。传统的磁盘驱动的写操作最高可以达到100MB/s，现代的固态硬盘在顺序写时的速度则更快。事实上，固态硬盘驱动有一些内置的并行机制来让它可以同时写入16到32MB的数据。LSM树和固态硬盘的特性十分匹配。顺序写要比随机写快很多。<br>为了正确地理解上述场景，让我们简单的看一下Facebook的Cassandra数据库是如何使用LSM原则的。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031180004-99554.png" alt="img"></p>
+<p>LSM系统示意图</p>
+<p>Cassandra或者任何LSM系统都会维护一个或者多个用来在写入磁盘前存储数据的内存数据结构(如上图中的memtable)，比如说子平衡树(AVL)、红黑树、B树或者跳表。该内存数据结构维护一个排序的数据集。不同的LSM实现互使用不同的数据结构来适应不同的需求，并不存在标准的LSM实现。当内存中存储的数据超过配置的阈值时，内存中存储的数据就会被放置在将会被写入磁盘的队列中。为了flush数据，Cassandra顺序地写入排序的数据到磁盘中。磁盘维护一个叫做“SSTable”(Sorted Strings Table)的数据结构，该数据就是写入文件数据的有序的快照，SSTable是不可变的。LSM系统可以管理磁盘上的多个文件。<br>因此，如果数据在内存中没有被发现，Cassandra需要扫描所有磁盘上的SSTables来搜索该数据。因此，Cassandra的读操作相对来说要比写操作慢，但是这里有一些可以处理的方法。Cassandra或者其他LSM系统会在后台运行压缩程序来减少SSTable的数量。压缩程序对SSTable进行归并排序，在新的SSTable找那个插入新的排序数据并且删除老的SSTables。但是使用压缩程序有时候无法应付数据库中数以百万计的更新操作。<br>因此，一些概率数据结构(probabilistic data structures)比如Bloom filters被应用来快速判断是否一些数据存在于SSTable。Bloom filters十分适合对内存中的数据进行判断，因为它需要进行大量的随机查询来进行数据是否存在的概率性判断。Bloom filters算法可以极大地减少遍历查询SSTables的花费。因此，LSM系统解决了在大数据中写操作需要花费大量时间的问题。LSM系统也有Read amplification的问题-会读取出比它实际需要更多的数据。因此，还有介于B Tree和LSM Tree之间的解决方法来给出我们最优（不一定准确）的读写效率吗？<br>Fractal Tree Index是基于B-Tree的数据结构。依据开发人员给出的<a href="https://www.percona.com/blog/2015/07/24/innodb-vs-tokudb-in-linkbench-benchmark/" target="_blank" rel="noopener">benchmark</a>，该数据结构有比B-Tree更优良的性能。Fractal tree支持在非叶节点上的信息缓存。MySQL的高性能存储引擎Tokudb就使用了Fractal tree。</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031180004-caede.png" alt="img"></p>
+<p>Fractal Tree Index示意图</p>
+<p>如上图所示，在Fractal Tree中，你进行的添加列，删除列，插入，更新等任何操作都会被当做操作消息存储在非叶节点上。由于操作只是被简单地存储在缓存或者任何次级索引缓存(secondary index buffer)中，所以，所有的操作都会被迅速执行结束。当某一个节点的缓存满了之后，这些操作消息会依次从根节点，经过非叶节点，向叶节点进行传递。叶节点仍然存储着真实数据。当进行读时，读操作会考虑查询路径节点上的所有操作消息来获取真实的数据状态。但是由于tokudb会尽力将所有非叶节点缓存在内存中，所以这一过程也很快。<br>tokubd中的block最大可以达到4MB，而不是InnoDB中的16KB。这样的大小可以允许一次I/O操作时加载或写回更多的数据，这也有助于一次压缩更多数据来减少磁盘上数据的存储大小。因此，tokudb强调借助更大的block大小能够实现更好的数据压缩和更少的磁盘I/O。tokudb宣称它们的存储引擎比InnoDB更快,提供比InnoDB更快的读写吞吐,并且tokudb也宣称自己有更少的碎片(fragmentation)问题，它也支持多集群索引等。下图是benchmark的相关统计图：</p>
+<p><img src="http://image.winrains.cn/2019/10/20191031180006-97d47.png" alt="img"></p>
+<p>benchmark统计图</p>
+<p>只有你系统中的benchmark可以帮助你判断正确的数据点和需求解决方案。但是MySQL的存储引擎会持续地不断改进和支持新出现的需求。LSM树是为了高写入场景的系统，然而B树是为了传统的场景应用。Fractal树的索引改进了B树索引存在的一些缺陷。因此，未来会不断地出现技术上的革新，包括数据库存储技术，硬件，磁盘驱动和操作系统，让我们拭目以待。</p>
+<blockquote>
+<p>作者：程序员历小冰</p>
+<p>来源：<a href="https://www.jianshu.com/p/d12abf481539" target="_blank" rel="noopener">https://www.jianshu.com/p/d12abf481539</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/MySQL%E6%8E%A2%E7%B4%A2%EF%BC%881%EF%BC%89%EF%BC%9AB-Tree%E7%B4%A2%E5%BC%95-1/" rel="prev" title="MySQL探索（1）：B-Tree索引">
+      <i class="fa fa-chevron-left"></i> MySQL探索（1）：B-Tree索引
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Spring-AOP-%E9%BB%98%E8%AE%A4%E4%BB%A3%E7%90%86%E6%96%B9%E5%BC%8F%E6%8E%A2%E8%AE%A8/" rel="next" title="Spring AOP 默认代理方式探讨">
+      Spring AOP 默认代理方式探讨 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

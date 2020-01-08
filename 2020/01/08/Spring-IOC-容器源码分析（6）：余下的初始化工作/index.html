@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="1. 简介本篇文章是“Spring IOC 容器源码分析”系列文章的最后一篇文章，本篇文章所分析的对象是 initializeBean 方法，该方法用于对已完成属性填充的 bean 做最后的初始化工作。相较于之前几篇文章所分析的源码，initializeBean 的源码相对比较简单，大家可以愉快的阅读。好了，其他的不多说了，我们直入主题吧。">
+<meta name="keywords" content="源码,IOC">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Spring IOC 容器源码分析（6）：余下的初始化工作">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;08&#x2F;Spring-IOC-%E5%AE%B9%E5%99%A8%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%886%EF%BC%89%EF%BC%9A%E4%BD%99%E4%B8%8B%E7%9A%84%E5%88%9D%E5%A7%8B%E5%8C%96%E5%B7%A5%E4%BD%9C&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="1. 简介本篇文章是“Spring IOC 容器源码分析”系列文章的最后一篇文章，本篇文章所分析的对象是 initializeBean 方法，该方法用于对已完成属性填充的 bean 做最后的初始化工作。相较于之前几篇文章所分析的源码，initializeBean 的源码相对比较简单，大家可以愉快的阅读。好了，其他的不多说了，我们直入主题吧。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:updated_time" content="2020-01-08T06:01:22.000Z">
+<meta name="twitter:card" content="summary">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/08/Spring-IOC-%E5%AE%B9%E5%99%A8%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%886%EF%BC%89%EF%BC%9A%E4%BD%99%E4%B8%8B%E7%9A%84%E5%88%9D%E5%A7%8B%E5%8C%96%E5%B7%A5%E4%BD%9C/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Spring IOC 容器源码分析（6）：余下的初始化工作 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">141</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">91</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">807</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/08/Spring-IOC-%E5%AE%B9%E5%99%A8%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%886%EF%BC%89%EF%BC%9A%E4%BD%99%E4%B8%8B%E7%9A%84%E5%88%9D%E5%A7%8B%E5%8C%96%E5%B7%A5%E4%BD%9C/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Spring IOC 容器源码分析（6）：余下的初始化工作
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-08 14:01:22" itemprop="dateCreated datePublished" datetime="2020-01-08T14:01:22+08:00">2020-01-08</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Spring%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Spring技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Spring%E6%8A%80%E6%9C%AF/Spring/" itemprop="url" rel="index">
+                    <span itemprop="name">Spring</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="1-简介"><a href="#1-简介" class="headerlink" title="1. 简介"></a>1. 简介</h1><p>本篇文章是“Spring IOC 容器源码分析”系列文章的最后一篇文章，本篇文章所分析的对象是 initializeBean 方法，该方法用于对已完成属性填充的 bean 做最后的初始化工作。相较于之前几篇文章所分析的源码，initializeBean 的源码相对比较简单，大家可以愉快的阅读。好了，其他的不多说了，我们直入主题吧。</p>
+<a id="more"></a>
+
+<h1 id="2-源码分析"><a href="#2-源码分析" class="headerlink" title="2. 源码分析"></a>2. 源码分析</h1><p>本章我们来分析一下 initializeBean 方法的源码。在完成分析后，还是像往常一样，把方法的执行流程列出来。好了，看源码吧：</p>
+<figure class="highlight processing"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">protected</span> <span class="keyword">Object</span> initializeBean(<span class="keyword">final</span> <span class="keyword">String</span> beanName, <span class="keyword">final</span> <span class="keyword">Object</span> bean, RootBeanDefinition mbd) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (System.getSecurityManager() != <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        AccessController.doPrivileged(<span class="keyword">new</span> PrivilegedAction&lt;<span class="keyword">Object</span>&gt;() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">            @Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">public</span> <span class="keyword">Object</span> run() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">                invokeAwareMethods(beanName, bean);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">return</span> <span class="keyword">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        &#125;, getAccessControlContext());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 若 bean 实现了 BeanNameAware、BeanFactoryAware、BeanClassLoaderAware 等接口，则向 bean 中注入相关对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        invokeAwareMethods(beanName, bean);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">Object</span> wrappedBean = bean;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (mbd == <span class="keyword">null</span> || !mbd.isSynthetic()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 执行 bean 初始化前置操作</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        wrappedBean = applyBeanPostProcessorsBeforeInitialization(wrappedBean, beanName);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">/*</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line"><span class="comment">         * 调用初始化方法：</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line"><span class="comment">         * 1. 若 bean 实现了 InitializingBean 接口，则调用 afterPropertiesSet 方法</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"><span class="comment">         * 2. 若用户配置了 bean 的 init-method 属性，则调用用户在配置中指定的方法</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line"><span class="comment">         */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">        invokeInitMethods(beanName, wrappedBean, mbd);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">catch</span> (Throwable ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> BeanCreationException(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">                (mbd != <span class="keyword">null</span> ? mbd.getResourceDescription() : <span class="keyword">null</span>),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">                beanName, <span class="string">"Invocation of init method failed"</span>, ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (mbd == <span class="keyword">null</span> || !mbd.isSynthetic()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 执行 bean 初始化后置操作，AOP 会在此处向目标对象中织入切面逻辑</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">        wrappedBean = applyBeanPostProcessorsAfterInitialization(wrappedBean, beanName);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> wrappedBean;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>以上就是 initializeBean 方法的逻辑，很简单是不是。该方法做了如下几件事情：</p>
+<ol>
+<li>检测 bean 是否实现了 *Aware 类型接口，若实现，则向 bean 中注入相应的对象</li>
+<li>执行 bean 初始化前置操作</li>
+<li>执行初始化操作</li>
+<li>执行 bean 初始化后置操作</li>
+</ol>
+<p>在上面的流程中，我们又发现了后置处理器的踪影。如果大家阅读过 Spring 的源码，会发现后置处理器在 Spring 源码中多次出现过。后置处理器是 Spring 拓展点之一，通过实现后置处理器 BeanPostProcessor 接口，我们就可以插手 bean 的初始化过程。比如大家所熟悉的 AOP 就是在后置处理 postProcessAfterInitialization 方法中向目标对象中织如切面逻辑的。关于“前置处理”和“后置处理”相关的源码，这里就不分析了，大家有兴趣自己去看一下。接下来分析一下 invokeAwareMethods 和 invokeInitMethods 方法，如下：</p>
+<figure class="highlight armasm"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">private</span> void invokeAwareMethods(final <span class="keyword">String </span><span class="keyword">beanName, </span>final Object <span class="keyword">bean) </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">if</span> (<span class="keyword">bean </span>instanceof Aware) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        <span class="meta">if</span> (<span class="keyword">bean </span>instanceof <span class="keyword">BeanNameAware) </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">            // 注入 <span class="keyword">beanName </span>字符串</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">            ((<span class="keyword">BeanNameAware) </span><span class="keyword">bean).setBeanName(beanName);</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>       &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        <span class="meta">if</span> (<span class="keyword">bean </span>instanceof <span class="keyword">BeanClassLoaderAware) </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">            // 注入 ClassLoader 对象</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">            ((<span class="keyword">BeanClassLoaderAware) </span><span class="keyword">bean).setBeanClassLoader(getBeanClassLoader());</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>       &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="meta">if</span> (<span class="keyword">bean </span>instanceof <span class="keyword">BeanFactoryAware) </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">            // 注入 <span class="keyword">BeanFactory </span>对象</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            ((<span class="keyword">BeanFactoryAware) </span><span class="keyword">bean).setBeanFactory(AbstractAutowireCapableBeanFactory.this);</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>       &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>invokeAwareMethods 方法的逻辑很简单，一句话总结：根据 bean 所实现的 Aware 的类型，向 bean 中注入不同类型的对象。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">protected void invoke<span class="constructor">InitMethods(String <span class="params">beanName</span>, <span class="params">final</span> Object <span class="params">bean</span>, RootBeanDefinition <span class="params">mbd</span>)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">        throws Throwable &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 检测 bean 是否是 InitializingBean 类型的</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    boolean isInitializingBean = (bean instanceof InitializingBean);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (isInitializingBean<span class="operator"> &amp;&amp; </span>(mbd<span class="operator"> == </span>null<span class="operator"> || </span>!mbd.is<span class="constructor">ExternallyManagedInitMethod(<span class="string">"afterPropertiesSet"</span>)</span>)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (logger.is<span class="constructor">DebugEnabled()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            logger.debug(<span class="string">"Invoking afterPropertiesSet() on bean with name '"</span> + beanName + <span class="string">"'"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (<span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>get<span class="constructor">SecurityManager()</span> != null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">                <span class="module-access"><span class="module"><span class="identifier">AccessController</span>.</span></span><span class="keyword">do</span><span class="constructor">Privileged(<span class="params">new</span> PrivilegedExceptionAction&lt;Object&gt;()</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">                    @Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">                    public Object run<span class="literal">()</span> throws Exception &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">                        ((InitializingBean) bean).after<span class="constructor">PropertiesSet()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">                        return null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">                    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">                &#125;, get<span class="constructor">AccessControlContext()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">            catch (PrivilegedActionException pae) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">                throw pae.get<span class="constructor">Exception()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// 如果 bean 实现了 InitializingBean，则调用 afterPropertiesSet 方法执行初始化逻辑</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">            ((InitializingBean) bean).after<span class="constructor">PropertiesSet()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (mbd != null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">        String initMethodName = mbd.get<span class="constructor">InitMethodName()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (initMethodName != null<span class="operator"> &amp;&amp; </span>!(isInitializingBean<span class="operator"> &amp;&amp; </span><span class="string">"afterPropertiesSet"</span>.equals(initMethodName)) &amp;&amp;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">                !mbd.is<span class="constructor">ExternallyManagedInitMethod(<span class="params">initMethodName</span>)</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// 调用用户自定义的初始化方法</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">            invoke<span class="constructor">CustomInitMethod(<span class="params">beanName</span>, <span class="params">bean</span>, <span class="params">mbd</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>invokeInitMethods 方法用于执行初始化方法，也不复杂，就不多说了。</p>
+<h1 id="3-总结"><a href="#3-总结" class="headerlink" title="3. 总结"></a>3. 总结</h1><p>本篇文章到这里差不多就分析完了，总的来说本文的内容比较简单，很容易看懂。正如简介一章中所说，本篇文章是我的“Spring IOC 容器源码分析”系列文章的最后一篇文章。写完这本篇文章，有种如释重负的感觉。我在5月15号写完 <a href="http://www.coolblog.xyz/2018/05/15/Java-中的-CAS-原理分析/" target="_blank" rel="noopener">Java CAS 原理分析</a> 文章后，次日开始阅读 Spring IOC 部分的源码，阅读该部分源码花了大概两周的时间。然后在5月30号发布了“Spring IOC 容器源码分析”系列文章的第一篇文章 <a href="http://www.coolblog.xyz/2018/05/30/Spring-IOC-容器源码分析系列文章导读/" target="_blank" rel="noopener">Spring IOC 容器源码分析系列文章导读</a>。在写完第一篇文章后，就开启了快速更新模式，以平均2天一篇的速度进行更新。终于在今天，也就是6月11号写完了最后一篇。这一段时间写文章写的很累，经常熬夜。主要的原因在于，在自己看懂源码的同时，通过写文章的方式尽量保证别人也能看懂的话，这个就比较难了。比如我在阅读源码的时候，在源码上面写了一些简单的注释。这些注释我可以看懂，但如果想写成文章，则需要把注释写的尽量详细，必要的背景知识也要介绍一下。总的来说，认真写一篇技术文章还是不容易的。写文章尚如此，那写书呢，想必更加辛苦了。我在阅读源码和写文章的过程中，也参考了一些资料（相关资料在“<a href="http://www.coolblog.xyz/2018/05/30/Spring-IOC-容器源码分析系列文章导读/" target="_blank" rel="noopener">导读</a>”一文中指明了出处，本文就不再次说明）。在这里，向这些资料的作者致以崇高的敬意，感谢！<br>好了，本篇文章就到这里了，感谢大家的阅读。</p>
+<h1 id="附录：Spring-源码分析文章列表"><a href="#附录：Spring-源码分析文章列表" class="headerlink" title="附录：Spring 源码分析文章列表"></a>附录：Spring 源码分析文章列表</h1><h2 id="Ⅰ-IOC"><a href="#Ⅰ-IOC" class="headerlink" title="Ⅰ. IOC"></a>Ⅰ. IOC</h2><table>
+<thead>
+<tr>
+<th>更新时间</th>
+<th>标题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>2018-05-30</td>
+<td><a href="http://www.coolblog.xyz/2018/05/30/Spring-IOC-容器源码分析系列文章导读/" target="_blank" rel="noopener">Spring IOC 容器源码分析系列文章导读</a></td>
+</tr>
+<tr>
+<td>2018-06-01</td>
+<td><a href="http://www.coolblog.xyz/2018/06/01/Spring-IOC-容器源码分析-获取单例-bean/" target="_blank" rel="noopener">Spring IOC 容器源码分析 - 获取单例 bean</a></td>
+</tr>
+<tr>
+<td>2018-06-04</td>
+<td><a href="http://www.coolblog.xyz/2018/06/04/Spring-IOC-容器源码分析-创建单例-bean/" target="_blank" rel="noopener">Spring IOC 容器源码分析 - 创建单例 bean 的过程</a></td>
+</tr>
+<tr>
+<td>2018-06-06</td>
+<td><a href="http://www.coolblog.xyz/2018/06/06/Spring-IOC-容器源码分析-创建原始-bean-对象/" target="_blank" rel="noopener">Spring IOC 容器源码分析 - 创建原始 bean 对象</a></td>
+</tr>
+<tr>
+<td>2018-06-08</td>
+<td><a href="http://www.coolblog.xyz/2018/06/08/Spring-IOC-容器源码分析-循环依赖的解决办法/" target="_blank" rel="noopener">Spring IOC 容器源码分析 - 循环依赖的解决办法</a></td>
+</tr>
+<tr>
+<td>2018-06-11</td>
+<td><a href="http://www.coolblog.xyz/2018/06/11/Spring-IOC-容器源码分析-填充属性到-bean-原始对象/" target="_blank" rel="noopener">Spring IOC 容器源码分析 - 填充属性到 bean 原始对象</a></td>
+</tr>
+<tr>
+<td>2018-06-11</td>
+<td><a href="http://www.coolblog.xyz/2018/06/11/Spring-IOC-容器源码分析-余下的初始化工作/" target="_blank" rel="noopener">Spring IOC 容器源码分析 - 余下的初始化工作</a></td>
+</tr>
+</tbody></table>
+<h2 id="Ⅱ-AOP"><a href="#Ⅱ-AOP" class="headerlink" title="Ⅱ. AOP"></a>Ⅱ. AOP</h2><table>
+<thead>
+<tr>
+<th>更新时间</th>
+<th>标题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>2018-06-17</td>
+<td><a href="http://www.coolblog.xyz/2018/06/17/Spring-AOP-源码分析系列文章导读/" target="_blank" rel="noopener">Spring AOP 源码分析系列文章导读</a></td>
+</tr>
+<tr>
+<td>2018-06-20</td>
+<td><a href="http://www.coolblog.xyz/2018/06/20/Spring-AOP-源码分析-筛选合适的通知器/" target="_blank" rel="noopener">Spring AOP 源码分析 - 筛选合适的通知器</a></td>
+</tr>
+<tr>
+<td>2018-06-20</td>
+<td><a href="http://www.coolblog.xyz/2018/06/20/Spring-AOP-源码分析-筛选合适的通知器/" target="_blank" rel="noopener">Spring AOP 源码分析 - 创建代理对象</a></td>
+</tr>
+<tr>
+<td>2018-06-22</td>
+<td><a href="http://www.coolblog.xyz/2018/06/22/Spring-AOP-源码分析-拦截器链的执行过程/" target="_blank" rel="noopener">Spring AOP 源码分析 - 拦截器链的执行过程</a></td>
+</tr>
+</tbody></table>
+<h2 id="Ⅲ-MVC"><a href="#Ⅲ-MVC" class="headerlink" title="Ⅲ. MVC"></a>Ⅲ. MVC</h2><table>
+<thead>
+<tr>
+<th>更新时间</th>
+<th>标题</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>2018-06-29</td>
+<td><a href="http://www.coolblog.xyz/2018/06/29/Spring-MVC-原理探秘-一个请求的旅行过程/" target="_blank" rel="noopener">Spring MVC 原理探秘 - 一个请求的旅行过程</a></td>
+</tr>
+<tr>
+<td>2018-06-30</td>
+<td><a href="http://www.coolblog.xyz/2018/06/30/Spring-MVC-原理探秘-容器的创建过程/" target="_blank" rel="noopener">Spring MVC 原理探秘 - 容器的创建过程</a></td>
+</tr>
+</tbody></table>
+<blockquote>
+<p>作者：田小波</p>
+<p>来源：<a href="https://www.tianxiaobo.com/2018/06/11/Spring-IOC-%E5%AE%B9%E5%99%A8%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90-%E4%BD%99%E4%B8%8B%E7%9A%84%E5%88%9D%E5%A7%8B%E5%8C%96%E5%B7%A5%E4%BD%9C/" target="_blank" rel="noopener">https://www.tianxiaobo.com/2018/06/11/Spring-IOC-%E5%AE%B9%E5%99%A8%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90-%E4%BD%99%E4%B8%8B%E7%9A%84%E5%88%9D%E5%A7%8B%E5%8C%96%E5%B7%A5%E4%BD%9C/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E6%BA%90%E7%A0%81/" rel="tag"># 源码</a>
+              <a href="/tags/IOC/" rel="tag"># IOC</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Spring-IOC-%E5%AE%B9%E5%99%A8%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%885%EF%BC%89%EF%BC%9A%E5%A1%AB%E5%85%85%E5%B1%9E%E6%80%A7%E5%88%B0-bean-%E5%8E%9F%E5%A7%8B%E5%AF%B9%E8%B1%A1/" rel="prev" title="Spring IOC 容器源码分析（5）：填充属性到 bean 原始对象">
+      <i class="fa fa-chevron-left"></i> Spring IOC 容器源码分析（5）：填充属性到 bean 原始对象
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Spring-AOP-%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%880%EF%BC%89%EF%BC%9A%E6%96%87%E7%AB%A0%E5%AF%BC%E8%AF%BB/" rel="next" title="Spring AOP 源码分析（0）：文章导读">
+      Spring AOP 源码分析（0）：文章导读 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#1-简介"><span class="nav-number">1.</span> <span class="nav-text">1. 简介</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#2-源码分析"><span class="nav-number">2.</span> <span class="nav-text">2. 源码分析</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#3-总结"><span class="nav-number">3.</span> <span class="nav-text">3. 总结</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#附录：Spring-源码分析文章列表"><span class="nav-number">4.</span> <span class="nav-text">附录：Spring 源码分析文章列表</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#Ⅰ-IOC"><span class="nav-number">4.1.</span> <span class="nav-text">Ⅰ. IOC</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Ⅱ-AOP"><span class="nav-number">4.2.</span> <span class="nav-text">Ⅱ. AOP</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Ⅲ-MVC"><span class="nav-number">4.3.</span> <span class="nav-text">Ⅲ. MVC</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">807</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">91</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">141</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
