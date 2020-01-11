@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="上一篇《分布式数据缓存中的一致性哈希算法》 文章中讲述了一致性哈希算法的基本原理和实现，今天就以 Redis Cluster 为例，详细讲解一下分布式数据缓存中的数据分片，上线下线时数据迁移以及请求重定向等操作。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Redis Cluster 的数据分片机制">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;11&#x2F;Redis-Cluster-%E7%9A%84%E6%95%B0%E6%8D%AE%E5%88%86%E7%89%87%E6%9C%BA%E5%88%B6&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="上一篇《分布式数据缓存中的一致性哈希算法》 文章中讲述了一致性哈希算法的基本原理和实现，今天就以 Redis Cluster 为例，详细讲解一下分布式数据缓存中的数据分片，上线下线时数据迁移以及请求重定向等操作。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212100906-d68d7.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212100906-3ee6f.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212100907-21411.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212100908-ed4c4.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212100909-ecf72.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212100910-c7c95.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212100912-76656.png">
+<meta property="og:updated_time" content="2020-01-11T03:37:58.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212100906-d68d7.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/11/Redis-Cluster-%E7%9A%84%E6%95%B0%E6%8D%AE%E5%88%86%E7%89%87%E6%9C%BA%E5%88%B6/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Redis Cluster 的数据分片机制 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/11/Redis-Cluster-%E7%9A%84%E6%95%B0%E6%8D%AE%E5%88%86%E7%89%87%E6%9C%BA%E5%88%B6/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Redis Cluster 的数据分片机制
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-11 11:37:58" itemprop="dateCreated datePublished" datetime="2020-01-11T11:37:58+08:00">2020-01-11</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/Redis/" itemprop="url" rel="index">
+                    <span itemprop="name">Redis</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>上一篇<a href="https://mp.weixin.qq.com/s/IkQYqnaO2lLmDunzlYvqPg" target="_blank" rel="noopener">《分布式数据缓存中的一致性哈希算法》</a> 文章中讲述了一致性哈希算法的基本原理和实现，今天就以 Redis Cluster 为例，详细讲解一下分布式数据缓存中的数据分片，上线下线时数据迁移以及请求重定向等操作。</p>
+<a id="more"></a>
+
+<h2 id="Redis-集群简介"><a href="#Redis-集群简介" class="headerlink" title="Redis 集群简介"></a>Redis 集群简介</h2><p><img src="http://image.winrains.cn/2019/12/20191212100906-d68d7.png" alt="img"></p>
+<p>Redis Cluster 是 Redis 的分布式解决方案，在 3.0 版本正式推出，有效地解决了 Redis 分布式方面的需求。</p>
+<p>Redis Cluster 一般由多个节点组成，节点数量至少为 6 个才能保证组成完整高可用的集群，其中三个为主节点，三个为从节点。三个主节点会分配槽，处理客户端的命令请求，而从节点可用在主节点故障后，顶替主节点。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212100906-3ee6f.png" alt="集群示意图"></p>
+<p>图片来源 redislabs如上图所示，该集群中包含 6 个 Redis 节点，3主3从，分别为M1，M2，M3，S1，S2，S3。除了主从 Redis 节点之间进行数据复制外，所有 Redis 节点之间采用 Gossip 协议进行通信，交换维护节点元数据信息。</p>
+<p>一般来说，主 Redis 节点会处理 Clients 的读写操作，而从节点只处理读操作。</p>
+<h2 id="数据分片策略"><a href="#数据分片策略" class="headerlink" title="数据分片策略"></a>数据分片策略</h2><blockquote>
+<p>分布式数据存储方案中最为重要的一点就是数据分片，也就是所谓的 Sharding。</p>
+</blockquote>
+<p>为了使得集群能够水平扩展，首要解决的问题就是如何将整个数据集按照一定的规则分配到多个节点上，常用的数据分片的方法有：范围分片，哈希分片，一致性哈希算法，哈希槽等。</p>
+<p>范围分片假设数据集是有序，将顺序相临近的数据放在一起，可以很好的支持遍历操作。范围分片的缺点是面对顺序写时，会存在热点。比如日志类型的写入，一般日志的顺序都是和时间相关的，时间是单调递增的，因此写入的热点永远在最后一个分片。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212100907-21411.png" alt="范围分区"></p>
+<p>对于关系型的数据库，因为经常性的需要表扫描或者索引扫描，基本上都会使用范围的分片策略。</p>
+<p>哈希分片和一致性哈希算法在上一篇文章中已经学习过了，感兴趣的同学可以去了解一下<a href="https://mp.weixin.qq.com/s/IkQYqnaO2lLmDunzlYvqPg" target="_blank" rel="noopener">《分布式数据缓存中的一致性哈希算法》</a>。我们接下来主要来看Redis 的虚拟哈希槽策略。</p>
+<p>Redis Cluster 采用虚拟哈希槽分区，所有的键根据哈希函数映射到 0 ~ 16383 整数槽内，计算公式：slot = CRC16(key) &amp; 16383。每一个节点负责维护一部分槽以及槽所映射的键值数据。</p>
+<p>Redis 虚拟槽分区的特点：</p>
+<ul>
+<li>解耦数据和节点之间的关系，简化了节点扩容和收缩难度。</li>
+<li>节点自身维护槽的映射关系，不需要客户端或者代理服务维护槽分区元数据</li>
+<li>支持节点、槽和键之间的映射查询，用于数据路由，在线集群伸缩等场景。</li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/12/20191212100908-ed4c4.png" alt="示意图"></p>
+<p>Redis 集群提供了灵活的节点扩容和收缩方案。在不影响集群对外服务的情况下，可以为集群添加节点进行扩容也可以下线部分节点进行缩容。可以说，<strong>槽是 Redis 集群管理数据的基本单位</strong>，集群伸缩就是槽和数据在节点之间的移动。</p>
+<p>下面我们就先来看一下 Redis 集群伸缩的原理。然后再了解当 Redis 节点数据迁移过程中或者故障恢复时如何保证集群可用。</p>
+<h2 id="扩容集群"><a href="#扩容集群" class="headerlink" title="扩容集群"></a>扩容集群</h2><p>为了让读者更好的理解上线节点时的扩容操作，我们通过 Redis Cluster 的命令来模拟整个过程。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212100909-ecf72.png" alt="示意图"></p>
+<p>当一个 Redis 新节点运行并加入现有集群后，我们需要为其迁移槽和数据。首先要为新节点指定槽的迁移计划，确保迁移后每个节点负责相似数量的槽，从而保证这些节点的数据均匀。</p>
+<ol>
+<li>首先启动一个 Redis 节点，记为 M4。</li>
+<li>使用 cluster meet 命令，让新 Redis 节点加入到集群中。新节点刚开始都是主节点状态，由于没有负责的槽，所以不能接受任何读写操作，后续我们就给他迁移槽和填充数据。</li>
+<li>对 M4 节点发送 cluster setslot { slot } importing { sourceNodeId} 命令，让目标节点准备导入槽的数据。</li>
+<li>对源节点，也就是 M1，M2，M3 节点发送 cluster setslot { slot } migrating { targetNodeId} 命令，让源节点准备迁出槽的数据。</li>
+<li>源节点执行 cluster getkeysinslot { slot } { count } 命令，获取 count 个属于槽 { slot } 的键，然后执行步骤六的操作进行迁移键值数据。</li>
+<li>在源节点上执行 migrate { targetNodeIp} “ “ 0 { timeout } keys { key… } 命令，把获取的键通过 pipeline 机制批量迁移到目标节点，批量迁移版本的 migrate 命令在 Redis 3.0.6 以上版本提供。</li>
+<li>重复执行步骤 5 和步骤 6 直到槽下所有的键值数据迁移到目标节点。</li>
+<li>向集群内所有主节点发送 cluster setslot { slot } node { targetNodeId } 命令，通知槽分配给目标节点。为了保证槽节点映射变更及时传播，需要遍历发送给所有主节点更新被迁移的槽执行新节点。</li>
+</ol>
+<h2 id="收缩集群"><a href="#收缩集群" class="headerlink" title="收缩集群"></a>收缩集群</h2><p>收缩节点就是将 Redis 节点下线，整个流程需要如下操作流程。</p>
+<ol>
+<li>首先需要确认下线节点是否有负责的槽，如果是，需要把槽迁移到其他节点，保证节点下线后整个集群槽节点映射的完整性。</li>
+<li>当下线节点不再负责槽或者本身是从节点时，就可以通知集群内其他节点忘记下线节点，当所有的节点忘记改节点后可以正常关闭。</li>
+</ol>
+<p>下线节点需要将节点自己负责的槽迁移到其他节点，原理与之前节点扩容的迁移槽过程一致。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212100910-c7c95.png" alt="示意图"></p>
+<p>迁移完槽后，还需要通知集群内所有节点忘记下线的节点，也就是说让其他节点不再与要下线的节点进行 Gossip 消息交换。</p>
+<p>Redis 集群使用 cluster forget { downNodeId } 命令来讲指定的节点加入到禁用列表中，在禁用列表内的节点不再发送 Gossip 消息。</p>
+<h2 id="客户端路由"><a href="#客户端路由" class="headerlink" title="客户端路由"></a>客户端路由</h2><p>在集群模式下，Redis 节点接收任何键相关命令时首先计算键对应的槽，在根据槽找出所对应的节点，如果节点是自身，则处理键命令；否则回复 MOVED 重定向错误，通知客户端请求正确的节点。这个过程称为 MOVED 重定向。</p>
+<p><strong><em>需要注意的是 Redis 计算槽时并非只简单的计算键值内容，当键值内容包括大括号时，则只计算括号内的内容。</em></strong>比如说，key 为 user:{10000}:books时，计算哈希值只计算10000。</p>
+<p>MOVED 错误示例如下，键 <code>x</code> 所属的哈希槽 <code>3999</code> ，以及负责处理这个槽的节点的 IP 和端口号 <code>127.0.0.1:6381</code> 。 客户端需要根据这个 IP 和端口号， 向所属的节点重新发送一次 GET 命令请求。</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">GET x </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">-MOVED <span class="number">3999</span> <span class="number">127.0</span><span class="number">.0</span><span class="number">.1</span>:<span class="number">6381</span></span></pre></td></tr></table></figure>
+
+<p>由于请求重定向会增加 IO 开销，这不是 Redis 集群高效的使用方式，而是要使用 Smart 集群客户端。Smart 客户端通过在内部维护 slot 到 Redis节点的映射关系，本地就可以实现键到节点的查找，从而保证 IO 效率的最大化，而 MOVED 重定向负责协助客户端更新映射关系。</p>
+<p>Redis 集群支持在线迁移槽( slot ) 和数据来完成水平伸缩，当 slot 对应的数据从源节点到目标节点迁移过程中，客户端需要做到智能迁移，保证键命令可正常执行。例如当 slot 数据从源节点迁移到目标节点时，期间可能出现一部分数据在源节点，而另一部分在目标节点。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212100912-76656.png" alt="示意图"></p>
+<p>所以，综合上述情况，客户端命令执行流程如下所示：</p>
+<ul>
+<li>客户端根据本地 slot 缓存发送命令到源节点，如果存在键对应则直接执行并返回结果给客户端。</li>
+<li>如果节点返回 MOVED 错误，更新本地的 slot 到 Redis 节点的映射关系，然后重新发起请求。</li>
+<li>如果数据正在迁移中，节点会回复 ASK 重定向异常。格式如下: ( error ) ASK { slot } { targetIP } : {targetPort}</li>
+<li>客户端从 ASK 重定向异常提取出目标节点信息，发送 asking 命令到目标节点打开客户端连接标识，再执行键命令。</li>
+</ul>
+<p>ASK 和 MOVED 虽然都是对客户端的重定向控制，但是有着本质区别。ASK 重定向说明集群正在进行 slot 数据迁移，客户端无法知道什么时候迁移完成，因此只能是临时性的重定向，客户端不会更新 slot 到 Redis 节点的映射缓存。但是 MOVED 重定向说明键对应的槽已经明确指定到新的节点，因此需要更新 slot 到 Redis 节点的映射缓存。</p>
+<h2 id="故障转移"><a href="#故障转移" class="headerlink" title="故障转移"></a>故障转移</h2><p>当 Redis 集群内少量节点出现故障时通过自动故障转移保证集群可以正常对外提供服务。</p>
+<p>当某一个 Redis 节点客观下线时，Redis 集群会从其从节点中通过选主选出一个替代它，从而保证集群的高可用性。这块内容并不是本文的核心内容，感兴趣的同学可以自己学习。</p>
+<p>但是，有一点要注意。默认情况下，当集群 16384 个槽任何一个没有指派到节点时整个集群不可用。执行任何键命令返回 CLUSTERDOWN Hash slot not served 命令。<strong><em>当持有槽的主节点下线时，从故障发现到自动完成转移期间整个集群是不可用状态，对于大多数业务无法忍受这情况，因此建议将参数 cluster-require-full-coverage 配置为 no ，当主节点故障时只影响它负责槽的相关命令执行，不会影响其他主节点的可用性</em></strong>。</p>
+<blockquote>
+<p>作者：程序员历小冰</p>
+<p>来源：<a href="https://juejin.im/post/5ce7efef518825332b59f79b" target="_blank" rel="noopener">https://juejin.im/post/5ce7efef518825332b59f79b</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/11/Redis-%E5%8F%91%E7%94%9F%E9%AB%98%E5%BB%B6%E8%BF%9F%E7%9A%84%E5%8E%9F%E5%9B%A0%E5%88%86%E6%9E%90/" rel="prev" title="Redis 发生高延迟的原因分析">
+      <i class="fa fa-chevron-left"></i> Redis 发生高延迟的原因分析
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/11/%E5%88%86%E5%B8%83%E5%BC%8F%E6%95%B0%E6%8D%AE%E7%BC%93%E5%AD%98%E4%B8%AD%E7%9A%84%E4%B8%80%E8%87%B4%E6%80%A7%E5%93%88%E5%B8%8C%E7%AE%97%E6%B3%95/" rel="next" title="分布式数据缓存中的一致性哈希算法">
+      分布式数据缓存中的一致性哈希算法 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#Redis-集群简介"><span class="nav-number">1.</span> <span class="nav-text">Redis 集群简介</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#数据分片策略"><span class="nav-number">2.</span> <span class="nav-text">数据分片策略</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#扩容集群"><span class="nav-number">3.</span> <span class="nav-text">扩容集群</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#收缩集群"><span class="nav-number">4.</span> <span class="nav-text">收缩集群</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#客户端路由"><span class="nav-number">5.</span> <span class="nav-text">客户端路由</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#故障转移"><span class="nav-number">6.</span> <span class="nav-text">故障转移</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="TCP 是基于流传输的协议，请求数据在其传输的过程中是没有界限区分，所以我们在读取请求的时候，不一定能获取到一个完整的数据包。如果一个包较大时，可能会切分成多个包进行多次传输。同时，如果存在多个小包时，可能会将其整合成一个大包进行传输。这就是 TCP 协议的粘包&#x2F;拆包概念。  本文基于 Netty5 进行分析">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Netty中粘包&#x2F;拆包处理">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;11&#x2F;Netty%E4%B8%AD%E7%B2%98%E5%8C%85-%E6%8B%86%E5%8C%85%E5%A4%84%E7%90%86&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="TCP 是基于流传输的协议，请求数据在其传输的过程中是没有界限区分，所以我们在读取请求的时候，不一定能获取到一个完整的数据包。如果一个包较大时，可能会切分成多个包进行多次传输。同时，如果存在多个小包时，可能会将其整合成一个大包进行传输。这就是 TCP 协议的粘包&#x2F;拆包概念。  本文基于 Netty5 进行分析">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;1cffd-netty-tcp.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;4bcc7-netty-e-1.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;d3e2a-netty-e-2.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;6698f-netty-decode-s.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;b3d7b-netty-decode-c.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;94bd3-netty-end-10.png">
+<meta property="og:updated_time" content="2020-01-11T03:11:49.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;1cffd-netty-tcp.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/11/Netty%E4%B8%AD%E7%B2%98%E5%8C%85-%E6%8B%86%E5%8C%85%E5%A4%84%E7%90%86/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Netty中粘包/拆包处理 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/11/Netty%E4%B8%AD%E7%B2%98%E5%8C%85-%E6%8B%86%E5%8C%85%E5%A4%84%E7%90%86/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Netty中粘包/拆包处理
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-11 11:11:49" itemprop="dateCreated datePublished" datetime="2020-01-11T11:11:49+08:00">2020-01-11</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">其它技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/Netty/" itemprop="url" rel="index">
+                    <span itemprop="name">Netty</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <blockquote>
+<p>TCP 是基于流传输的协议，请求数据在其传输的过程中是没有界限区分，所以我们在读取请求的时候，不一定能获取到一个完整的数据包。如果一个包较大时，可能会切分成多个包进行多次传输。同时，如果存在多个小包时，可能会将其整合成一个大包进行传输。这就是 TCP 协议的粘包/拆包概念。</p>
+</blockquote>
+<p><strong>本文基于 Netty5 进行分析</strong></p>
+<a id="more"></a>
+
+<h1 id="粘包-拆包描述"><a href="#粘包-拆包描述" class="headerlink" title="粘包/拆包描述"></a>粘包/拆包描述</h1><p>假设当前有<code>123</code>和<code>abc</code>两个数据包，那么他们传输情况示意图如下：</p>
+<p><a href="http://image.winrains.cn/2019/12/1cffd-netty-tcp.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/12/1cffd-netty-tcp.png" alt="img"></a></p>
+<ul>
+<li>I 为正常情况，两次传输两个独立完整的包。</li>
+<li>II 为粘包情况，<code>123</code>和<code>abc</code>封装成了一个包。</li>
+<li>III 为拆包情况，图中的描述是将<code>123</code>拆分成了<code>1</code>和<code>23</code>，并且<code>1</code>和<code>abc</code>一起传输。<code>123</code>和<code>abc</code>也可能是<code>abc</code>进行拆包。甚至<code>123</code>和<code>abc</code>进行多次拆分也有可能。</li>
+</ul>
+<h1 id="Netty-粘包-拆包问题"><a href="#Netty-粘包-拆包问题" class="headerlink" title="Netty 粘包/拆包问题"></a>Netty 粘包/拆包问题</h1><p>为突出 Netty 的粘包/拆包问题，这里通过例子进行重现问题，以下为突出问题的主要代码：</p>
+<p>服务端：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * 服务端网络事件的读写操作类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * </span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Created by YangTao.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> ServerHandler extends ChannelHandlerAdapter &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 接收消息计数器</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="built_in">int</span> i = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// client端消息</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    @Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    public void channel<span class="constructor">Read(ChannelHandlerContext <span class="params">ctx</span>, Object <span class="params">msg</span>)</span> throws Exception &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        i++;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.print(msg);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 对每条读取到的消息进行打数标记</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"================== ["</span>+ i +<span class="string">"]"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 发送应答消息给客户端</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        ByteBuf rmsg = <span class="module-access"><span class="module"><span class="identifier">Unpooled</span>.</span></span>copied<span class="constructor">Buffer(String.<span class="params">valueOf</span>(<span class="params">i</span>)</span>.get<span class="constructor">Bytes()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        ctx.write(rmsg);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 其他操作 .......</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>客户端：</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * 客户端发送数据</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * </span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Created by YangTao.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="built_in">public</span> <span class="keyword">class</span> NettyClient &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">public</span> <span class="type">void</span> send() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        Bootstrap bootstrap = <span class="built_in">new</span> Bootstrap();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        NioEventLoopGroup <span class="keyword">group</span> = <span class="built_in">new</span> NioEventLoopGroup();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        try &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            bootstrap.<span class="keyword">group</span>(<span class="keyword">group</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">                    .channel(NioSocketChannel.<span class="keyword">class</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">                    .<span class="keyword">option</span>(ChannelOption.TCP_NODELAY, <span class="keyword">true</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">                    .<span class="keyword">handler</span>(<span class="built_in">new</span> ChannelInitializer&lt;NioSocketChannel&gt;() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">                        @Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">                        protected <span class="type">void</span> initChannel(NioSocketChannel ch) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">                            ChannelPipeline pipeline = ch.pipeline();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">                            pipeline.addLast(<span class="built_in">new</span> StringDecoder());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">                            pipeline.addLast("logger", <span class="built_in">new</span> LoggingHandler(LogLevel.<span class="keyword">INFO</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">                            pipeline.addLast(<span class="built_in">new</span> ClientHandler());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">                        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">                    &#125;);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">            Channel channel = bootstrap.<span class="keyword">connect</span>(HOST, PORT).channel();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">            <span class="type">int</span> i = <span class="number">1</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">while</span> (i &lt;= <span class="number">300</span>)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">                channel.writeAndFlush(String.format("【时间 %s: \t%s】", <span class="built_in">new</span> <span class="type">Date</span>(), i));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">                // 打印发送请求的次数</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">System</span>.<span class="keyword">out</span>.println(i);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">                i++;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">        &#125;catch (<span class="keyword">Exception</span> e)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">            e.printStackTrace();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">        &#125;finally &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">             <span class="keyword">if</span> (<span class="keyword">group</span> != <span class="keyword">null</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">                 <span class="keyword">group</span>.shutdownGracefully();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">         &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>以上代码中，我们第一反应理解的是，如果非异常情况下客户端所有数据发送成功，并且服务端全部接收到。那么从打印信息中可以看到客户端的发送次数<code>i</code>和服务端的接收消息计数<code>i</code>应该是相同的数。那么下面通过运行程序，查看打印结果。</p>
+<p><a href="http://image.winrains.cn/2019/12/4bcc7-netty-e-1.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/12/4bcc7-netty-e-1.png" alt="img"></a></p>
+<p>如上图所示，<code>【】</code>中的最后一个数字与<code>[]</code>中数字对上的是已独立完整的包接收到<strong>（粘包/拆包示意图中的情况 I）</strong>。但是<code>【】</code>中为<code>37</code>和<code>38</code>的出现了粘包情况<strong>（粘包/拆包示意图中的情况 II）</strong>，两条数据粘合在一起。</p>
+<p><a href="http://image.winrains.cn/2019/12/d3e2a-netty-e-2.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/12/d3e2a-netty-e-2.png" alt="img"></a></p>
+<p>上图中可以看到<code>【】</code>中<code>167</code>的数据被拆分为了两部分（图中画绿线数据），该情况为拆包<strong>（粘包/拆包示意图中的情况 III）</strong>。</p>
+<p>上面程序没有考虑到 TCP 的粘包/拆包问题，所以如果是我们实际应用的程序的话，不能保证数据的正常情况，就会导致程序异常。</p>
+<h1 id="Netty-解决粘包-拆包问题"><a href="#Netty-解决粘包-拆包问题" class="headerlink" title="Netty 解决粘包/拆包问题"></a>Netty 解决粘包/拆包问题</h1><h2 id="LineBasedFrameDecoder-换行符处理"><a href="#LineBasedFrameDecoder-换行符处理" class="headerlink" title="LineBasedFrameDecoder 换行符处理"></a>LineBasedFrameDecoder 换行符处理</h2><p>Netty 的强大，方便，简单使用的优势，在粘包/拆包问题上也提供了多种编解码解决方案，并且很容易理解和掌握。<br>这里使用 LineBasedFrameDecoder 和 StringDecoder（将接收到的对象转换成字符串） 来解决粘包/拆包问题。<br>只需在服务端和客户端分别添加 LineBasedFrameDecoder 和 StringDecoder解码器，因为是双向会话，所以两端都要添加，由于我一开始就添加 StringDecoder 编码器，所以只需添加 LineBasedFrameDecoder 就够了。<br>服务端：</p>
+<p><a href="http://image.winrains.cn/2019/12/6698f-netty-decode-s.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/12/6698f-netty-decode-s.png" alt="img"></a></p>
+<p>客户端：</p>
+<p><a href="http://image.winrains.cn/2019/12/b3d7b-netty-decode-c.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/12/b3d7b-netty-decode-c.png" alt="img"></a></p>
+<p>服务端网络事件操作：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * 服务端网络事件的读写操作类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * </span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Created by YangTao.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> ServerHandler extends ChannelHandlerAdapter &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 接收消息计数器</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="built_in">int</span> i = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// client端消息</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    @Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    public void channel<span class="constructor">Read(ChannelHandlerContext <span class="params">ctx</span>, Object <span class="params">msg</span>)</span> throws Exception &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        i++;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.print(msg);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 对每条读取到的消息进行打数标记</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"================== ["</span>+ i +<span class="string">"]"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 发送应答消息给客户端</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        ByteBuf rmsg = <span class="module-access"><span class="module"><span class="identifier">Unpooled</span>.</span></span>copied<span class="constructor">Buffer(String.<span class="params">valueOf</span>(<span class="params">i</span> + System.<span class="params">getProperty</span>(<span class="string">"line.separator"</span>)</span>).get<span class="constructor">Bytes()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        ctx.write(rmsg);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 其他操作 .......</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>客户端发送数据：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * 客户端发送数据</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * </span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> * Created by YangTao.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment"> */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> NettyClient &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    public void send<span class="literal">()</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 连接操作 .......</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// 获取 channel</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            Channel channel = channel<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">            <span class="built_in">int</span> i = <span class="number">1</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            ByteBuf buf = null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">while</span> (i &lt;= <span class="number">300</span>)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">                String str = <span class="module-access"><span class="module"><span class="identifier">String</span>.</span></span>format(<span class="string">"【时间 %s: \t%s】"</span>, <span class="keyword">new</span> <span class="constructor">Date()</span>, i) + <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>get<span class="constructor">Property(<span class="string">"line.separator"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">                byte<span class="literal">[]</span> <span class="built_in">bytes</span> = str.get<span class="constructor">Bytes()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// 写入缓冲区</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">                buf = <span class="module-access"><span class="module"><span class="identifier">Unpooled</span>.</span></span>buffer(<span class="built_in">bytes</span>.length);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">                buf.write<span class="constructor">Bytes(<span class="params">bytes</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">                channel.write<span class="constructor">AndFlush(<span class="params">buf</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// 打印发送请求的次数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">                <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(i);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">                i++;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">        &#125;catch (Exception e)&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">            e.print<span class="constructor">StackTrace()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">        </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 退出操作 .......</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>细心观察代码的变化，应该会发现现在的代码每次在发送消息的时候，在消息末尾后加了换行分隔符。<strong>注意，使用 LineBasedFrameDecoder 时，换行分隔符必须加，否则接收消息端收不到消息，如果手写换行分割，要记得区分不同系统的适配</strong>。</p>
+<p>经过多次测试 3W 条请求，没有再出现过粘包/拆包情况，看最后一条数据数字是否相同便知。</p>
+<p><a href="http://image.winrains.cn/2019/12/94bd3-netty-end-10.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/12/94bd3-netty-end-10.png" alt="img"></a></p>
+<h2 id="DelimiterBasedFrameDecoder-自定义分隔符"><a href="#DelimiterBasedFrameDecoder-自定义分隔符" class="headerlink" title="DelimiterBasedFrameDecoder 自定义分隔符"></a>DelimiterBasedFrameDecoder 自定义分隔符</h2><p>自定义分隔符和换行分隔符差不多，只需将发送的数据后换行符换成你自己设定的分割符即可。</p>
+<p>服务端和客户端均在 pipeline 添加 DelimiterBasedFrameDecoder:</p>
+<figure class="highlight haxe"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 指定的分隔符</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">static</span> final <span class="keyword">String</span> DELIMITER = <span class="string">"$@$"</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 如果当前数据2048个字节中没有分隔符，就会抛出异常，避免内存溢出。也可以自定义预检查当前读取的数据，自定义这里超过的规则</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">pipeline.addLast(<span class="keyword">new</span> <span class="type">DelimiterBasedFrameDecoder</span>(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="number">2048</span>, </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        Unpooled.wrappedBuffer(DELIMITER.getBytes())) <span class="comment">// 分割符缓冲对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">);</span></pre></td></tr></table></figure>
+
+<h2 id="FixedLengthFrameDecoder-根据固定长度"><a href="#FixedLengthFrameDecoder-根据固定长度" class="headerlink" title="FixedLengthFrameDecoder 根据固定长度"></a>FixedLengthFrameDecoder 根据固定长度</h2><p>设定固定长度，进行数据传输，如果不达固定长度，使用空格补全。</p>
+<p>服务端和客户端均在 pipeline 添加 FixedLengthFrameDecoder:</p>
+<figure class="highlight haxe"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 100为指定的固定长度</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">ch.pipeline().addLast(<span class="keyword">new</span> <span class="type">FixedLengthFrameDecoder</span>(<span class="number">100</span>));</span></pre></td></tr></table></figure>
+
+<p>每次读取数据时都会按照 FixedLengthFrameDecoder 中设置的固定长度进行解码，如果出现粘包，那么会进行多次解码，如果出现拆包的情况，那么 FixedLengthFrameDecoder 会先缓存当前部分包的信息，当接收下一个包时，会与缓存的部分包进行拼接，知道满足规定的长度。</p>
+<h2 id="动态指定长度"><a href="#动态指定长度" class="headerlink" title="动态指定长度"></a>动态指定长度</h2><p>动态指定长度就是说，每条消息的长度都是随着消息头进行指定，这里使用的编码器为 LengthFieldBasedFrameDecoder。</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">pipeline().addLast(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">        new LengthFieldBasedFrameDecoder(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        <span class="number">2048</span>, <span class="comment">// 帧的最大长度，即每个数据包最大限度</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="number">0</span>, <span class="comment">// 长度字段偏移量</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="number">4</span>, <span class="comment">// 长度字段所占的字节数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="number">0</span>, <span class="comment">// 消息头的长度，可以为负数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        <span class="number">4</span>) <span class="comment">// 需要忽略的字节数，从消息头开始，这里是指整个包</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">);</span></pre></td></tr></table></figure>
+
+<p>发送消息时，创建自己的消息对象编码器</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 创建 byteBuf</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">ByteBuf buf = get<span class="constructor">Buf()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// .....</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 设置该条消息内容长度</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">buf.write<span class="constructor">Int(<span class="params">msg</span>.<span class="params">length</span>()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 设置消息内容</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">buf.write<span class="constructor">Bytes(<span class="params">msg</span>.<span class="params">getBytes</span>(<span class="string">"UTF-8"</span>)</span>);</span></pre></td></tr></table></figure>
+
+<p>服务端读取的时候就直接读取即可，没其他特殊操作。</p>
+<p>除了以上 Netty 提供的现成方案，还可以通过重写 MessageToByteEncoder 编码实现自定义协议。</p>
+<h1 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h1><blockquote>
+<p>Netty 极大的为使用者提供了多种解决粘包/拆包方案，并且可以很愉快的对多种消息进行自动解码，在使用过程中也极容易掌握和理解，很大程度上提升开发效率和稳定性。</p>
+</blockquote>
+<blockquote>
+<p>作者：杨滔</p>
+<p>来源：<a href="https://ytao.top/2019/12/09/10-netty/" target="_blank" rel="noopener">https://ytao.top/2019/12/09/10-netty/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/11/Ajax%E7%9F%A5%E8%AF%86%E4%BD%93%E7%B3%BB%E5%A4%A7%E6%A2%B3%E7%90%86/" rel="prev" title="Ajax知识体系大梳理">
+      <i class="fa fa-chevron-left"></i> Ajax知识体系大梳理
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/11/Java-%E5%B9%B6%E5%8F%91%E5%9F%BA%E7%A1%80%E5%B8%B8%E8%A7%81%E9%9D%A2%E8%AF%95%E9%A2%98%E6%80%BB%E7%BB%93/" rel="next" title="Java 并发基础常见面试题总结">
+      Java 并发基础常见面试题总结 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#粘包-拆包描述"><span class="nav-number">1.</span> <span class="nav-text">粘包/拆包描述</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#Netty-粘包-拆包问题"><span class="nav-number">2.</span> <span class="nav-text">Netty 粘包/拆包问题</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#Netty-解决粘包-拆包问题"><span class="nav-number">3.</span> <span class="nav-text">Netty 解决粘包/拆包问题</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#LineBasedFrameDecoder-换行符处理"><span class="nav-number">3.1.</span> <span class="nav-text">LineBasedFrameDecoder 换行符处理</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#DelimiterBasedFrameDecoder-自定义分隔符"><span class="nav-number">3.2.</span> <span class="nav-text">DelimiterBasedFrameDecoder 自定义分隔符</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#FixedLengthFrameDecoder-根据固定长度"><span class="nav-number">3.3.</span> <span class="nav-text">FixedLengthFrameDecoder 根据固定长度</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#动态指定长度"><span class="nav-number">3.4.</span> <span class="nav-text">动态指定长度</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#总结"><span class="nav-number">4.</span> <span class="nav-text">总结</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

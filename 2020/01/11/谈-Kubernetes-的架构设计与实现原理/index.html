@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="Kubernetes 基本上是这两年最热门、最被人熟知的技术了，它为软件工程师提供了强大的容器编排能力，模糊了开发和运维之间的边界，让我们开发、管理和维护一个大型的分布式系统和项目变得更加容易。这篇文章是整个 Kuberentes 架构设计与实现原理的开篇，文章会先简单介绍 Kuberentes 的背景、依赖的技术，它的架构以及设计理念，最后会提及一些关键概念和实现原理。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="谈 Kubernetes 的架构设计与实现原理">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;11&#x2F;%E8%B0%88-Kubernetes-%E7%9A%84%E6%9E%B6%E6%9E%84%E8%AE%BE%E8%AE%A1%E4%B8%8E%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="Kubernetes 基本上是这两年最热门、最被人熟知的技术了，它为软件工程师提供了强大的容器编排能力，模糊了开发和运维之间的边界，让我们开发、管理和维护一个大型的分布式系统和项目变得更加容易。这篇文章是整个 Kuberentes 架构设计与实现原理的开篇，文章会先简单介绍 Kuberentes 的背景、依赖的技术，它的架构以及设计理念，最后会提及一些关键概念和实现原理。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;de0e9-2018-11-25-kubernetes-banner.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;c69da-2018-11-25-docker-swarm-vs-kubernetes.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;c1881-2018-11-25-docker-logo.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;8a390-2018-11-25-microservices.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;1ed0a-2018-11-25-kubernetes-design.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;54b10-2018-11-25-kubernetes-declarative-api.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;a39a7-2018-11-25-kubernetes-external-api.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;c581e-2018-11-25-kuberentes-non-invasive.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;988bb-2018-11-25-kubernetes-persistent-volume.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;7ed6c-2018-11-25-kubernetes-architecture.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;68ca7-2018-11-25-kubernetes-master-node.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;cac1b-2018-11-25-kubernetes-worker-node.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;7b172-2018-11-25-kubernetes-object.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;95759-2018-11-25-kubernetes-pod.png">
+<meta property="og:updated_time" content="2020-01-11T02:41:01.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;de0e9-2018-11-25-kubernetes-banner.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/11/%E8%B0%88-Kubernetes-%E7%9A%84%E6%9E%B6%E6%9E%84%E8%AE%BE%E8%AE%A1%E4%B8%8E%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>谈 Kubernetes 的架构设计与实现原理 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/11/%E8%B0%88-Kubernetes-%E7%9A%84%E6%9E%B6%E6%9E%84%E8%AE%BE%E8%AE%A1%E4%B8%8E%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          谈 Kubernetes 的架构设计与实现原理
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-11 10:41:01" itemprop="dateCreated datePublished" datetime="2020-01-11T10:41:01+08:00">2020-01-11</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">其它技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/Kubernetes/" itemprop="url" rel="index">
+                    <span itemprop="name">Kubernetes</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>Kubernetes 基本上是这两年最热门、最被人熟知的技术了，它为软件工程师提供了强大的容器编排能力，模糊了开发和运维之间的边界，让我们开发、管理和维护一个大型的分布式系统和项目变得更加容易。<br><img src="http://image.winrains.cn/2019/11/de0e9-2018-11-25-kubernetes-banner.png" alt="kubernetes-banner"><br>这篇文章是整个 Kuberentes 架构设计与实现原理的开篇，文章会先简单介绍 Kuberentes 的背景、依赖的技术，它的架构以及设计理念，最后会提及一些关键概念和实现原理。</p>
+<a id="more"></a>
+
+<h2 id="介绍"><a href="#介绍" class="headerlink" title="介绍"></a>介绍</h2><p>作为一个目前在生产环境已经广泛使用的开源项目 Kubernetes 被定义成一个用于自动化部署、扩容和管理容器应用的开源系统；它将一个分布式软件的一组容器打包成一个个更容易管理和发现的逻辑单元。<br>Kubernetes 是希腊语『舵手』的意思，它最开始由 Google 的几位软件工程师创立，深受公司内部 <a href="https://ai.google/research/pubs/pub43438" target="_blank" rel="noopener">Borg</a> 和 Omega 项目的影响，很多设计都是从 Borg 中借鉴的，同时也对 Borg 的缺陷进行了改进，Kubernetes 目前是 Cloud Native Computing Foundation (CNCF) 的项目并且是很多公司管理分布式系统的解决方案。<br><img src="http://image.winrains.cn/2019/11/c69da-2018-11-25-docker-swarm-vs-kubernetes.png" alt="docker-swarm-vs-kubernetes"><br>在 Kubernetes 统治了容器编排这一领域之前，其实也有很多容器编排方案，例如 <a href="https://github.com/docker/compose" target="_blank" rel="noopener">compose</a> 和 <a href="https://github.com/docker/swarm" target="_blank" rel="noopener">Swarm</a>，但是在运维大规模、复杂的集群时，这些方案基本已经都被 Kubernetes 替代了。<br>Kubernetes 将已经打包好的应用镜像进行编排，所以如果没有容器技术的发展和微服务架构中复杂的应用关系，其实也很难找到合适的应用场景去使用，所以在这里我们会简单介绍 Kubernetes 的两大『依赖』——容器技术和微服务架构。</p>
+<h3 id="容器技术"><a href="#容器技术" class="headerlink" title="容器技术"></a>容器技术</h3><p>Docker 已经是容器技术的事实标准了，作者在前面的文章中 <a href="https://draveness.me/docker" target="_blank" rel="noopener">Docker 核心技术与实现原理</a> 曾经介绍过 Docker 的实现主要依赖于 Linux 的 namespace、cgroups 和 UnionFS。<br><img src="http://image.winrains.cn/2019/11/c1881-2018-11-25-docker-logo.png" alt="docker-logo"><br>它让开发者将自己的应用以及依赖打包到一个可移植的容器中，让应用程序的运行可以实现环境无关。<br>我们能够通过 Docker 实现进程、网络以及挂载点和文件系统隔离的环境，并且能够对宿主机的资源进行分配，这能够让我们在同一个机器上运行多个不同的 Docker 容器，任意一个 Docker 的进程都不需要关心宿主机的依赖，都各自在镜像构建时完成依赖的安装和编译等工作，这也是为什么 Docker 是 Kubernetes 项目的一个重要依赖。</p>
+<h3 id="微服务架构"><a href="#微服务架构" class="headerlink" title="微服务架构"></a>微服务架构</h3><p>如果今天的软件并不是特别复杂并且需要承载的峰值流量不是特别多，那么后端项目的部署其实也只需要在虚拟机上安装一些简单的依赖，将需要部署的项目编译后运行就可以了。<br><img src="http://image.winrains.cn/2019/11/8a390-2018-11-25-microservices.png" alt="microservices"><br>但是随着软件变得越来越复杂，一个完整的后端服务不再是单体服务，而是由多个职责和功能不同的服务组成，服务之间复杂的拓扑关系以及单机已经无法满足的性能需求使得软件的部署和运维工作变得非常复杂，这也就使得部署和运维大型集群变成了非常迫切的需求。</p>
+<h3 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h3><p>Kubernetes 的出现不仅主宰了容器编排的市场，更改变了过去的运维方式，不仅将开发与运维之间边界变得更加模糊，而且让 DevOps 这一角色变得更加清晰，每一个软件工程师都可以通过 Kubernetes 来定义服务之间的拓扑关系、线上的节点个数、资源使用量并且能够快速实现水平扩容、蓝绿部署等在过去复杂的运维操作。</p>
+<h2 id="设计"><a href="#设计" class="headerlink" title="设计"></a>设计</h2><p>这一小节我们将介绍 Kubernetes 的一些设计理念，这些关键字能够帮助了解 Kubernetes 在设计时所做的一些选择：<br><img src="http://image.winrains.cn/2019/11/1ed0a-2018-11-25-kubernetes-design.png" alt="kubernetes-design"><br>这里将按照顺序分别介绍声明式、显式接口、无侵入性和可移植性这几个设计的选择能够为我们带来什么。</p>
+<h3 id="声明式"><a href="#声明式" class="headerlink" title="声明式"></a>声明式</h3><p>声明式（Declarative）的编程方式一直都会被工程师们拿来与命令式（Imperative）进行对比，这两者是完全不同的编程方法。我们最常接触的其实是命令式编程，它要求我们描述为了达到某一个效果或者目标所需要完成的指令，常见的编程语言 Go、Ruby、C++ 其实都为开发者了命令式的编程方法，<br>在 Kubernetes 中，我们可以直接使用 YAML 文件定义服务的拓扑结构和状态：</p>
+<figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="attr">apiVersion:</span> <span class="string">v1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="attr">kind:</span> <span class="string">Pod</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="attr">metadata:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="attr">name:</span> <span class="string">rss-site</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="attr">labels:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="attr">app:</span> <span class="string">web</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="attr">spec:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  <span class="attr">containers:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="bullet">-</span> <span class="attr">name:</span> <span class="string">front-end</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">      <span class="attr">image:</span> <span class="string">nginx</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">      <span class="attr">ports:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="bullet">-</span> <span class="attr">containerPort:</span> <span class="number">80</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    <span class="bullet">-</span> <span class="attr">name:</span> <span class="string">rss-reader</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">      <span class="attr">image:</span> <span class="string">nickchase/rss-php-nginx:v1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">      <span class="attr">ports:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        <span class="bullet">-</span> <span class="attr">containerPort:</span> <span class="number">88</span></span></pre></td></tr></table></figure>
+
+<p>这种声明式的方式能够大量地减少使用者的工作量，极大地增加开发的效率，这是因为声明式能够简化需要的代码，减少开发人员的工作，如果我们使用命令式的方式进行开发，虽然在配置上比较灵活，但是带来了更多的工作。</p>
+<figure class="highlight n1ql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> * <span class="keyword">FROM</span> posts <span class="keyword">WHERE</span> user_id = <span class="number">1</span> <span class="keyword">AND</span> <span class="built_in">title</span> <span class="keyword">LIKE</span> <span class="string">'hello%'</span>;</span></pre></td></tr></table></figure>
+
+<p>SQL 其实就是一种常见的声明式『编程语言』，它能够让开发者自己去指定想要的数据是什么，Kubernetes 中的 YAML 文件也有着相同的原理，我们可以告诉 Kubernetes 想要的最终状态是什么，而它会帮助我们从现有的状态进行迁移。<br><img src="http://image.winrains.cn/2019/11/54b10-2018-11-25-kubernetes-declarative-api.png" alt="kubernetes-declarative-api"><br>如果 Kubernetes 采用命令式编程的方式提供接口，那么工程师可能就需要通过代码告诉 Kubernetes 要达到某个状态需要通过哪些操作，相比于更关注状态和结果声明式的编程方式，命令式的编程方式更强调过程。<br>总而言之，Kubernetes 中声明式的 API 其实指定的是集群期望的运行状态，所以在出现任何不一致问题时，它本身都可以通过指定的 YAML 文件对线上集群进行状态的迁移，就像一个水平触发的系统，哪怕系统错过了相应的事件，最终也会根据当前的状态自动做出做合适的操作。</p>
+<h3 id="显式接口"><a href="#显式接口" class="headerlink" title="显式接口"></a>显式接口</h3><p>第二个 Kubernetes 的设计规范其实就是 —— 不存在内部的私有接口，所有的接口都是显示定义的，组件之间通信使用的接口对于使用者来说都是显式的，我们都可以直接调用。<br><img src="http://image.winrains.cn/2019/11/a39a7-2018-11-25-kubernetes-external-api.png" alt="kubernetes-external-api"><br>当 Kubernetes 的接口不能满足工程师的复杂需求时，我们需要利用已有的接口实现更复杂的特性，在这时 Kubernetes 的这一设计就不会成为自定义需求的障碍。</p>
+<h3 id="无侵入性"><a href="#无侵入性" class="headerlink" title="无侵入性"></a>无侵入性</h3><p>为了尽可能满足用户（工程师）的需求，减少工程师的工作量与任务并增强灵活性，Kubernetes 为工程师提供了无侵入式的接入方式，每一个应用或者服务一旦被打包成了镜像就可以直接在 Kubernetes 中无缝使用，不需要修改应用程序中的任何代码。<br><img src="http://image.winrains.cn/2019/11/c581e-2018-11-25-kuberentes-non-invasive.png" alt="kuberentes-non-invasive"><br>Docker 和 Kubernetes 就像包裹在应用程序上的两层，它们两个为应用程序提供了容器化以及编排的能力，在应用程序内部却不需要任何的修改就能够在 Docker 和 Kubernetes 集群中运行，这是 Kubernetes 在设计时选择无侵入带来最大的好处，同时无侵入的接入方式也是目前几乎所有应用程序或者服务都必须考虑的一点。</p>
+<h3 id="可移植性"><a href="#可移植性" class="headerlink" title="可移植性"></a>可移植性</h3><p>在微服务架构中，我们往往都会让所有处理业务的服务变成无状态的服务，以前在内存中存储的数据、Session 等缓存，现在都会放到 Redis、ETCD 等数据库中存储，微服务架构要求我们对业务进行拆分并划清服务之间的边界，所以有状态的服务往往会对架构的水平迁移带来障碍。<br>然而有状态的服务其实是无可避免的，我们将每一个基础服务或者业务服务都变成了一个个只负责计算的进程，但是仍然需要有其他的进程负责存储易失的缓存和持久的数据，Kubernetes 对这种有状态的服务也提供了比较好的支持。<br>Kubernetes 引入了 <code>PersistentVolume</code> 和 <code>PersistentVolumeClaim</code> 的概念用来屏蔽底层存储的差异性，目前的 Kubernetes 支持下列类型的 <code>PersistentVolume</code>：<br><img src="http://image.winrains.cn/2019/11/988bb-2018-11-25-kubernetes-persistent-volume.png" alt="kubernetes-persistent-volume"><br>这些不同的 <code>PersistentVolume</code> 会被开发者声明的 <code>PersistentVolumeClaim</code> 分配到不同的服务中，对于上层来讲所有的服务都不需要接触 <code>PersistentVolume</code>，只需要直接使用 <code>PersistentVolumeClaim</code> 得到的卷就可以了。</p>
+<h2 id="架构"><a href="#架构" class="headerlink" title="架构"></a>架构</h2><p>Kubernetes 遵循非常传统的客户端服务端架构，客户端通过 RESTful 接口或者直接使用 kubectl 与 Kubernetes 集群进行通信，这两者在实际上并没有太多的区别，后者也只是对 Kubernetes 提供的 RESTful API 进行封装并提供出来。<br><img src="http://image.winrains.cn/2019/11/7ed6c-2018-11-25-kubernetes-architecture.png" alt="kubernetes-architecture"><br>每一个 Kubernetes 就集群都由一组 Master 节点和一系列的 Worker 节点组成，其中 Master 节点主要负责存储集群的状态并为 Kubernetes 对象分配和调度资源。</p>
+<h3 id="Master"><a href="#Master" class="headerlink" title="Master"></a>Master</h3><p>作为管理集群状态的 Master 节点，它主要负责接收客户端的请求，安排容器的执行并且运行控制循环，将集群的状态向目标状态进行迁移，Master 节点内部由三个组件构成：<br><img src="http://image.winrains.cn/2019/11/68ca7-2018-11-25-kubernetes-master-node.png" alt="kubernetes-master-node"><br>其中 API Server 负责处理来自用户的请求，其主要作用就是对外提供 RESTful 的接口，包括用于查看集群状态的读请求以及改变集群状态的写请求，也是唯一一个与 etcd 集群通信的组件。<br>而 Controller 管理器运行了一系列的控制器进程，这些进程会按照用户的期望状态在后台不断地调节整个集群中的对象，当服务的状态发生了改变，控制器就会发现这个改变并且开始向目标状态迁移。<br>最后的 Scheduler 调度器其实为 Kubernetes 中运行的 Pod 选择部署的 Worker 节点，它会根据用户的需要选择最能满足请求的节点来运行 Pod，它会在每次需要调度 Pod 时执行。</p>
+<h3 id="Worker"><a href="#Worker" class="headerlink" title="Worker"></a>Worker</h3><p>其他的 Worker 节点实现就相对比较简单了，它主要由 kubelet 和 kube-proxy 两部分组成：<br><img src="http://image.winrains.cn/2019/11/cac1b-2018-11-25-kubernetes-worker-node.png" alt="kubernetes-worker-node"><br>kubelet 是一个节点上的主要服务，它周期性地从 API Server 接受新的或者修改的 Pod 规范并且保证节点上的 Pod 和其中容器的正常运行，还会保证节点会向目标状态迁移，该节点仍然会向 Master 节点发送宿主机的健康状况。<br>另一个运行在各个节点上的代理服务 kube-proxy 负责宿主机的子网管理，同时也能将服务暴露给外部，其原理就是在多个隔离的网络中把请求转发给正确的 Pod 或者容器。</p>
+<h2 id="实现原理"><a href="#实现原理" class="headerlink" title="实现原理"></a>实现原理</h2><p>到现在，我们已经对 Kubernetes 有了一些简单的认识和了解，也大概清楚了 Kubernetes 的架构，在这一小节中我们将介绍 Kubernetes 中的一些重要概念和实现原理。</p>
+<h3 id="对象"><a href="#对象" class="headerlink" title="对象"></a>对象</h3><p>Kubernetes 对象是系统中的持久实体，它使用这些对象来表示集群中的状态，这些对象能够描述：<br><img src="http://image.winrains.cn/2019/11/7b172-2018-11-25-kubernetes-object.png" alt="kubernetes-object"><br>这些对象描述了哪些应用应该运行在集群中，它们请求的资源下限和上限以及重启、升级和容错的策略。每一个创建的对象其实都是我们对集群状态的改变，这些对象描述的其实就是集群的期望状态，Kubernetes 会根据我们指定的期望状态不断检查对当前的集群状态进行迁移。</p>
+<figure class="highlight groovy"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">type Deployment struct &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    metav1.TypeMeta `<span class="string">json:</span><span class="string">",inline"</span>`</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    metav1.ObjectMeta `<span class="string">json:</span><span class="string">"metadata,omitempty"</span> <span class="string">protobuf:</span><span class="string">"bytes,1,opt,name=metadata"</span>`</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    Spec DeploymentSpec `<span class="string">json:</span><span class="string">"spec,omitempty"</span> <span class="string">protobuf:</span><span class="string">"bytes,2,opt,name=spec"</span>`</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    Status DeploymentStatus `<span class="string">json:</span><span class="string">"status,omitempty"</span> <span class="string">protobuf:</span><span class="string">"bytes,3,opt,name=status"</span>`</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>每一个对象都包含两个嵌套对象来描述规格（Spec）和状态（Status），对象的规格其实就是我们期望的目标状态，而状态描述了对象的当前状态，这部分一般由 Kubernetes 系统本身提供和管理，是我们观察集群本身的一个接口。</p>
+<h3 id="Pod"><a href="#Pod" class="headerlink" title="Pod"></a>Pod</h3><p>Pod 是 Kubernetes 中最基本的概念，它也是 Kubernetes 对象模型中我们可以创建或者部署的最小并且最简单的单元。<br><img src="http://image.winrains.cn/2019/11/95759-2018-11-25-kubernetes-pod.png" alt="kubernetes-pod"><br>它将应用的容器、存储资源以及独立的网络 IP 地址等资源打包到了一起，表示一个最小的部署单元，但是每一个 Pod 中的运行的容器可能不止一个，这是因为 Pod 最开始设计时就能够在多个进程之间进行协调，构建一个高内聚的服务单元，这些容器能够共享存储和网络，非常方便地进行通信。</p>
+<h3 id="控制器"><a href="#控制器" class="headerlink" title="控制器"></a>控制器</h3><p>最后要介绍的就是 Kubernetes 中的控制器，它们其实是用于创建和管理 Pod 的实例，能够在集群的层级提供复制、发布以及健康检查的功能，这些控制器其实都运行在 Kubernetes 集群的主节点上。<br>在 Kuberentes 的 <a href="https://github.com/kubernetes/kubernetes/tree/master/pkg/controller" target="_blank" rel="noopener">kubernetes/pkg/controller/</a> 目录中包含了官方提供的一些常见控制器，我们可以通过下面这个函数看到所有需要运行的控制器：</p>
+<figure class="highlight prolog"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">func <span class="symbol">NewControllerInitializers</span>(loopMode <span class="symbol">ControllerLoopMode</span>) map[string]<span class="symbol">InitFunc</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    controllers := map[string]<span class="symbol">InitFunc</span>&#123;&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    controllers[<span class="string">"endpoint"</span>] = startEndpointController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    controllers[<span class="string">"replicationcontroller"</span>] = startReplicationController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    controllers[<span class="string">"podgc"</span>] = startPodGCController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    controllers[<span class="string">"resourcequota"</span>] = startResourceQuotaController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    controllers[<span class="string">"namespace"</span>] = startNamespaceController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    controllers[<span class="string">"serviceaccount"</span>] = startServiceAccountController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    controllers[<span class="string">"garbagecollector"</span>] = startGarbageCollectorController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    controllers[<span class="string">"daemonset"</span>] = startDaemonSetController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    controllers[<span class="string">"job"</span>] = startJobController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    controllers[<span class="string">"deployment"</span>] = startDeploymentController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    controllers[<span class="string">"replicaset"</span>] = startReplicaSetController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    controllers[<span class="string">"horizontalpodautoscaling"</span>] = startHPAController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    controllers[<span class="string">"disruption"</span>] = startDisruptionController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    controllers[<span class="string">"statefulset"</span>] = startStatefulSetController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    controllers[<span class="string">"cronjob"</span>] = startCronJobController</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    // ...</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">    return controllers</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>这些控制器会随着控制器管理器的启动而运行，它们会监听集群状态的变更来调整集群中的 Kuberentes 对象的状态，在后面的文章中我们会展开介绍一些常见控制器的实现原理。</p>
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>作为 Kubernetes 系列文章的开篇，我们已经了解了它出现的背景、依赖的关键技术，同时我们也介绍了 Kubernetes 的架构设计，主节点负责处理客户端的请求、节点的调度，最后我们提到了几个 Kuberentes 中非常重要的概念：对象、Pod 和控制器，在接下来的文章中我们会深入介绍 Kuberentes 的实现原理。</p>
+<h2 id="相关文章"><a href="#相关文章" class="headerlink" title="相关文章"></a>相关文章</h2><ul>
+<li>基础<ul>
+<li><a href="https://draveness.me/distributed-transaction-principle" target="_blank" rel="noopener">分布式事务的实现原理</a></li>
+<li><a href="https://draveness.me/message-delivery" target="_blank" rel="noopener">分布式系统与消息的投递</a></li>
+</ul>
+</li>
+<li>数据库<ul>
+<li><a href="https://draveness.me/dynamo" target="_blank" rel="noopener">分布式键值存储 Dynamo 的实现原理</a></li>
+<li><a href="https://draveness.me/bigtable-leveldb" target="_blank" rel="noopener">浅析 Bigtable 和 LevelDB 的实现</a></li>
+</ul>
+</li>
+<li>分布式协调 &amp; 服务发现<ul>
+<li><a href="https://draveness.me/zookeeper-chubby" target="_blank" rel="noopener">详解分布式协调服务 ZooKeeper</a></li>
+<li><a href="https://draveness.me/etcd-introduction" target="_blank" rel="noopener">高可用分布式存储 etcd 的实现原理</a></li>
+<li><a href="https://draveness.me/dns-coredns" target="_blank" rel="noopener">详解 DNS 与 CoreDNS 的实现原理</a></li>
+</ul>
+</li>
+<li>容器编排<ul>
+<li><a href="https://draveness.me/understanding-kubernetes" target="_blank" rel="noopener">谈 Kubernetes 的架构设计与实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-object-intro" target="_blank" rel="noopener">从 Kubernetes 中的对象谈起</a></li>
+<li><a href="https://draveness.me/kubernetes-pod" target="_blank" rel="noopener">详解 Kubernetes Pod 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-service" target="_blank" rel="noopener">详解 Kubernetes Service 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-volume" target="_blank" rel="noopener">详解 Kubernetes Volume 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-replicaset" target="_blank" rel="noopener">详解 Kubernetes ReplicaSet 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-deployment" target="_blank" rel="noopener">详解 Kubernetes Deployment 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-statefulset" target="_blank" rel="noopener">详解 Kubernetes StatefulSet 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-daemonset" target="_blank" rel="noopener">详解 Kubernetes DaemonSet 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-job-cronjob" target="_blank" rel="noopener">详解 Kubernetes Job 和 CronJob 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-garbage-collector" target="_blank" rel="noopener">详解 Kubernetes 垃圾收集器 的实现原理</a></li>
+</ul>
+</li>
+</ul>
+<h2 id="Reference"><a href="#Reference" class="headerlink" title="Reference"></a>Reference</h2><ul>
+<li><a href="https://ai.google/research/pubs/pub43438" target="_blank" rel="noopener">Large-scale cluster management at Google with Borg</a></li>
+<li><a href="https://kubernetes.io/" target="_blank" rel="noopener">Production-Grade Container Orchestration</a></li>
+<li><a href="https://ai.google/research/pubs/pub44843" target="_blank" rel="noopener">Borg, Omega, and Kubernetespo</a></li>
+<li><a href="https://thenewstack.io/kubernetes-design-and-development-explained/" target="_blank" rel="noopener">Kubernetes Design and Development Explained</a></li>
+<li><a href="https://www.dynatrace.com/news/blog/2018-year-of-kubernetes-with-help-from-docker/?utm_source=tuicool&utm_medium=referral" target="_blank" rel="noopener">2018 is the year of Kubernetes – with some help from Docker</a></li>
+<li><a href="https://x-team.com/blog/introduction-kubernetes-architecture/" target="_blank" rel="noopener">Introduction to Kubernetes Architecture</a></li>
+<li><a href="https://elastisys.com/wp-content/uploads/2018/01/kubernetes-ha-setup.pdf?x83281" target="_blank" rel="noopener">Setting up highly available Kubernetes clusters</a></li>
+<li><a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/kubernetes-objects/" target="_blank" rel="noopener">Understanding Kubernetes Objects</a></li>
+</ul>
+<blockquote>
+<p>作者：Draveness</p>
+<p>来源：<a href="https://draveness.me/understanding-kubernetes" target="_blank" rel="noopener">https://draveness.me/understanding-kubernetes</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/11/%E8%AF%A6%E8%A7%A3-DNS-%E4%B8%8E-CoreDNS-%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/" rel="prev" title="详解 DNS 与 CoreDNS 的实现原理">
+      <i class="fa fa-chevron-left"></i> 详解 DNS 与 CoreDNS 的实现原理
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/11/%E4%BB%8E-Kubernetes-%E4%B8%AD%E7%9A%84%E5%AF%B9%E8%B1%A1%E8%B0%88%E8%B5%B7/" rel="next" title="从 Kubernetes 中的对象谈起">
+      从 Kubernetes 中的对象谈起 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#介绍"><span class="nav-number">1.</span> <span class="nav-text">介绍</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#容器技术"><span class="nav-number">1.1.</span> <span class="nav-text">容器技术</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#微服务架构"><span class="nav-number">1.2.</span> <span class="nav-text">微服务架构</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#小结"><span class="nav-number">1.3.</span> <span class="nav-text">小结</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#设计"><span class="nav-number">2.</span> <span class="nav-text">设计</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#声明式"><span class="nav-number">2.1.</span> <span class="nav-text">声明式</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#显式接口"><span class="nav-number">2.2.</span> <span class="nav-text">显式接口</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#无侵入性"><span class="nav-number">2.3.</span> <span class="nav-text">无侵入性</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#可移植性"><span class="nav-number">2.4.</span> <span class="nav-text">可移植性</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#架构"><span class="nav-number">3.</span> <span class="nav-text">架构</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#Master"><span class="nav-number">3.1.</span> <span class="nav-text">Master</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Worker"><span class="nav-number">3.2.</span> <span class="nav-text">Worker</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#实现原理"><span class="nav-number">4.</span> <span class="nav-text">实现原理</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#对象"><span class="nav-number">4.1.</span> <span class="nav-text">对象</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Pod"><span class="nav-number">4.2.</span> <span class="nav-text">Pod</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#控制器"><span class="nav-number">4.3.</span> <span class="nav-text">控制器</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#总结"><span class="nav-number">5.</span> <span class="nav-text">总结</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#相关文章"><span class="nav-number">6.</span> <span class="nav-text">相关文章</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Reference"><span class="nav-number">7.</span> <span class="nav-text">Reference</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

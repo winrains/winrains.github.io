@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="内存管理的主要目的合理分配内存，减少内存碎片，及时回收资源，提高内存的使用效率。从操作系统层面来说，各个软件在运行时向操作系统请求对计算机内存资源进行快速的分配，并且在适当的时候释放和回收内存资源。常见的一些算法有slab，buddy，jemalloc等思想。从Netty层面来说，其实质就是先分配一块大内存，然后在内存的分配和回收过程中，使用一些数据结构记录内存使用状态，如果有新的分配请求，根据">
+<meta name="keywords" content="源码">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Netty源码分析（7）：内存管理">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;10&#x2F;Netty%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%887%EF%BC%89%EF%BC%9A%E5%86%85%E5%AD%98%E7%AE%A1%E7%90%86&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="内存管理的主要目的合理分配内存，减少内存碎片，及时回收资源，提高内存的使用效率。从操作系统层面来说，各个软件在运行时向操作系统请求对计算机内存资源进行快速的分配，并且在适当的时候释放和回收内存资源。常见的一些算法有slab，buddy，jemalloc等思想。从Netty层面来说，其实质就是先分配一块大内存，然后在内存的分配和回收过程中，使用一些数据结构记录内存使用状态，如果有新的分配请求，根据">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109213327-ce593.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109213328-33ba3.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109213328-c2d83.png">
+<meta property="og:updated_time" content="2020-01-10T12:43:25.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109213327-ce593.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/10/Netty%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%887%EF%BC%89%EF%BC%9A%E5%86%85%E5%AD%98%E7%AE%A1%E7%90%86/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Netty源码分析（7）：内存管理 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/10/Netty%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%887%EF%BC%89%EF%BC%9A%E5%86%85%E5%AD%98%E7%AE%A1%E7%90%86/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Netty源码分析（7）：内存管理
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-10 20:43:25" itemprop="dateCreated datePublished" datetime="2020-01-10T20:43:25+08:00">2020-01-10</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">其它技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/Netty/" itemprop="url" rel="index">
+                    <span itemprop="name">Netty</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <blockquote>
+<p>内存管理的主要目的合理分配内存，减少内存碎片，及时回收资源，提高内存的使用效率。从操作系统层面来说，各个软件在运行时向操作系统请求对计算机内存资源进行快速的分配，并且在适当的时候释放和回收内存资源。常见的一些算法有slab，buddy，jemalloc等思想。从Netty层面来说，其实质就是先分配一块大内存，然后在内存的分配和回收过程中，使用一些数据结构记录内存使用状态，如果有新的分配请求，根据这些状态信息寻找最合适的位置返回并更新数据结构；内存使用完释放后，同步修改数据结构。Netty的内存管理分为有缓冲池和无缓冲池的，有缓冲池的内存分配器会在内存回收时，将信息记录在缓冲池中，下次如果有合适的分配请求则直接从缓冲池中复用。在实践中，由于多线程网络请求处理很快，分配和回收在有缓冲池的（pooled）效率更高。</p>
+</blockquote>
+<a id="more"></a>
+
+<h2 id="7-1-基本概念"><a href="#7-1-基本概念" class="headerlink" title="7.1 基本概念"></a>7.1 基本概念</h2><p>在事件循环读取到数据之后，会进入unsafe的read方法。unsafe内部使用了两个类处理内存的分配，ByteBufAllocator和RecvByteBufAllocator。ByteBufAllocator用来处理内存的分配，RecvByteBufAllocator用来计算此次读循环应该分配多少内存。<br>主事件循环组收到Accept事件后，会创建与客户端连接的NioSocketChannel，并将READ注册在子事件循环组中的selector上面，由事件循环不断select()查询就绪读I/O后交给NioSocketChannel处理。NioSocketChannel在初始化时创建了NioSocketChannelConfig，config内部会创建AdaptiveRecvByteBufAllocator实例用来计算内存大小，ByteBufAllocator.DEFAULT作为事件分配内存的工具类。</p>
+<h3 id="7-1-1-RecvByteBufAllocator"><a href="#7-1-1-RecvByteBufAllocator" class="headerlink" title="7.1.1 RecvByteBufAllocator"></a>7.1.1 RecvByteBufAllocator</h3><p>RecvByteBufAllocator是用于计算下次读循环应该分配多少内存的接口，只有一个方法。读循环是因为分配的初始ByteBuf不一定能够容纳所有读取到的数据，因此可能会多次读取，直到读完客户端发送的数据。（具体逻辑可见AbstractNioByteChannel的read()）</p>
+<figure class="highlight haxe"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">Handle <span class="keyword">new</span><span class="type">Handle</span>();</span></pre></td></tr></table></figure>
+
+<p>newHandle用来返回RecvByteBufAllocator内部的计算器Handle，Handle提供了实际的计算操作，内部保存了记录每次分配多少内存的信息，提供预测缓冲大小等功能，下面是Handle接口：</p>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function">ByteBuf <span class="title">allocate</span><span class="params">(ByteBufAllocator alloc)</span></span>; <span class="comment">// 创建一个空间合理的缓冲，在不浪费空间的情况下能够容纳需要读取的所有inbound的数据，内部由alloc来进行实际的分配</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">int</span> <span class="title">guess</span><span class="params">()</span></span>; <span class="comment">// 猜测所需的缓冲区大小，不进行实际的分配</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">void</span> <span class="title">reset</span><span class="params">(ChannelConfig <span class="built_in">config</span>)</span></span>; <span class="comment">// 每次开始读循环之前，重置相关属性</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">void</span> <span class="title">incMessagesRead</span><span class="params">(<span class="keyword">int</span> numMessages)</span></span>; <span class="comment">// 增加本地读循环的次数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">void</span> <span class="title">lastBytesRead</span><span class="params">(<span class="keyword">int</span> bytes)</span></span>; <span class="comment">// 设置最后一次读到的字节数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">int</span> <span class="title">lastBytesRead</span><span class="params">()</span></span>; <span class="comment">// 最后一次读到的字节数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">void</span> <span class="title">attemptedBytesRead</span><span class="params">(<span class="keyword">int</span> bytes)</span></span>; <span class="comment">// 设置读操作尝试读取的字节数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">void</span> <span class="title">attemptedBytesRead</span><span class="params">()</span></span>; <span class="comment">// 获取尝试读取的字节数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">boolean</span> <span class="title">continueReading</span><span class="params">()</span></span>; <span class="comment">// 判断需要继续读</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">void</span> <span class="title">readComplete</span><span class="params">()</span></span>; <span class="comment">// 读结束后调用</span></span></pre></td></tr></table></figure>
+
+<p>AdaptiveRecvByteBufAllocator是我们实际使用的缓冲管理区，这个类可以动态计算下次需要分配的内存大小，其根据读取到的数据预测所需字节大小，从而自动增加或减少；如果上一次读循环将缓冲填充满，那么预测的字节数会变大。如果连续两次读循环不能填满已分配的缓冲区，则会减少所需的缓冲大小。需要注意的是，这个类只是计算大小，真正的分配动作由ByteBufAllocator完成。<br>AdaptiveRecvByteBufAllocator内部维护了一个SIZE_TABLE数组，使用slab的思想记录了不同的内存块大小，按照分配需要的大小寻找最合适的内存块。SIZE_TABLE数组中的值都是2的n次方，这样便于软硬件进行处理。位置0从16开始，之后每次增加16，直到512；而从512之后起，每次增加一倍，直到int的最大值；这是因为当我需要的内存很小时，增长的幅度也不大，而较大时增长幅度也很大。例如，当我们需要分配一块40的缓冲时，根据SIZE_TABLE会定位到64，index为2。这是SIZE_TABLE的主要作用。</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="number">16</span> <span class="number">32</span> <span class="number">48</span> <span class="number">64</span> <span class="number">80</span> <span class="number">96</span> <span class="number">112</span> <span class="number">128</span> <span class="number">144</span> <span class="number">160</span> <span class="number">176</span> <span class="number">192</span> <span class="number">208</span> <span class="number">224</span> <span class="number">240</span> <span class="number">256</span></span></pre></td></tr></table></figure>
+
+<p>AdaptiveRecvByteBufAllocator在初始化时，会设置三个大小属性：缓冲最小值，初始值和最大值，并根据SIZE_TABLE定位到相应的index，保存在minIndex，initial，maxIndex中。<br>HandleImpl在创建时内部保存了AdaptiveRecvByteBufAllocator的缓冲最小/最大和初始的index，并记录了下次需要分配的缓冲大小nextReceiveBufferSize，guess()时返回的即是该值。每次读循环完成后，会根据实际读取到的字节数和当前缓冲大小重新设置下次需要分配的缓冲大小。程序如下：</p>
+<figure class="highlight glsl"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">private <span class="type">void</span> record(<span class="type">int</span> actualReadBytes) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (actualReadBytes &lt;= SIZE_TABLE[Math.<span class="built_in">max</span>(<span class="number">0</span>, <span class="keyword">index</span> - INDEX_DECREMENT - <span class="number">1</span>)]) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (decreaseNow) &#123; <span class="comment">// 因为连续两次小于缓冲大小才会减小</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">index</span> = Math.<span class="built_in">max</span>(<span class="keyword">index</span> - INDEX_DECREMENT, minIndex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">            nextReceiveBufferSize = SIZE_TABLE[<span class="keyword">index</span>];</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            decreaseNow = <span class="literal">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        &#125; <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">            decreaseNow = <span class="literal">true</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125; <span class="keyword">else</span> <span class="keyword">if</span> (actualReadBytes &gt;= nextReceiveBufferSize) &#123;<span class="comment">//读到的值大于缓冲大小</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">index</span> = Math.<span class="built_in">min</span>(<span class="keyword">index</span> + INDEX_INCREMENT, maxIndex); <span class="comment">// INDEX_INCREMENT=4 index前进4</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        nextReceiveBufferSize = SIZE_TABLE[<span class="keyword">index</span>];</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        decreaseNow = <span class="literal">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">@Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">public <span class="type">void</span> readComplete() &#123; <span class="comment">//读取完成后调用</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    record(totalBytesRead());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>了解了AdaptiveRecvByteBufAllocator之后，以一个实例进行演示。每次读循环开始时，先reset重置此次循环读取到的字节数，读取完成后readComplete会计算并调整下次循环需要分配的缓冲大小。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 默认最小64 初始1024 最大65536</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">AdaptiveRecvByteBufAllocator adAlloctor = <span class="keyword">new</span> <span class="constructor">AdaptiveRecvByteBufAllocator()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">Handle handle =  adAlloctor.<span class="keyword">new</span><span class="constructor">Handle()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"------------读循环1----------------------------"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">handle.reset(null);<span class="comment">// 读取循环开始前先重置，将读取的次数和字节数设置为0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="module-access"><span class="module"><span class="identifier">String</span>.</span></span>format(<span class="string">"读循环1-1：需要分配的大小：%d"</span>, handle.guess<span class="literal">()</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">handle.last<span class="constructor">BytesRead(1024)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="module-access"><span class="module"><span class="identifier">String</span>.</span></span>format(<span class="string">"读循环1-2：需要分配的大小：%d"</span>, handle.guess<span class="literal">()</span>));<span class="comment">// 读循环中缓冲大小不变</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">handle.last<span class="constructor">BytesRead(1024)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">handle.read<span class="constructor">Complete()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"------------读循环2----------------------------"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">handle.reset(null);<span class="comment">// 读取循环开始前先重置，将读取的次数和字节数设置为0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="module-access"><span class="module"><span class="identifier">String</span>.</span></span>format(<span class="string">"读循环2-1：需要分配的大小：%d"</span>, handle.guess<span class="literal">()</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">handle.last<span class="constructor">BytesRead(1024)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">handle.read<span class="constructor">Complete()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"------------读循环3----------------------------"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">handle.reset(null);<span class="comment">// 读取循环开始前先重置，将读取的次数和字节数设置为0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="module-access"><span class="module"><span class="identifier">String</span>.</span></span>format(<span class="string">"读循环3-1：需要分配的大小：%d"</span>, handle.guess<span class="literal">()</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">handle.last<span class="constructor">BytesRead(1024)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">handle.read<span class="constructor">Complete()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"------------读循环4----------------------------"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">handle.reset(null);<span class="comment">// 读取循环开始前先重置，将读取的次数和字节数设置为0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="module-access"><span class="module"><span class="identifier">String</span>.</span></span>format(<span class="string">"读循环4-1：需要分配的大小：%d"</span>, handle.guess<span class="literal">()</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">handle.read<span class="constructor">Complete()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//###############################</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//------------读循环1----------------------------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//读循环1-1：需要分配的大小：1024</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//读循环1-2：需要分配的大小：1024</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//------------读循环2----------------------------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//读循环2-1：需要分配的大小：16384 （1024 × 2^INDEX_INCREMENT）</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//------------读循环3----------------------------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//读循环3-1：需要分配的大小：16384</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//------------读循环4----------------------------</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//读循环4-1：需要分配的大小：8192  （16384 /  2^INDEX_DECREMENT）</span></span></pre></td></tr></table></figure>
+
+<h3 id="7-1-2-内存分配算法"><a href="#7-1-2-内存分配算法" class="headerlink" title="7.1.2 内存分配算法"></a>7.1.2 内存分配算法</h3><p>Netty采用了jemalloc的思想，这是FreeBSD实现的一种并发malloc的算法。jemalloc依赖多个Arena来分配内存，运行中的应用都有固定数量的多个Arena，默认的数量与处理器的个数有关。系统中有多个Arena的原因是由于各个线程进行内存分配时竞争不可避免，这可能会极大的影响内存分配的效率，为了缓解高并发时的线程竞争，Netty允许使用者创建多个分配器（Arena）来分离锁，提高内存分配效率，当然是以内存来作为代价的。<br>线程首次分配/回收内存时，首先会为其分配一个固定的Arena。线程选择Arena时使用round-robin的方式，也就是顺序轮流选取，这是因为jemalloc任务依靠线程地址进行hash选取是不可靠的。<br>jemalloc的另一个思路是使用Thread-local storage，每个线程各种保存Arena和缓存池信息，这样可以减少竞争并提高访问效率。Arena将内存分为很多Chunk进行管理，Chunk内部保存Page，以页为单位申请。<br>申请内存分配时，会讲分配的规格分为几类：TINY，SAMLL，NORMAL和HUGE，分别对应不同的范围，处理过程也不相同。</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109213327-ce593.png" alt="img"></p>
+<p>Arena</p>
+<h3 id="7-1-3-ByteBufAllocator"><a href="#7-1-3-ByteBufAllocator" class="headerlink" title="7.1.3 ByteBufAllocator"></a>7.1.3 ByteBufAllocator</h3><p>这个类用来进行实际的内存分配，默认使用的是ByteBufAllocator.DEFAULT,初始化时会根据配置和平台进行赋值。<code>io.netty.allocator.type</code>可以设置为<code>unpooled</code>和<code>pooled</code>指定是否需要缓冲池，如果不设置则会根据平台判断。一般情况下，我们会在linux运行，使用的是有缓冲池的内存分配器。</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">//</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">String allocType = SystemPropertyUtil.<span class="builtin-name">get</span>(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        <span class="string">"io.netty.allocator.type"</span>, PlatformDependent.isAndroid() ? <span class="string">"unpooled"</span> : <span class="string">"pooled"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">allocType = allocType.toLowerCase(Locale.US).trim();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">ByteBufAllocator alloc;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (<span class="string">"unpooled"</span>.equals(allocType)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    alloc = UnpooledByteBufAllocator.DEFAULT;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    logger.<span class="builtin-name">debug</span>(<span class="string">"-Dio.netty.allocator.type: &#123;&#125;"</span>, allocType);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">&#125; <span class="keyword">else</span> <span class="keyword">if</span> (<span class="string">"pooled"</span>.equals(allocType)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    alloc = PooledByteBufAllocator.DEFAULT;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    logger.<span class="builtin-name">debug</span>(<span class="string">"-Dio.netty.allocator.type: &#123;&#125;"</span>, allocType);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">&#125; <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    alloc = PooledByteBufAllocator.DEFAULT;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    logger.<span class="builtin-name">debug</span>(<span class="string">"-Dio.netty.allocator.type: pooled (unknown: &#123;&#125;)"</span>, allocType);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h3 id="7-1-4-PooledByteBufAllocator"><a href="#7-1-4-PooledByteBufAllocator" class="headerlink" title="7.1.4 PooledByteBufAllocator"></a>7.1.4 PooledByteBufAllocator</h3><p>Netty实际使用内存分配器会根据配置采用PooledByteBufAllocator.DEFAULT或PooledByteBufAllocator.DEFAULT，所有事件循环线程使用的是一个分配器实例。<br>PooledByteBufAllocator将内存分为PoolArena，PoolChunk和PoolPage，Chunk中包含多个内存页，Arena包含3个Chunk。在PooledByteBufAllocator类加载时，会对这些配置进行初始化设置。</p>
+<ul>
+<li>最大chunk大小：(Integer.max_value+1)/2 约为1GB</li>
+<li>最大page大小：默认为8192，要求大于4096且为2的n次方</li>
+<li>最大顺序：默认为11，在0-14之间</li>
+<li>默认chunk大小：页大小* 2^order，即chunk由2的order个page组成</li>
+<li>Arena个数： Arena分为堆内存和直接内存，默认有3个chunk。由于pool的大小不能超过最大内存的一半，并且我们在事件循环组中使用了2×cores个线程，为了避免通过jvm进行同步，尽量选取大于2×cores的值。在netty中，使用2×cores和堆/直接内存/2/3的最小值作为Arena的数量</li>
+<li>在内存分配的使用上，使用tiny：512，small：256;，normal：64作为阀值</li>
+<li>默认缓存大小为32KB，这是jemalloc的推荐</li>
+<li>DEFAULT_CACHE_TRIM_INTERVAL：默认为8192，超过这个阀值会被free</li>
+</ul>
+<p>PooledByteBufAllocator内部有两个重要数组<code>HeapArena</code>和<code>DirectArena</code>，用来记录堆内存和直接内存当前的使用状态。PoolArena都实现了PoolArenaMetric接口，用于测量内存使用状况。PooledByteBufAllocator初始化时，会根据之前的配置，初始化Arena信息，保存在heapArenas和directArenas，并分布使用两个list记录Metric。除此之外，还有一个重要的对象PoolThreadLocalCache，其继承了FastThreadLocal，用于线程的本地缓存，在内存管理中，线程本地内存缓区的信息会保存在PoolThreadCache对象中。<br>PooledByteBufAllocator覆盖的newHeapBuffer和newDirectBuffer用来分配内存，我们以newHeapBuffer为例学习。</p>
+<h3 id="7-1-5-PoolArena"><a href="#7-1-5-PoolArena" class="headerlink" title="7.1.5 PoolArena"></a>7.1.5 PoolArena</h3><p>PoolArena内部有三个重要的链表，tinySubpagePools/smallSubpagePools和PoolChunkList。前两个用于保存page的使用状态，最后一个用来保存chunk的使用状态。<br><strong>tinySubpagePools</strong><br>用来保存为tiny规格分配的内存页的链表，共有32个这样的链表，保存着从16开始到512字节的内存页，32的大小是固定的，因为正好匹配tiny规格的范围(0,512),间隔为16。<br><img src="http://image.winrains.cn/2019/11/20191109213328-33ba3.png" alt="img"></p>
+<p>Tiny</p>
+<p>例如，当分配64字节的内存时，会从tinySubpagePools查找合适的内存页面，如果找到，会调用该页的allocation方法，尝试在该页继续分配bytebuf，如果未找到则会创建新的页，然后加入到这个链表。<br><strong>smallSubpagePools</strong><br>用来保存为small规格分配的内存页的链表，共有4个这样的链表，保存着从1024开始到8192字节的内存页，链表数组的大小不是固定的，根据PageSize有所变化，计算公式是1024 * 2^(4-1) = PageSIze，也就是说从1024开始直到PageSize，每次乘以2，共需要几次。默认的PageSize为8192，2的13次方，1024*2的3次方=8192，因此共有4个。</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109213328-c2d83.png" alt="img"></p>
+<p>SMALL</p>
+<p>Arena在分配samll范围内的内存时，会从这个链表进行查找。<br><strong>PoolChunkList</strong><br>Arena内部有6个Chunk链表，保存在ChunkList对象中；而ChunkList本身也是链表，共有6个：</p>
+<ul>
+<li><p>qInit：存储剩余内存0-25%的chunk</p>
+</li>
+<li><p>q000：存储剩余内存1-50%的chunk</p>
+</li>
+<li><p>q025：存储剩余内存25-75%的chunk</p>
+</li>
+<li><p>q050：存储剩余内存50-100%个chunk</p>
+</li>
+<li><p>q075：存储剩余内存75-100%个chunk</p>
+</li>
+<li><p>q100：存储剩余内存100%chunk</p>
+</li>
+</ul>
+<p>  Tiny</p>
+<p>  当分配内存时，Arena会在chunklist查找可用的chunk，如果没有才会创建新的chunk，chunk内部也保存了页的当前使用状态</p>
+<p>至此，我们只是简单了解了一下Arena相关的几个数据结构，需要记住的是所有线程共享使用一个Allocator，Allocator内部保存了内存分配的相关配置信息，包含多个Arena；每个线程会固定使用一个Arena，Arena中记录了Chunk链表和Page的使用信息。这些信息对于之后的内存分配是很重要的。</p>
+<h2 id="7-2-本地缓存"><a href="#7-2-本地缓存" class="headerlink" title="7.2 本地缓存"></a>7.2 本地缓存</h2><p>jemalloc的另一个重要的概念是本地缓冲Thread-Local Storage,将释放后的内存使用信息保存在线程中以提高内存分配效率。<br>在Netty中，担负TLS的类有：</p>
+<ul>
+<li>PoolThreadLocalCache 类似ThreadLocal对象，内部保存线程本地缓存</li>
+<li>PoolThreadCache 缓冲池，每个线程一个实例，保存回收的内存信息</li>
+<li>MemoryRegionCache 内部有一个队列，保存了内存释放时的数据Chunk和Handle</li>
+<li>Recycler 一个轻量级对象池，</li>
+</ul>
+<h3 id="7-2-1-PoolThreadLocalCache"><a href="#7-2-1-PoolThreadLocalCache" class="headerlink" title="7.2.1 PoolThreadLocalCache"></a>7.2.1 PoolThreadLocalCache</h3><p>PoolThreadLocalCache继承FastThreadLocal对象，FastThreadLocal是netty自己实现的一直ThreadLocal机制，详细实现可以参见ThreadLocal一节。我们可以将其当做一个普通的FastThreadLocal理解，每个线程保存了PoolThreadCache对象，使用get时，如果ThreadLocal内部没有则会调用initialValue()方法创建。PoolThreadCache创建过程中会选择内存使用最少的Arena来创建PoolThreadCache。</p>
+<figure class="highlight scala"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">final</span> <span class="class"><span class="keyword">class</span> <span class="title">PoolThreadLocalCache</span> <span class="keyword">extends</span> <span class="title">FastThreadLocal&lt;PoolThreadCache&gt;</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">@Override</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">protected</span> synchronized <span class="type">PoolThreadCache</span> initialValue() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">final</span> <span class="type">PoolArena</span>&lt;byte[]&gt; heapArena = leastUsedArena(heapArenas);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">final</span> <span class="type">PoolArena</span>&lt;<span class="type">ByteBuffer</span>&gt; directArena = leastUsedArena(directArenas);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> <span class="keyword">new</span> <span class="type">PoolThreadCache</span>(heapArena, directArena, tinyCacheSize, smallCacheSize, normalCacheSize,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">                <span class="type">DEFAULT_MAX_CACHED_BUFFER_CAPACITY</span>, <span class="type">DEFAULT_CACHE_TRIM_INTERVAL</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">@Override</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">protected</span> void onRemoval(<span class="type">PoolThreadCache</span> threadCache) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        threadCache.free();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> &lt;<span class="type">T</span>&gt; <span class="type">PoolArena</span>&lt;<span class="type">T</span>&gt; leastUsedArena(<span class="type">PoolArena</span>&lt;<span class="type">T</span>&gt;[] arenas) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (arenas == <span class="literal">null</span> || arenas.length == <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">return</span> <span class="literal">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="type">PoolArena</span>&lt;<span class="type">T</span>&gt; minArena = arenas[<span class="number">0</span>];</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">for</span> (int i = <span class="number">1</span>; i &lt; arenas.length; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">            <span class="type">PoolArena</span>&lt;<span class="type">T</span>&gt; arena = arenas[i];</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (arena.numThreadCaches.get() &lt; minArena.numThreadCaches.get()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">                minArena = arena;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> minArena;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h3 id="7-2-2-PoolThreadCache"><a href="#7-2-2-PoolThreadCache" class="headerlink" title="7.2.2 PoolThreadCache"></a>7.2.2 PoolThreadCache</h3><p>PoolThreadCache记录了线程本地保存的内存池，分配的ByteBuf释放时会被保存到该对象的实例中。PoolThreadCache内部保存了tiny/small/normal的堆内存和直接内存的MemoryRegionCache数组</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">final</span> PoolArena&lt;<span class="keyword">byte</span>[]&gt; heapArena; <span class="comment">// 堆Arena</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">final</span> PoolArena&lt;ByteBuffer&gt; directArena; <span class="comment">// 直接内存Arena</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> MemoryRegionCache&lt;<span class="keyword">byte</span>[]&gt;[] tinySubPageHeapCaches;<span class="comment">// tiny-heap</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> MemoryRegionCache&lt;<span class="keyword">byte</span>[]&gt;[] smallSubPageHeapCaches;<span class="comment">// small-heap</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> MemoryRegionCache&lt;<span class="keyword">byte</span>[]&gt;[] normalHeapCaches;<span class="comment">// normal-heap</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> MemoryRegionCache&lt;ByteBuffer&gt;[] tinySubPageDirectCaches;<span class="comment">// tiny-direct</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> MemoryRegionCache&lt;ByteBuffer&gt;[] smallSubPageDirectCaches;<span class="comment">// small-direct</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> MemoryRegionCache&lt;ByteBuffer&gt;[] normalDirectCaches;<span class="comment">// normal-direct</span></span></pre></td></tr></table></figure>
+
+<p>数组的大小与Arena中tinySubpagePools和smallSubpagePools的大小一样，NormalMemoryRegionCache继承了MemoryRegionCache对象，内部的queue保存了chunk和handle，根据这两个可以定位到chunk中对应的范围。</p>
+<h3 id="7-2-3-Recycler"><a href="#7-2-3-Recycler" class="headerlink" title="7.2.3 Recycler"></a>7.2.3 Recycler</h3><p>Recycler是一个基于ThreadLocal栈的轻量级的对象池，在实现上，线程内部的threadLocal保存Stack对象，Stack内部保存了Handler，<br>内部有一个Handle接口，recycle方法用来回收对象</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public<span class="built_in"> interface </span>Handle&lt;T&gt; &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    void recycle(T object);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>在使用时，需要重写Recycler的newObject方法，该方法会在get时使用，如果本地线程池没有可重复使用的对象则调用newObject返回一个新对象。</p>
+<figure class="highlight haxe"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="keyword">static</span> Recycler&lt;MObject&gt; RECYCLER = <span class="keyword">new</span> <span class="type">Recycler</span>&lt;MObject&gt;() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    @Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    protected MObject <span class="keyword">new</span><span class="type">Object</span>(Handle&lt;MObject&gt; handle) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> <span class="keyword">new</span> <span class="type">MObject</span>(handle);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">&#125;;</span></pre></td></tr></table></figure>
+
+<p>之后，我们就可以讲对象的获取交给RECYCLER处理</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public static void main(String<span class="literal">[]</span> args) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    MObject obj1 = <span class="module-access"><span class="module"><span class="identifier">RECYCLER</span>.</span></span>get<span class="literal">()</span>;<span class="comment">// 获取对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(obj1);  <span class="comment">// obj1 地址 1418370913</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    MObject obj2 = <span class="module-access"><span class="module"><span class="identifier">RECYCLER</span>.</span></span>get<span class="literal">()</span>; <span class="comment">// 再次获取</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(obj2); <span class="comment">// obj2 地址 361993357</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    obj1.free<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    obj2.free<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="module-access"><span class="module"><span class="identifier">RECYCLER</span>.</span></span>get<span class="literal">()</span>);<span class="comment">// 地址1418370913，重用了obj1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="module-access"><span class="module"><span class="identifier">RECYCLER</span>.</span></span>get<span class="literal">()</span>);<span class="comment">//   地址625576447 创建了新对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>Recycler的get方法，首先从本地获取stack，如果为空会创建并保存到线程本地。之后从stack中获取对象，如果存在则返回。注意stack中的对象是Handler对象，Handler的value才是newObject返回的对象。</p>
+<figure class="highlight lasso"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> final T get() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (maxCapacityPerThread == <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> newObject((<span class="keyword">Handle</span>&lt;T&gt;) NOOP_HANDLE);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">Stack</span>&lt;T&gt; <span class="built_in">stack</span> = threadLocal.get(); <span class="comment">// 从本地stack中获取 没有则创建</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    DefaultHandle&lt;T&gt; <span class="keyword">handle</span> = <span class="built_in">stack</span>.pop(); <span class="comment">// 获取stack里面的handler</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (<span class="keyword">handle</span> == <span class="built_in">null</span>) &#123; <span class="comment">// 如果handler为空，则创建一个，</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">handle</span> = <span class="built_in">stack</span>.newHandle();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">handle</span>.value = newObject(<span class="keyword">handle</span>); <span class="comment">// 创建对象</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> (T) <span class="keyword">handle</span>.value;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>释放对象时，需要通过Handler的recycle方法完成，</p>
+<figure class="highlight cs"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">recycle</span>(<span class="params">Object <span class="keyword">object</span></span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (<span class="keyword">object</span> != <span class="keyword">value</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> IllegalArgumentException(<span class="string">"object does not belong to handle"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    stack.push(<span class="keyword">this</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h2 id="7-3-内存分配与回收"><a href="#7-3-内存分配与回收" class="headerlink" title="7.3 内存分配与回收"></a>7.3 内存分配与回收</h2><h3 id="7-3-1-内存分配"><a href="#7-3-1-内存分配" class="headerlink" title="7.3.1 内存分配"></a>7.3.1 内存分配</h3><p>netty进行分配时，主要流程比较简单，首先从对象池获取ByteBuf，之后从线程本地缓存MemoryRegionCache中查找内存页，再从Arena的内存池中查找，最后查找Chunk，分配SubPage，最后初始化bytebuf。</p>
+<ol>
+<li>从线程的本地缓存中获取PoolThreadCache对象，如果没有，则选择使用空间最少的Arena创建PoolThreadCache实例并保存至线程本地</li>
+<li>使用PoolThreadCache的Arena从对象池中获取ByteBuf，对象池中默认没有释放的对象，会创建新对象。Arena根据HAS_UNSAFE判断是PooledUnsafeHeapByteBuf还是PooledHeapByteBuf进行相应处理。</li>
+<li>根据请求的内存大小，判断其规格：tiny/small/normal/huge，<ul>
+<li>若大小为tiny(0,512），从本地缓存的PoolThreadCache的MemoryRegionCache中查看是否有释放后的内存可以重用，若有则初始化PooledByteBuf；本地缓存池中没有可重用内存，先根据大小定位到在Arena的tinySubpagePools的位置idx，然后在其中查找可用的PoolSubpage，如果找到内存页，则使用内存页的chunk的初始化PoolSubpage。</li>
+<li>若大小为small[512,pagesize]，逻辑与tiny类似，只是寻找缓存所在Arena中属性有所不同。</li>
+<li>tiny和small在MemoryRegionCache和tinySubpagePools/smallSubpagePools中未找到可用分配的内存页则会调用allocateNormal寻找chunk</li>
+<li>若大小为normal(pagesize,chunksize]，会先从MemoryRegionCache中查找可用的回收后的缓存，如果未找到则会调用allocateNormal寻找chunk</li>
+</ul>
+</li>
+<li>寻找chunk时，先从q050-&gt;q025-&gt;q000-&gt;qInit-&gt;q075查找可用的chunk，如果没有找到，会创建PoolChunk对象的实例，创建chunk时会分配实际内存（heap使用byte[]，direct使用ByteBuffer.allocateDirect）。找到chunk后，在chunk中查找或创建内存页，最后返回一个Handle。Handle是一个long型整数，记录了chunk和内部的偏移。</li>
+<li>chunk寻找内存页的过程：根据请求大小计算idx，并找到tinySubpagePools或smallSubpagePools中idx位置的链表head；再根据大小计算在chunk的memoryMap叶子节点的index，如果chunk的subpages数组中index位置为空，说明没有创建PoolSubpage，创建新的内存页之后，并将其加入到chunk的subpages数组。最后修改subpage中的bitmap，讲该内存页加入到tinySubpagePools或smallSubpagePools对应位置的链表中。最后计算出分配出的内存的Handle，<code>0x4000000000000000L | (long) bitmapIdx &lt;&lt; 32 | memoryMapIdx;</code> 内部保存了所分配的内存在chunk中的内存页位置memoryMapIdx和在内存页中的位置bitmapIdx</li>
+<li>获得Handle之后，对第2步中获取的ByteBuf进行初始化。</li>
+<li>如果chunk是新创建的，还需要加入到Arena的chunklist中。</li>
+</ol>
+<h3 id="7-3-2-内存释放"><a href="#7-3-2-内存释放" class="headerlink" title="7.3.2 内存释放"></a>7.3.2 内存释放</h3><p>调用ByteBuf的release方法可以释放内存，主要分为两步：使用Arena释放ByteBuf，将ByteBuf回收到对象池中。<br>Arena释放ByteBuf时，如果线程本地PoolThreadCache不为空，查找PoolThreadCache的Caches数组中对应的MemoryRegionCache，将chunk和Handle加入到MemoryRegionCache的queue中。</p>
+<blockquote>
+<p>作者：史圣杰</p>
+<p>来源：<a href="https://www.jianshu.com/p/0d664f415914" target="_blank" rel="noopener">https://www.jianshu.com/p/0d664f415914</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E6%BA%90%E7%A0%81/" rel="tag"># 源码</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/10/Netty%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%886%EF%BC%89%EF%BC%9A%E8%AF%BB%E5%86%99%E6%B5%81%E7%A8%8B/" rel="prev" title="Netty源码分析（6）：读写流程">
+      <i class="fa fa-chevron-left"></i> Netty源码分析（6）：读写流程
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/10/Netty%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%888%EF%BC%89%EF%BC%9A%E6%97%A5%E5%BF%97/" rel="next" title="Netty源码分析（8）：日志">
+      Netty源码分析（8）：日志 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#7-1-基本概念"><span class="nav-number">1.</span> <span class="nav-text">7.1 基本概念</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#7-1-1-RecvByteBufAllocator"><span class="nav-number">1.1.</span> <span class="nav-text">7.1.1 RecvByteBufAllocator</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#7-1-2-内存分配算法"><span class="nav-number">1.2.</span> <span class="nav-text">7.1.2 内存分配算法</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#7-1-3-ByteBufAllocator"><span class="nav-number">1.3.</span> <span class="nav-text">7.1.3 ByteBufAllocator</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#7-1-4-PooledByteBufAllocator"><span class="nav-number">1.4.</span> <span class="nav-text">7.1.4 PooledByteBufAllocator</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#7-1-5-PoolArena"><span class="nav-number">1.5.</span> <span class="nav-text">7.1.5 PoolArena</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#7-2-本地缓存"><span class="nav-number">2.</span> <span class="nav-text">7.2 本地缓存</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#7-2-1-PoolThreadLocalCache"><span class="nav-number">2.1.</span> <span class="nav-text">7.2.1 PoolThreadLocalCache</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#7-2-2-PoolThreadCache"><span class="nav-number">2.2.</span> <span class="nav-text">7.2.2 PoolThreadCache</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#7-2-3-Recycler"><span class="nav-number">2.3.</span> <span class="nav-text">7.2.3 Recycler</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#7-3-内存分配与回收"><span class="nav-number">3.</span> <span class="nav-text">7.3 内存分配与回收</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#7-3-1-内存分配"><span class="nav-number">3.1.</span> <span class="nav-text">7.3.1 内存分配</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#7-3-2-内存释放"><span class="nav-number">3.2.</span> <span class="nav-text">7.3.2 内存释放</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

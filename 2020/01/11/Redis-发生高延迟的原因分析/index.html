@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="Redis 是一种内存数据库，将数据保存在内存中，读写效率要比传统的将数据保存在磁盘上的数据库要快很多。但是 Redis 也会发生延迟时，这是就需要我们对其产生原因有深刻的了解，以便于快速排查问题，解决 Redis的延迟问题">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Redis 发生高延迟的原因分析">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;11&#x2F;Redis-%E5%8F%91%E7%94%9F%E9%AB%98%E5%BB%B6%E8%BF%9F%E7%9A%84%E5%8E%9F%E5%9B%A0%E5%88%86%E6%9E%90&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="Redis 是一种内存数据库，将数据保存在内存中，读写效率要比传统的将数据保存在磁盘上的数据库要快很多。但是 Redis 也会发生延迟时，这是就需要我们对其产生原因有深刻的了解，以便于快速排查问题，解决 Redis的延迟问题">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212095904-ef6d8.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212095906-9bcf7.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212095908-8d026.png">
+<meta property="og:updated_time" content="2020-01-11T03:37:13.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212095904-ef6d8.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/11/Redis-%E5%8F%91%E7%94%9F%E9%AB%98%E5%BB%B6%E8%BF%9F%E7%9A%84%E5%8E%9F%E5%9B%A0%E5%88%86%E6%9E%90/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Redis 发生高延迟的原因分析 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/11/Redis-%E5%8F%91%E7%94%9F%E9%AB%98%E5%BB%B6%E8%BF%9F%E7%9A%84%E5%8E%9F%E5%9B%A0%E5%88%86%E6%9E%90/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Redis 发生高延迟的原因分析
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-11 11:37:13" itemprop="dateCreated datePublished" datetime="2020-01-11T11:37:13+08:00">2020-01-11</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/Redis/" itemprop="url" rel="index">
+                    <span itemprop="name">Redis</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>Redis 是一种内存数据库，将数据保存在内存中，读写效率要比传统的将数据保存在磁盘上的数据库要快很多。但是 Redis 也会发生延迟时，这是就需要我们对其产生原因有深刻的了解，以便于快速排查问题，解决 Redis的延迟问题</p>
+<a id="more"></a>
+
+<h2 id="一条命令执行过程"><a href="#一条命令执行过程" class="headerlink" title="一条命令执行过程"></a>一条命令执行过程</h2><p>在本文场景下，延迟 (latency) 是指从客户端发送命令到客户端接收到命令返回值的时间间隔。所以我们先来看一下 Redis 一条命令执行的步骤，其中每个步骤出问题都可能导致高延迟。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212095904-ef6d8.png" alt="img"></p>
+<p>上图是 Redis 客户端发送一条命令的执行过程示意图，绿色的是执行步骤，而蓝色的则是可能出现的导致高延迟的原因。</p>
+<p>网络连接限制、网络传输速率和CPU性能等是所有服务端都可能产生的性能问题。但是 Redis 有自己独有的可能导致高延迟的问题：命令或者数据结构误用、持久化阻塞和内存交换。</p>
+<p>而且更为致命的是，Redis 采用单线程和事件驱动的机制来处理网络请求，分别有对应的连接应答处理器，命令请求处理器和命令回复处理器来处理客户端的网络请求事件，处理完一个事件就继续处理队列中的下一个。一条命令处理出现了高延迟会影响接下来处于排队状态的其他命令。有关 Redis 事件处理机制的可以参考<a href="http://remcarpediem.net/article/1aa2da89/" target="_blank" rel="noopener">本篇文章</a>。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212095906-9bcf7.png" alt="img"></p>
+<p>对于高延迟，Redis 原生提供慢查询统计功能，执行 slowlog get {n} 命令可以获取最近的 n 条慢查询命令，默认对于执行超过10毫秒(可配置)的命令都会记录到一个定长队列中，线上实例建议设置为1毫秒便于及时发现毫秒级以上的命令。</p>
+<figure class="highlight excel"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"># 超过 slowlog-<span class="built_in">log</span>-slower-than 阈值的命令都会被记录到慢查询队列中</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"># 队列最大长度为 slowlog-<span class="built_in">max</span>-<span class="built_in">len</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">slowlog-<span class="built_in">log</span>-slower-than <span class="number">10000</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">slowlog-<span class="built_in">max</span>-<span class="built_in">len</span> <span class="number">128</span></span></pre></td></tr></table></figure>
+
+<p>如果命令执行时间在毫秒级，则实例实际OPS只有1000左右。慢查询队列长度默认128，可适当调大。慢查询本身只记录了命令执行时间，不包括数据网络传输时间和命令排队时间，因此客户端发生阻塞异常 后，可能不是当前命令缓慢，而是在等待其他命令执行。需要重点比对异常和慢查询发生的时间点，确认是否有慢查询造成的命令阻塞排队。</p>
+<p>slowlog的输出格式如下所示。第一个字段表示该条记录在所有慢日志中的序号，最新的记录被展示在最前面；第二个字段是这条记录被记录时的系统时间，可以用 date 命令来将其转换为友好的格式第三个字段表示这条命令的响应时间，单位为 us (微秒)；第四个字段为对应的 Redis 操作。</p>
+<figure class="highlight lsl"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">&gt; slowlog get</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="number">1</span>) <span class="number">1</span>) (<span class="type">integer</span>) <span class="number">26</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">   <span class="number">2</span>) (<span class="type">integer</span>) <span class="number">1450253133</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">   <span class="number">3</span>) (<span class="type">integer</span>) <span class="number">43097</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">   <span class="number">4</span>) <span class="number">1</span>) <span class="string">"flushdb"</span></span></pre></td></tr></table></figure>
+
+<p>下面我们就来依次看一下不合理地使用命令或者数据结构、持久化阻塞和内存交换所导致的高延迟问题。</p>
+<h2 id="不合理的命令或者数据结构"><a href="#不合理的命令或者数据结构" class="headerlink" title="不合理的命令或者数据结构"></a>不合理的命令或者数据结构</h2><p>一般来说 Redis 执行命令速度都非常快，但是当数据量达到一定级别时，某些命令的执行就会花费大量时间，比如对一个包含上万个元素的 hash 结构执行 hgetall 操作，由于数据量比较大且命令算法复杂度是 O(n)，这条命令执行速度必然很慢。</p>
+<p>这个问题就是典型的不合理使用命令和数据结构。对于高并发的场景我们应该尽量避免在大对象上执行算法复杂度超过 O(n) 的命令。对于键值较多的 hash 结构可以使用 scan 系列命令来逐步遍历，而不是直接使用 hgetall 来全部获取。</p>
+<p>Redis 本身提供发现大对象的工具，对应命令：redis-cli-h {ip} -p {port} bigkeys。这条命令会使用 scan 从指定的 Redis DB 中持续采样，实时输出当时得到的 value 占用空间最大的 key 值，并在最后给出各种数据结构的 biggest key 的总结报告。</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">&gt; redis-cli -h host -p <span class="number">12345</span> --bigkeys</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"># Scanning the entire keyspace to find biggest keys as well as</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"># average sizes per key type.  You can use -i <span class="number">0.1</span> to sleep <span class="number">0.1</span> sec</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"># per <span class="number">100</span> SCAN commands (<span class="keyword">not</span> usually needed).</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">[<span class="number">00.00</span>%] Biggest hash   found so far <span class="string">'idx:user'</span> with <span class="number">1</span> fields</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">[<span class="number">00.00</span>%] Biggest hash   found so far <span class="string">'idx:product'</span> with <span class="number">3</span> fields</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">[<span class="number">00.00</span>%] Biggest hash   found so far <span class="string">'idx:order'</span> with <span class="number">14</span> fields</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">[<span class="number">02.29</span>%] Biggest hash   found so far <span class="string">'idx:fund'</span> with <span class="number">16</span> fields</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">[<span class="number">02.29</span>%] Biggest hash   found so far <span class="string">'idx:pay'</span> with <span class="number">69</span> fields</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">[<span class="number">04.45</span>%] Biggest <span class="keyword">set</span>    found so far <span class="string">'indexed_word_set'</span> with <span class="number">1482</span> members</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">[<span class="number">05.93</span>%] Biggest hash   found so far <span class="string">'idx:address'</span> with <span class="number">159</span> fields</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">[<span class="number">11.79</span>%] Biggest hash   found so far <span class="string">'idx:reply'</span> with <span class="number">196</span> fields</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">-------- summary -------</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">Sampled <span class="number">1484</span> keys <span class="keyword">in</span> the keyspace!</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">Total key length <span class="keyword">in</span> bytes <span class="keyword">is</span> <span class="number">13488</span> (avg len <span class="number">9.09</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">Biggest    <span class="keyword">set</span> found <span class="string">'indexed_word_set'</span> has <span class="number">1482</span> members</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">Biggest   hash found <span class="string">'idx:的'</span> has <span class="number">196</span> fields</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"><span class="number">0</span> <span class="built_in">string</span>s with <span class="number">0</span> bytes (<span class="number">00.00</span>% of keys, avg size <span class="number">0.00</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line"><span class="number">0</span> lists with <span class="number">0</span> items (<span class="number">00.00</span>% of keys, avg size <span class="number">0.00</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line"><span class="number">2</span> sets with <span class="number">1710</span> members (<span class="number">00.13</span>% of keys, avg size <span class="number">855.00</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line"><span class="number">1482</span> hashs with <span class="number">6731</span> fields (<span class="number">99.87</span>% of keys, avg size <span class="number">4.54</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line"><span class="number">0</span> zsets with <span class="number">0</span> members (<span class="number">00.00</span>% of keys, avg size <span class="number">0.00</span>)</span></pre></td></tr></table></figure>
+
+<h3 id="持久化阻塞"><a href="#持久化阻塞" class="headerlink" title="持久化阻塞"></a>持久化阻塞</h3><p>对于开启了持久化功能的Redis节点，需要排查是否是持久化导致的阻 塞。持久化引起主线程阻塞的操作主要有：fork 阻塞、AOF刷盘阻塞。</p>
+<p>fork 操作发生在 RDB 和 AOF 重写时，Redis 主线程调用 fork 操作产生共享内存的子进程，由子进程完成对应的持久化工作。如果 fork 操作本身耗时过长，必然会导致主线程的阻塞。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212095908-8d026.png" alt="img"></p>
+<p>Redis 执行 fork 操作产生的子进程内存占用量表现为与父进程相同，理论上需要一倍的物理内存来完成相应的操作。但是 Linux 具有写时复制技术 (copy-on-write)，父子进程会共享相同的物理内存页，当父进程处理写请求时会对需要修改的页复制出一份副本完成写操作，而子进程依然读取 fork 时整个父进程的内存快照。所以，一般来说，fork 不会消耗过多时间。</p>
+<p>可以执行<code>info stats</code>命令获取到 latest_fork_usec 指标，表示 Redis 最近一次 fork 操作耗时，如果耗时很大，比如超过1秒，则需要做出优化调整。</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">&gt; redis-cli -c -p <span class="number">7000</span> info | grep -w latest_fork_usec</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">latest_fork_usec:<span class="number">315</span></span></pre></td></tr></table></figure>
+
+<p>当我们开启AOF持久化功能时，文件刷盘的方式一般采用每秒一次，后 台线程每秒对AOF文件做 fsync 操作。当硬盘压力过大时，fsync 操作需要等待，直到写入完成。如果主线程发现距离上一次的 fsync 成功超过2秒，为了数据安全性它会阻塞直到后台线程执行 fsync 操作完成。这种阻塞行为主要是硬盘压力引起，可以查看 Redis日志识别出这种情况，当发生这种阻塞行为时，会打印如下日志：</p>
+<figure class="highlight livescript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">Asynchronous AOF fsync <span class="keyword">is</span> taking too long (disk <span class="keyword">is</span> busy). <span class="string">\</span> </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">Writing the AOF buffer without waiting <span class="keyword">for</span> fsync <span class="keyword">to</span> complete, <span class="string">\</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">this</span> may slow down Redis.</span></pre></td></tr></table></figure>
+
+<p>也可以查看 info persistence 统计中的 aof_delayed_fsync 指标，每次发生 fdatasync 阻塞主线程时会累加。</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">&gt;info persistence</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">loading:<span class="number">0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">aof_pending_bio_fsync:<span class="number">0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">aof_delayed_fsync:<span class="number">0</span></span></pre></td></tr></table></figure>
+
+<h3 id="内存交换"><a href="#内存交换" class="headerlink" title="内存交换"></a>内存交换</h3><p>内存交换（swap）对于 Redis 来说是非常致命的，Redis 保证高性能的一个重要前提是所有的数据在内存中。如果操作系统把 Redis 使用的部分内存换出到硬盘，由于内存与硬盘读写速度差几个数量级，会导致发生交换后的 Redis 性能急剧下降。识别 Redis 内存交换的检查方法如下：</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">&gt;redis-cli -p 6383 <span class="builtin-name">info</span><span class="built_in"> server </span>| grep process_id # 查询 redis 进程号</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">&gt;cat /proc/4476/smaps | grep Swap # 查询内存交换大小</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">Swap: 0 kB </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">Swap: 4 kB </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">Swap: 0 kB </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">Swap: 0 kB</span></pre></td></tr></table></figure>
+
+<p>如果交换量都是0KB或者个别的是4KB，则是正常现象，说明Redis进程内存没有被交换。</p>
+<p>有很多方法可以避免内存交换的发生。比如说：</p>
+<ul>
+<li>保证机器充足的可用内存</li>
+<li>确保所有Redis实例设置最大可用内存(maxmemory)，防止极端情况下 Redis 内存不可控的增长。</li>
+<li>降低系统使用swap优先级，如<code>echo10&gt;/proc/sys/vm/swappiness</code>。</li>
+</ul>
+<h2 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h2><ul>
+<li><a href="https://redis.io/topics/latency" target="_blank" rel="noopener">redis.io/topics/late…</a></li>
+</ul>
+<blockquote>
+<p>作者：程序员历小冰</p>
+<p>来源：<a href="https://juejin.im/post/5dcaa7d5e51d4535ee1f818a" target="_blank" rel="noopener">https://juejin.im/post/5dcaa7d5e51d4535ee1f818a</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/11/Tomcat-%E8%B0%83%E4%BC%98/" rel="prev" title="Tomcat 调优">
+      <i class="fa fa-chevron-left"></i> Tomcat 调优
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/11/Redis-Cluster-%E7%9A%84%E6%95%B0%E6%8D%AE%E5%88%86%E7%89%87%E6%9C%BA%E5%88%B6/" rel="next" title="Redis Cluster 的数据分片机制">
+      Redis Cluster 的数据分片机制 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#一条命令执行过程"><span class="nav-number">1.</span> <span class="nav-text">一条命令执行过程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#不合理的命令或者数据结构"><span class="nav-number">2.</span> <span class="nav-text">不合理的命令或者数据结构</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#持久化阻塞"><span class="nav-number">2.1.</span> <span class="nav-text">持久化阻塞</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#内存交换"><span class="nav-number">2.2.</span> <span class="nav-text">内存交换</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#参考"><span class="nav-number">3.</span> <span class="nav-text">参考</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

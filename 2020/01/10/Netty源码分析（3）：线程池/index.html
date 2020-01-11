@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="线程池是一个在多线程场景中运用很广泛的并发框架，需要异步执行或并发执行任务的程序都可以使用线程池。有任务到来时，如果不使用线程池，我们需要不断的创建&#x2F;销毁线程，还需要对线程进行管理；而使用线程池，直接将任务提交到线程池即可。使用线程池有几个好处：无需重复创建&#x2F;销毁线程，降低资源消耗；提高程序响应速度；提高线程的可管理性。">
+<meta name="keywords" content="源码,线程池">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Netty源码分析（3）：线程池">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;10&#x2F;Netty%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%883%EF%BC%89%EF%BC%9A%E7%BA%BF%E7%A8%8B%E6%B1%A0&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="线程池是一个在多线程场景中运用很广泛的并发框架，需要异步执行或并发执行任务的程序都可以使用线程池。有任务到来时，如果不使用线程池，我们需要不断的创建&#x2F;销毁线程，还需要对线程进行管理；而使用线程池，直接将任务提交到线程池即可。使用线程池有几个好处：无需重复创建&#x2F;销毁线程，降低资源消耗；提高程序响应速度；提高线程的可管理性。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109182627-71dbd.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109182627-add1c.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109182628-5e6fe.png">
+<meta property="og:updated_time" content="2020-01-10T12:39:23.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191109182627-71dbd.jpeg">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/10/Netty%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%883%EF%BC%89%EF%BC%9A%E7%BA%BF%E7%A8%8B%E6%B1%A0/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Netty源码分析（3）：线程池 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/10/Netty%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%883%EF%BC%89%EF%BC%9A%E7%BA%BF%E7%A8%8B%E6%B1%A0/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Netty源码分析（3）：线程池
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-10 20:39:23" itemprop="dateCreated datePublished" datetime="2020-01-10T20:39:23+08:00">2020-01-10</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">其它技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/Netty/" itemprop="url" rel="index">
+                    <span itemprop="name">Netty</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <blockquote>
+<p>线程池是一个在多线程场景中运用很广泛的并发框架，需要异步执行或并发执行任务的程序都可以使用线程池。有任务到来时，如果不使用线程池，我们需要不断的创建/销毁线程，还需要对线程进行管理；而使用线程池，直接将任务提交到线程池即可。使用线程池有几个好处：无需重复创建/销毁线程，降低资源消耗；提高程序响应速度；提高线程的可管理性。</p>
+</blockquote>
+<a id="more"></a>
+
+<h2 id="3-1-实现原理"><a href="#3-1-实现原理" class="headerlink" title="3.1 实现原理"></a>3.1 实现原理</h2><p>线程池内部一般包含一个核心线程池，其内部的线程在创建之后一般不会销毁，执行完任务后线程会阻塞等待新任务到来。<br>当向线程池提交任务时，线程池会做如下判断：</p>
+<ul>
+<li>核心线程池未满，创建线程执行任务</li>
+<li>核心线程池已满，若等待队列未满，则加入到等待队列；若等待队列已满但线程池未满，创建新线程执行任务；若等待队列和线程池均已满，则按照指定策略退出/拒绝任务/丢弃任务等。</li>
+</ul>
+<p><img src="http://image.winrains.cn/2019/11/20191109182627-71dbd.jpeg" alt="img"></p>
+<p>线程池执行流程</p>
+<p>了解了实现原理，我们先来自己实现一个线程池，首先定义线程池的接口</p>
+<h3 id="ThreadPool"><a href="#ThreadPool" class="headerlink" title="ThreadPool"></a><strong>ThreadPool</strong></h3><p>线程池的接口里面最重要的方法是execute执行任务</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">interface</span> <span class="title">ThreadPool</span>&lt;<span class="title">Job</span> <span class="keyword">extends</span> <span class="title">Runnable</span>&gt; </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//提交一个Job，这个Job需要实现Runnable接口</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">void</span> <span class="title">execute</span><span class="params">(Job job)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//关闭线程池</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">void</span> <span class="title">shutdown</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//增加工作者线程</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">void</span> <span class="title">addWorkers</span><span class="params">(<span class="keyword">int</span> num)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//减少工作者线程</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">void</span> <span class="title">removeWorker</span><span class="params">(<span class="keyword">int</span> num)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//得到正在等待执行的任务数量</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">int</span> <span class="title">getJobSize</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h3 id="CommonThreadPool"><a href="#CommonThreadPool" class="headerlink" title="CommonThreadPool"></a><strong>CommonThreadPool</strong></h3><p>在实现线程池时，我们需要定义线程池的大小，以及保存任务的列表jobs，下面是变量定义：</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 线程池最大限制数</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="keyword">int</span> MAX_WORKER_NUMBERS = <span class="number">100</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 线程池默认的数量</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="keyword">int</span> DEFAULT_WORKER_NUMBERS = <span class="number">1</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 线程池最小数量</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="keyword">int</span> MIN_WORKER_NUMBERS = <span class="number">1</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 工作列表</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> LinkedList&lt;Job&gt; jobs = <span class="keyword">new</span> LinkedList&lt;Job&gt;();</span></pre></td></tr></table></figure>
+
+<p>在线程池初始化时，我们要将核心线程池进行初始化，创建多个Worker线程，然后启动Worker线程。</p>
+<figure class="highlight cs"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// num 为DEFAULT_WORKER_NUMBERS 默认线程池大小</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title">initializeWokers</span>(<span class="params"><span class="keyword">int</span> num</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// 创建多个线程，加入workers中，并启动</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; num; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        Worker worker = <span class="keyword">new</span> Worker();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        workers.<span class="keyword">add</span>(worker);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        Thread thread = <span class="keyword">new</span> Thread(worker, <span class="string">"ThreadPool-Worker-"</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">                + threadNum.getAndIncrement());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        thread.start();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>Worker启动后，一直没有任务，需要阻塞在jobs上（jobs是上面定义的任务列表），Worker等待任务到来后唤醒获取队列中的任务并执行。下面的代码中，如果jobs为空，则线程等待；</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// worker的代码，首先要获取jobs的锁，</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">synchronized (jobs) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">while</span> (jobs.is<span class="constructor">Empty()</span>) &#123;<span class="comment">// 如果jobs是空的，则执行jobs.wait，使用while而不是if，因为wait后可能已经为空了，需要继续等待</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">            jobs.wait<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        &#125; catch (InterruptedException e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            e.print<span class="constructor">StackTrace()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">            <span class="module-access"><span class="module"><span class="identifier">Thread</span>.</span></span>current<span class="constructor">Thread()</span>.interrupt<span class="literal">()</span>;<span class="comment">// 中断</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">            return;<span class="comment">// 结束</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    job = jobs.remove<span class="constructor">First()</span>;<span class="comment">// 第一个job</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (job != null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            job.run<span class="literal">()</span>;<span class="comment">//注意，这里是run而不是start，传入的Job</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        &#125; catch (Exception e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// 忽略Job执行中的Exception</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">            e.print<span class="constructor">StackTrace()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>提交任务时，只需要将任务加入jobs中，然后通知worker线程即可。worker线程获得锁后会取第一个任务执行。执行完毕，若jobs为空，worker线程继续进行休眠等待任务到来。</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="meta">@Override</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="function"><span class="keyword">void</span> <span class="title">execute</span><span class="params">(Job job)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (job == <span class="keyword">null</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">synchronized</span> (jobs) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        jobs.addLast(job);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        jobs.notify();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>完整的代码可以查看<a href="https://links.jianshu.com/go?to=https%3A%2F%2Fgithub.com%2Fssj234%2FJavaStudy_IO%2Ftree%2Fmaster%2FIOResearch%2Fsrc%2Fnet%2Fssj%2Fpool" target="_blank" rel="noopener">https://github.com/ssj234/JavaStudy_IO/tree/master/IOResearch/src/net/ssj/pool</a></p>
+<h2 id="3-2-Java的Executor框架"><a href="#3-2-Java的Executor框架" class="headerlink" title="3.2 Java的Executor框架"></a>3.2 Java的Executor框架</h2><p>Java平台本身提供了Executor框架用来帮助我们使用线程池。</p>
+<p><img src="http://image.winrains.cn/2019/11/20191109182627-add1c.png" alt="img"></p>
+<p>Executor框架</p>
+<p>Executor框架最核心的类是ThreadPoolExecutor，这是各个线程池的实现类，有如下几个属性：</p>
+<ul>
+<li>corePool：核心线程池的大小 m</li>
+<li>maximumPool：最大线程池的大小</li>
+<li>keepAliveTime： 休眠等待时间</li>
+<li>TimeUnit unit ： 休眠等待时间单位，如微秒/纳秒等</li>
+<li>BlockingQueue workQueue：用来保存任务的工作队列</li>
+<li>ThreadFactory： 创建线程的工厂</li>
+<li>RejectedExecutionHandler：当线程池已经关闭或线程池Executor已经饱和，execute()方法将要调用的Handler</li>
+</ul>
+<p>通过Executor框架的根据类Executors，可以创建三种基本的线程池：</p>
+<ul>
+<li>FixedThreadPool</li>
+<li>SingleThreadExecutor</li>
+<li>CachedThreadPool</li>
+</ul>
+<h3 id="FixedThreadPool"><a href="#FixedThreadPool" class="headerlink" title="FixedThreadPool"></a>FixedThreadPool</h3><p>FixedThreadPool被称为可重用固定线程数的线程池。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// 获取fixedThreadPool</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">ExecutorService fixedThreadPool=<span class="module-access"><span class="module"><span class="identifier">Executors</span>.</span></span><span class="keyword">new</span><span class="constructor">FixedThreadPool(<span class="params">paramInt</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//内部会调用下面的方法，参数 corePoolSize、maximumPoolSize、keepAliveTime、workQueue</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">return <span class="keyword">new</span> <span class="constructor">ThreadPoolExecutor(<span class="params">paramInt</span>, <span class="params">paramInt</span>, 0L, TimeUnit.MILLISECONDS, <span class="params">new</span> LinkedBlockingQueue()</span>);</span></pre></td></tr></table></figure>
+
+<p>FixedTheadPool设置的线程池大小和最大数量一样；keepAliveTime为0，代表多余的空闲线程会立刻终止；保存任务的队列使用LinkedBlockingQueue，当线程池中的线程执行完任务后，会循环反复从队列中获取任务来执行。<br>FixedThreadPool适用于限制当前线程数量的应用场景，适用于<code>负载比较重</code>的服务器。</p>
+<h3 id="SingleThreadExecutor"><a href="#SingleThreadExecutor" class="headerlink" title="SingleThreadExecutor"></a>SingleThreadExecutor</h3><p>SingleThreadExecutor的核心线程池数量corePoolSize和最大数量maximumPoolSize都设置为1，适用于需要<code>保证顺序执行</code>的场景</p>
+<figure class="highlight haxe"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">ExecutorService singleThreadExecutor=Executors.<span class="keyword">new</span><span class="type">SingleThreadExecutor</span>();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">return</span> <span class="keyword">new</span> <span class="type">FinalizableDelegatedExecutorService</span>(<span class="keyword">new</span> <span class="type">ThreadPoolExecutor</span>(<span class="number">1</span>, <span class="number">1</span>, <span class="number">0</span>L, TimeUnit.MILLISECONDS, <span class="keyword">new</span> <span class="type">LinkedBlockingQueue</span>()));</span></pre></td></tr></table></figure>
+
+<h3 id="CachedThreadPool"><a href="#CachedThreadPool" class="headerlink" title="CachedThreadPool"></a>CachedThreadPool</h3><p>CachedThreadPool是一个会根据需要创建新线程的线程池，适用于短期异步的小任务，或<code>负载教轻</code>的服务器。</p>
+<figure class="highlight haxe"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">ExecutorService cachedThreadPool=Executors.<span class="keyword">new</span><span class="type">CachedThreadPool</span>();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">return</span> <span class="keyword">new</span> <span class="type">ThreadPoolExecutor</span>(<span class="number">0</span>, Integer.MAX_VALUE, <span class="number">60</span>L, TimeUnit.SECONDS, <span class="keyword">new</span> <span class="type">SynchronousQueue</span>());</span></pre></td></tr></table></figure>
+
+<p>SynchronousQueue是一种阻塞队列，其中每个插入操作必须等待另一个线程的对应移除操作 ，反之亦然。corePoolSize是0，maximumPoolSize都最大，无界的。keepAliveTime为60秒，空闲线程超过60S会被终止。</p>
+<h3 id="ScheduleThreadPoolExecutor"><a href="#ScheduleThreadPoolExecutor" class="headerlink" title="ScheduleThreadPoolExecutor"></a>ScheduleThreadPoolExecutor</h3><p>ScheduleThreadPoolExecutor和Timer类似，可以设置延时执行或周期执行，但比Timer有更多的功能。Timer和TimerTask只创建一个线程，任务执行时间超过周期会产生一些问题。Timer创建的线程没有处理异常，因此一旦抛出非受检异常，会立刻终止。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">ScheduledThreadPoolExecutor executor=<span class="keyword">new</span> <span class="constructor">ScheduledThreadPoolExecutor(5)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//可以直接执行</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">executor.execute(<span class="keyword">new</span> <span class="constructor">JobTaskR(<span class="string">"executor"</span>, 0)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">executor.execute(<span class="keyword">new</span> <span class="constructor">JobTaskR(<span class="string">"executor"</span>, 1)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"5S后执行executor3"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//隔5秒后执行一次，但只会执行一次。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">executor.schedule(<span class="keyword">new</span> <span class="constructor">JobTaskR(<span class="string">"executor"</span>, 3)</span>, <span class="number">5</span>, TimeUnit.SECONDS);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"开始周期调度"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="comment">//设置周期执行，初始时6S后执行，之后每2s执行一次</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">executor.schedule<span class="constructor">AtFixedRate(<span class="params">new</span> JobTaskR(<span class="string">"executor"</span>, 4)</span>, <span class="number">6</span>, <span class="number">2</span>, TimeUnit.SECONDS);</span></pre></td></tr></table></figure>
+
+<p>scheduleAtFixedRate或者scheduleWithFixedDelay方法，它们不同的是前者以固定频率执行，后者以相对固定延迟之后执行。</p>
+<h2 id="3-3-Netty的EventLoop与线程池"><a href="#3-3-Netty的EventLoop与线程池" class="headerlink" title="3.3 Netty的EventLoop与线程池"></a>3.3 Netty的EventLoop与线程池</h2><p>Netty的事件循环和事件循环组的实现中，类的层级关系比较复杂，其底层是Java线程池的实现，不过在netty的实际使用中还是比较简单的，我们只需要使用如下的代码即可，</p>
+<figure class="highlight haxe"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">EventLoopGroup bossGroup=<span class="keyword">new</span> <span class="type">NioEventLoopGroup</span>();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">EventLoopGroup workGroup=<span class="keyword">new</span> <span class="type">NioEventLoopGroup</span>();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">ServerBootstrap b=<span class="keyword">new</span> <span class="type">ServerBootstrap</span>();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">b.group(bossGroup,workGroup)<span class="comment">//设置事件循环组</span></span></pre></td></tr></table></figure>
+
+<p>Netty的事件循环机制有两个基本接口：EventLoop和EventLoopGroup。前者是事件循环，后者是由多个事件循环组成的组。<br>EventLoop自身是一个不断循环执行的线程，以NioEventLoop为例，其继承了<code>SingleThreadEventExecutor</code>，内部的<code>executor</code>是创建NioEventLoop时传入的线程池，用来将run方法放入线程池中执行；此外还包含为一个TaskQueue，netty在处理io过程中的task可以提交到这个队列中，事件循环会不断获取task并执行，因此但其本身也可以看做一个线程池。<br>NioEventLoop的run方法中，Nio的事件循环会不断select后获取任务并执行，然后根据ioRatio的设置执行TaskQueue的任务。NioEventLoop的execute方法中，其会将task加入到taskQueue等待事件循环执行。因此，我们可以将NioEventLoop当做一个不断执行的线程池，EventLoopGroup作为线程池组，线程池组的意义是采用给的的策略选取一个EventLoop并提交任务。<br>EventLoop的定义如下，其继承了一个顺序执行的线程池接口和EventLoopGroup，也就是说EventLoop之间有父子关系，通过parent();返回任务循环组，通过next()选取一个事件循环。线程池组的register用于将Netty的Channel注册到事件循环中。</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public<span class="built_in"> interface </span>EventLoop extends OrderedEventExecutor, EventLoopGroup &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    @Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    EventLoopGroup parent();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">public<span class="built_in"> interface </span>EventLoopGroup extends EventExecutorGroup &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    EventLoop next();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    ChannelFuture register(Channel channel);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h3 id="NioEventLoopGroup"><a href="#NioEventLoopGroup" class="headerlink" title="NioEventLoopGroup"></a>NioEventLoopGroup</h3><p>NioEventLoopGroup除了处理网络的异步I/O任务，还用于完成异步提交的系统任务。NioEventLoopGroup初始化时，有如下几个参数可以配置，主要用于设置线程池的相关配置。</p>
+<ul>
+<li>nThreads 子线程池数量</li>
+<li>Executor executor 用来执行事件循环的线程池</li>
+<li>chooserFactory ：next()时选择线程池的策略</li>
+<li>selectorProvider 用于打开selector</li>
+<li>selectStrategyFactory 用来控制select循环行为的策略</li>
+<li>RejectedExecutionHandlers 线程池执行的异常处理策略</li>
+</ul>
+<figure class="highlight armasm"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">public</span> NioEventLoopGroup(int nThreads, Executor executor, EventExecutorChooserFactory chooserFactory,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">        final <span class="keyword">SelectorProvider </span><span class="keyword">selectorProvider, </span>final <span class="keyword">SelectStrategyFactory </span><span class="keyword">selectStrategyFactory) </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    super(nThreads, executor, chooserFactory, <span class="keyword">selectorProvider, </span><span class="keyword">selectStrategyFactory,</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>           RejectedExecutionHandlers.reject())<span class="comment">;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>NioEventLoopGroup初始化过程为：</p>
+<ol>
+<li>如果传入的executor 为空，会默认使用<code>ThreadPerTaskExecutor</code>，该线程池针对每个任务会创建一个线程，创建线程方式使用<code>DefaultThreadFactory</code>提供的newThread方法。</li>
+<li>初始化开始，首先会根据创建nThread个子线程池，保存在childrens变量中，创建逻辑比较简单，将初始化NioEventLoopGroup时设置的参数传递给NioEventLoop对象。在创建子线程池NioEventLoop的过程中，如果一旦有失败的，就需要关闭已经创建的所有子线程池并等待这些线程池结束。</li>
+<li>之后，使用chooserFactory创建<code>chooser</code>，用来在next()选择事件循环时从childrens变量选择一个返回。默认使用2的倍数的策略，也可以设置为顺序依次选择。</li>
+<li>向组中所有的事件循环的<code>terminationFuture</code>注册事件，目的是等待所有事件循环结束后将事件循环组的<code>terminatedChildren</code>设置为成功完成。</li>
+<li>最后，将children复制保存为一个只读的集合，保存在变量<code>readonlyChildren</code>中。</li>
+</ol>
+<p>至此，NioEventLoopGroup的初始化过程就结束了。我们可以看到，NioEventLoopGroup主要的用来聚合多个EventLoop，对其进行调度。</p>
+<h3 id="NioEventLoop"><a href="#NioEventLoop" class="headerlink" title="NioEventLoop"></a>NioEventLoop</h3><p>在NioEventLoopGroup的初始化过程中，会创建多个NioEventLoop，NioEventLoop用来执行实际的事件循环，初始化时有如下几个属性：</p>
+<ul>
+<li>NioEventLoopGroup parent 线程池所在的Group</li>
+<li>Executor executor 执行任务的线程池，默认是ThreadPerTaskExecutor</li>
+<li>SelectorProvider selectorProvider 用来打开selector</li>
+<li>SelectStrategy strategy 用来控制select循环行为的策略</li>
+<li>RejectedExecutionHandlers 线程池执行的异常处理策略</li>
+<li>addTaskWakesUp addTask(Runnable)添加任务时是否唤醒线程池，默认是false</li>
+<li>maxPendingTasks 线程池中等待任务的最大数量</li>
+<li>scheduledTaskQueue 保存定时任务的QUeue</li>
+<li>tailTasks ：保存任务的Queue，netty选择使用jctools的MpscChunkedArrayQueue，原因是为了提高效率，因为Nio线程池的线程消费者只有一个，就是一直进行的select循环，而生产者可能有多个。具体实现参见 <a href="https://links.jianshu.com/go?to=http%3A%2F%2Fblog.csdn.net%2Fyouaremoon%2Farticle%2Fdetails%2F50351929" target="_blank" rel="noopener">http://blog.csdn.net/youaremoon/article/details/50351929</a></li>
+</ul>
+<h3 id="事件循环"><a href="#事件循环" class="headerlink" title="事件循环"></a>事件循环</h3><ul>
+<li>NioEventLoop初始化时，会根据配置参数<code>sun.nio.ch.bugLevel</code>和<code>io.netty.selectorAutoRebuildThreshold</code>设置重建selector的阈值，这是为了解决jvm空轮询导致cpu利用率100%的问题。</li>
+<li>openSelector的目的是打开选择描述符Selector，并对<code>sun.nio.ch.SelectorImpl</code>的实现进行优化，将selectedKeys和publicSelectedKeys属性都修改为SelectedSelectionKeySet类，这个类使用了两个数组，使用空间换时间的方法，设置了两个数组，每次使用其中的一个。</li>
+<li>打开Selector之后，在服务器启动后会调用register将选择描述符注册到EventLoopGroup，NioEventLoopGroup中会调用NioEventLoop的register，这样，事件循环中的Selector就注册到了channel上。</li>
+<li>在run方法中，会根据selectStrategy调用select方法，收到io事件后使用processSelectedKeys处理，处理完成后执行TaskQueue中的方法。</li>
+</ul>
+<h3 id="提交任务"><a href="#提交任务" class="headerlink" title="提交任务"></a>提交任务</h3><p>NioEventLoop初始化时，会创建/设置其包含的属性，最重要的是打开selector和创建tailTasks两个步骤；这时，由于没有任何任务，NioEventLoop不会启动线程。在netty中，向线程池提交任务可以使用下面的方法：</p>
+<figure class="highlight vbscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">EventLoopGroup <span class="keyword">loop</span> = <span class="keyword">new</span> NioEventLoopGroup();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">loop</span>.<span class="keyword">next</span>().submit(Callable&lt;T&gt; task)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">loop</span>.<span class="keyword">next</span>().submit(Runnable task)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">loop</span>.<span class="keyword">next</span>().<span class="keyword">execute</span>(Runnable command);</span></pre></td></tr></table></figure>
+
+<p>也可以直接通过EventLoopGroup提交任务，只是EventLoopGroup内部会调用next()后再执行相关的方法。</p>
+<figure class="highlight ada"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">EventLoopGroup <span class="keyword">loop</span> = <span class="keyword">new</span> NioEventLoopGroup();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">loop</span>.submit(Callable&lt;T&gt; <span class="keyword">task</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">loop</span>.submit(Runnable <span class="keyword">task</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">loop</span>.execute(Runnable command);</span></pre></td></tr></table></figure>
+
+<p>submit方法的内部会将Callable或Runnable包装后交给execute方法执行。</p>
+<figure class="highlight gradle"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// AbstractExecutorService.java</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> &lt;T&gt; Future&lt;T&gt; submit(Callable&lt;T&gt; <span class="keyword">task</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (<span class="keyword">task</span> == <span class="keyword">null</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> NullPointerException();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    RunnableFuture&lt;T&gt; ftask = newTaskFor(<span class="keyword">task</span>); <span class="comment">// 包装task为 ftask</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    execute(ftask);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> ftask;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>execute方法被NioEventLoop的父类SingleThreadEventExecutor覆盖，程序如下：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public void execute(Runnable task) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    boolean inEventLoop = <span class="keyword">in</span><span class="constructor">EventLoop()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (inEventLoop) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        add<span class="constructor">Task(<span class="params">task</span>)</span>; <span class="comment">// 添加到任务队列</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    &#125; <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        start<span class="constructor">Thread()</span>; <span class="comment">// 启动线程，向EventLoop内部的线程池提交任务，会执行NioEventLoop run</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        add<span class="constructor">Task(<span class="params">task</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (is<span class="constructor">Shutdown()</span><span class="operator"> &amp;&amp; </span>remove<span class="constructor">Task(<span class="params">task</span>)</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">            reject<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (!addTaskWakesUp<span class="operator"> &amp;&amp; </span>wakes<span class="constructor">UpForTask(<span class="params">task</span>)</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        wakeup(inEventLoop);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<ol>
+<li>判断当前线程（提交任务的线程）与当前线程池是同一个线程，也就是说是如果是当前线程池提交的任务，则直接将任务加入线程池队列即可；</li>
+<li>如果不是，则需要启动线程后添加任务。启动线程的过程是，如果内部线程没有启动则启动，向NioEventLoop内部包含的executor提交一个任务，任务内部执行NioEventLoop的run方法也就是事件循环（executor是实际使用的线程池，初始化是传入，默认是ThreadPerTaskExecutor）。</li>
+<li>最后根据addTaskWakesUp标志和任务是否实现了NonWakeupRunnable判断是否需要唤醒，唤醒的方法是提交一个默认的空任务WAKEUP_TASK。</li>
+</ol>
+<h2 id="3-4-事件循环解析"><a href="#3-4-事件循环解析" class="headerlink" title="3.4 事件循环解析"></a>3.4 事件循环解析</h2><p>Nio事件循环在NioEventLoop中，主要功能：</p>
+<ul>
+<li>处理网络I/O读写事件</li>
+<li>执行系统任务和定时任务</li>
+</ul>
+<p>在主循环中我们可以看到netty对I/O任务和提交到事件循环中的系统任务的调度。<br><img src="http://image.winrains.cn/2019/11/20191109182628-5e6fe.png" alt="img"></p>
+<p>EventLoop事件循环</p>
+<h3 id="3-4-1-I-O事件"><a href="#3-4-1-I-O事件" class="headerlink" title="3.4.1 I/O事件"></a>3.4.1 I/O事件</h3><ol>
+<li>由于NIO的I/O读写需要使用选择符，因此，netty在NioEventLoop初始化时，会使用SelectorProvider打开selector。在类加载时，netty会从系统设置中读取相关配置参数：</li>
+</ol>
+<ul>
+<li>sun.nio.ch.bugLevel 用来修复JDK的NIO在Selector.open()的一个BUG</li>
+<li>io.netty.selectorAutoRebuildThreshold select()多少次数后重建selector</li>
+</ul>
+<figure class="highlight armasm"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">static</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    int <span class="keyword">selectorAutoRebuildThreshold </span>= SystemPropertyUtil.getInt(<span class="string">"io.netty.selectorAutoRebuildThreshold"</span>, <span class="number">512</span>)<span class="comment">;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">if</span> (<span class="keyword">selectorAutoRebuildThreshold </span>&lt; MIN_PREMATURE_SELECTOR_RETURNS) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">selectorAutoRebuildThreshold </span>= <span class="number">0</span><span class="comment">;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">SELECTOR_AUTO_REBUILD_THRESHOLD </span>= <span class="keyword">selectorAutoRebuildThreshold;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">&#125;</span></span></pre></td></tr></table></figure>
+
+<ol>
+<li>NioEventLoop的构造方法中，会调用provider.openSelector()打开Selector;如果设置<code>io.netty.noKeySetOptimization</code>为true，则会启动优化，优化内容是将Selector的selectedKeys和publicSelectedKeys属性设置为可写并替换为Netty实现的集合以提供效率。</li>
+</ol>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="function">Selector <span class="title">openSelector</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">final</span> Selector selector;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        selector = provider.openSelector();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    &#125; <span class="keyword">catch</span> (IOException e) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> ChannelException(<span class="string">"failed to open a new selector"</span>, e);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (DISABLE_KEYSET_OPTIMIZATION) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> selector;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">   <span class="comment">//  下面是优化程序,此处省略</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">   ...</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> selector;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<ol>
+<li>NioEventLoop最核心的地方在于事件循环，具体代码在NioEventLoop.java在run方法中</li>
+</ol>
+<ul>
+<li>首先根据默认的选择策略DefaultSelectStrategy判断本次循环是否select，具体逻辑为：如果当前有任务则使用selectNow立刻查询是否有准备就绪的I/O；如果当前没有任务则返回SelectStrategy.SELECT，并将wakenUp设置为false，并调用select()进行查询。</li>
+</ul>
+<figure class="highlight cs"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">protected</span> <span class="keyword">void</span> <span class="title">run</span>(<span class="params"></span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">for</span> (;;) &#123;  <span class="comment">// 事件循环</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// select策略</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">switch</span> (selectStrategy.calculateStrategy(selectNowSupplier, hasTasks())) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">case</span> SelectStrategy.CONTINUE:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">continue</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">case</span> SelectStrategy.SELECT:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">select</span>(wakenUp.getAndSet(<span class="literal">false</span>));  <span class="comment">// select()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">if</span> (wakenUp.<span class="keyword">get</span>()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">                        selector.wakeup(); <span class="comment">// 唤醒select()的线程</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">                    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">default</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">                    <span class="comment">// fallthrough</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        .... 后续处理</span></pre></td></tr></table></figure>
+
+<ul>
+<li>select()时需要判断当前是否有scheduledTask(定时任务)，如果有则需要计算任务delay的时间，如果定时任务需要立刻执行了，那么必须马上selectNow()并返回，之后执行任务。如果没有scheduledTask，会判断当前是否有任务在等待列表，如果有任务时将wakenUp设置为true并selectNow()；如果没有任务，那么会 selector.select(1000); 阻塞等待1s，直到有I/O就绪，或者有任务等待，或需要唤醒时退出，否则，会继续循环，直到前面的几种情况发生后退出。</li>
+<li>之后，事件循环开始处理IO和任务。如果查询到有IO事件，会调用processSelectedKeysOptimized（优化的情况下），对SelectionKey进行处理。</li>
+</ul>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (ioRatio<span class="operator"> == </span><span class="number">100</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        process<span class="constructor">SelectedKeys()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    &#125; finally &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        run<span class="constructor">AllTasks()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">&#125; <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    final long ioStartTime = <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>nano<span class="constructor">Time()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        process<span class="constructor">SelectedKeys()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    &#125; finally &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        final long ioTime = <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>nano<span class="constructor">Time()</span> - ioStartTime; <span class="comment">// io花费的时间</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        run<span class="constructor">AllTasks(<span class="params">ioTime</span> <span class="operator">*</span> (100 - <span class="params">ioRatio</span>)</span><span class="operator"> / </span>ioRatio); <span class="comment">// 按照iorate计算task的时间</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<ul>
+<li>processSelectedKeysOptimized处理I/O，主要是NIO的select操作，处理相关的事件。</li>
+</ul>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="built_in">void</span> processSelectedKey(SelectionKey k, AbstractNioChannel ch) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">final</span> AbstractNioChannel.NioUnsafe unsafe = ch.unsafe();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">   ......</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">int</span> readyOps = k.readyOps();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> ((readyOps &amp; SelectionKey.OP_CONNECT) != <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            <span class="built_in">int</span> ops = k.<span class="built_in">int</span>erestOps();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">            ops &amp;= ~SelectionKey.OP_CONNECT;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">            k.<span class="built_in">int</span>erestOps(ops);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            unsafe.finishConnect();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> ((readyOps &amp; SelectionKey.OP_WRITE) != <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            ch.unsafe().forceFlush();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> ((readyOps &amp; (SelectionKey.OP_READ | SelectionKey.OP_ACCEPT)) != <span class="number">0</span> || readyOps == <span class="number">0</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            unsafe.read();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (!ch.isOpen()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// Connection already closed - no need to handle write.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">return</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    &#125; <span class="keyword">catch</span> (CancelledKeyException ignored) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        unsafe.close(unsafe.<span class="built_in">void</span>Promise());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h3 id="3-4-2-任务处理"><a href="#3-4-2-任务处理" class="headerlink" title="3.4.2 任务处理"></a>3.4.2 任务处理</h3><ul>
+<li>runAllTasks执行提交到EventLoop的任务，首先从scheduledTaskQueue获取需要执行的任务，加入到taskQueue，然后依次执行taskQueue的任务。</li>
+</ul>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">protected boolean run<span class="constructor">AllTasks()</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">assert</span> <span class="keyword">in</span><span class="constructor">EventLoop()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    boolean fetchedAll;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    boolean ranAtLeastOne = <span class="literal">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">do</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        fetchedAll = fetch<span class="constructor">FromScheduledTaskQueue()</span>; <span class="comment">// 获取定时任务</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (run<span class="constructor">AllTasksFrom(<span class="params">taskQueue</span>)</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">            ranAtLeastOne = <span class="literal">true</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125; <span class="keyword">while</span> (!fetchedAll); <span class="comment">// keep on processing until we fetched all scheduled tasks.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (ranAtLeastOne) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        lastExecutionTime = <span class="module-access"><span class="module"><span class="identifier">ScheduledFutureTask</span>.</span></span>nano<span class="constructor">Time()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    after<span class="constructor">RunningAllTasks()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    return ranAtLeastOne;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<ul>
+<li>ioRatio不为100时，会调用runAllTasks(ioTime * (100 - ioRatio) / ioRatio)，首先计算出I/O处理的事件，然后按照比例为执行task分配事件，内部主要逻辑与runAllTasks()主要逻辑相同。</li>
+</ul>
+<blockquote>
+<p>作者：史圣杰</p>
+<p>来源：<a href="https://www.jianshu.com/p/3a770d58797f" target="_blank" rel="noopener">https://www.jianshu.com/p/3a770d58797f</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E6%BA%90%E7%A0%81/" rel="tag"># 源码</a>
+              <a href="/tags/%E7%BA%BF%E7%A8%8B%E6%B1%A0/" rel="tag"># 线程池</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/08/Netty%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%882%EF%BC%89%EF%BC%9A%E5%BF%AB%E9%80%9F%E5%85%A5%E9%97%A8/" rel="prev" title="Netty源码分析（2）：快速入门">
+      <i class="fa fa-chevron-left"></i> Netty源码分析（2）：快速入门
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/10/Netty%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%884%EF%BC%89%EF%BC%9AFuture%E5%92%8CPromise/" rel="next" title="Netty源码分析（4）：Future和Promise">
+      Netty源码分析（4）：Future和Promise <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#3-1-实现原理"><span class="nav-number">1.</span> <span class="nav-text">3.1 实现原理</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#ThreadPool"><span class="nav-number">1.1.</span> <span class="nav-text">ThreadPool</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#CommonThreadPool"><span class="nav-number">1.2.</span> <span class="nav-text">CommonThreadPool</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3-2-Java的Executor框架"><span class="nav-number">2.</span> <span class="nav-text">3.2 Java的Executor框架</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#FixedThreadPool"><span class="nav-number">2.1.</span> <span class="nav-text">FixedThreadPool</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#SingleThreadExecutor"><span class="nav-number">2.2.</span> <span class="nav-text">SingleThreadExecutor</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#CachedThreadPool"><span class="nav-number">2.3.</span> <span class="nav-text">CachedThreadPool</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#ScheduleThreadPoolExecutor"><span class="nav-number">2.4.</span> <span class="nav-text">ScheduleThreadPoolExecutor</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3-3-Netty的EventLoop与线程池"><span class="nav-number">3.</span> <span class="nav-text">3.3 Netty的EventLoop与线程池</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#NioEventLoopGroup"><span class="nav-number">3.1.</span> <span class="nav-text">NioEventLoopGroup</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#NioEventLoop"><span class="nav-number">3.2.</span> <span class="nav-text">NioEventLoop</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#事件循环"><span class="nav-number">3.3.</span> <span class="nav-text">事件循环</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#提交任务"><span class="nav-number">3.4.</span> <span class="nav-text">提交任务</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3-4-事件循环解析"><span class="nav-number">4.</span> <span class="nav-text">3.4 事件循环解析</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#3-4-1-I-O事件"><span class="nav-number">4.1.</span> <span class="nav-text">3.4.1 I/O事件</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#3-4-2-任务处理"><span class="nav-number">4.2.</span> <span class="nav-text">3.4.2 任务处理</span></a></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

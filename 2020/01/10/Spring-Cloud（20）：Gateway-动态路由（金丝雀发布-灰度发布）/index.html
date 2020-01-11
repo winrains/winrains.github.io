@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="为什么需要动态路由？之前说过 Gateway 的路由配置，常用的有两种方式：  Fluent API 配置文件  这两者之间因为配置文件的方式修改起来比较灵活，然后通过 Stream+Bus 的方式刷新路由配置，所以大家使用的比较多。但是如果我们在网关层需要类似于 Canary Release（金丝雀发布，也称灰度发布）这样的能力的话，那么以上两种配置路由的方式就都显得太笨拙了。  矿井中的金丝雀">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Spring Cloud（20）：Gateway 动态路由（金丝雀发布 &#x2F; 灰度发布）">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;10&#x2F;Spring-Cloud%EF%BC%8820%EF%BC%89%EF%BC%9AGateway-%E5%8A%A8%E6%80%81%E8%B7%AF%E7%94%B1%EF%BC%88%E9%87%91%E4%B8%9D%E9%9B%80%E5%8F%91%E5%B8%83-%E7%81%B0%E5%BA%A6%E5%8F%91%E5%B8%83%EF%BC%89&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="为什么需要动态路由？之前说过 Gateway 的路由配置，常用的有两种方式：  Fluent API 配置文件  这两者之间因为配置文件的方式修改起来比较灵活，然后通过 Stream+Bus 的方式刷新路由配置，所以大家使用的比较多。但是如果我们在网关层需要类似于 Canary Release（金丝雀发布，也称灰度发布）这样的能力的话，那么以上两种配置路由的方式就都显得太笨拙了。  矿井中的金丝雀">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;eb07a-5c43dbee987f0.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;ac639-5c43e5a86d371.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;18946-5c43dbee1a7f0.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;1a6ef-5c43e88daf621.jpg">
+<meta property="og:updated_time" content="2020-01-10T14:13:32.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;eb07a-5c43dbee987f0.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/10/Spring-Cloud%EF%BC%8820%EF%BC%89%EF%BC%9AGateway-%E5%8A%A8%E6%80%81%E8%B7%AF%E7%94%B1%EF%BC%88%E9%87%91%E4%B8%9D%E9%9B%80%E5%8F%91%E5%B8%83-%E7%81%B0%E5%BA%A6%E5%8F%91%E5%B8%83%EF%BC%89/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Spring Cloud（20）：Gateway 动态路由（金丝雀发布 / 灰度发布） | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/10/Spring-Cloud%EF%BC%8820%EF%BC%89%EF%BC%9AGateway-%E5%8A%A8%E6%80%81%E8%B7%AF%E7%94%B1%EF%BC%88%E9%87%91%E4%B8%9D%E9%9B%80%E5%8F%91%E5%B8%83-%E7%81%B0%E5%BA%A6%E5%8F%91%E5%B8%83%EF%BC%89/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Spring Cloud（20）：Gateway 动态路由（金丝雀发布 / 灰度发布）
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-10 22:13:32" itemprop="dateCreated datePublished" datetime="2020-01-10T22:13:32+08:00">2020-01-10</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Spring%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Spring技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Spring%E6%8A%80%E6%9C%AF/Spring-Cloud/" itemprop="url" rel="index">
+                    <span itemprop="name">Spring Cloud</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="为什么需要动态路由？"><a href="#为什么需要动态路由？" class="headerlink" title="为什么需要动态路由？"></a>为什么需要动态路由？</h1><p>之前说过 Gateway 的路由配置，常用的有两种方式：</p>
+<ul>
+<li>Fluent API</li>
+<li>配置文件</li>
+</ul>
+<p>这两者之间因为配置文件的方式修改起来比较灵活，然后通过 Stream+Bus 的方式刷新路由配置，所以大家使用的比较多。<br>但是如果我们在网关层需要类似于 Canary Release（金丝雀发布，也称灰度发布）这样的能力的话，那么以上两种配置路由的方式就都显得太笨拙了。</p>
+<blockquote>
+<p>矿井中的金丝雀<br>17 世纪，英国矿井工人发现，金丝雀对瓦斯这种气体十分敏感。空气中哪怕有极其微量的瓦斯，金丝雀也会停止歌唱；而当瓦斯含量超过一定限度时，虽然鲁钝的人类毫无察觉，金丝雀却早已毒发身亡。当时在采矿设备相对简陋的条件下，工人们每次下井都会带上一只金丝雀作为 “瓦斯检测指标”，以便在危险状况下紧急撤离。</p>
+</blockquote>
+<a id="more"></a>
+
+<p>Spring Cloud Gateway 中虽然已经提供了关于权重的断言，我们在配置文件中可以直接这样配置</p>
+<figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="attr">spring:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="attr">application:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="attr">name:</span> <span class="string">cloud-gateway</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="attr">cloud:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="attr">gateway:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">      <span class="attr">routes:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">      <span class="bullet">-</span> <span class="attr">id:</span> <span class="string">service1_prod</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="attr">uri:</span> <span class="string">http://localhost:8081</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="attr">predicates:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        <span class="bullet">-</span> <span class="string">Path=/test</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="bullet">-</span> <span class="string">Weight=service1,</span> <span class="number">90</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">      <span class="bullet">-</span> <span class="attr">id:</span> <span class="string">service1_canary</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="attr">uri:</span> <span class="string">http://localhost:8082</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="attr">predicates:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="bullet">-</span> <span class="string">Path=/test</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        <span class="bullet">-</span> <span class="string">Weight=service1,</span> <span class="number">10</span></span></pre></td></tr></table></figure>
+
+<p><a href="http://image.winrains.cn/2019/11/eb07a-5c43dbee987f0.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/11/eb07a-5c43dbee987f0.png" alt="img"></a><br>以实现 Canary Release 的能力，但是每次发布都配置一遍未免太过麻烦了。<br>出于 “懒” 的本性，我们当然希望在发布脚本里能在运行时直接动态修改 <code>service1_prod</code>、<code>service1_canary</code> 的权重，这样我们就不用手动修改还提心吊胆的担心改错了。<br>这其实就是 “动态路由” 了。</p>
+<h1 id="Spring-Cloud-Gateway-默认动态路由实现"><a href="#Spring-Cloud-Gateway-默认动态路由实现" class="headerlink" title="Spring Cloud Gateway 默认动态路由实现"></a>Spring Cloud Gateway 默认动态路由实现</h1><p>Spring Cloud Gateway 在去年 6 月份发布了 2.0 第一个 release 版本，其实已经自带动态路由了， 但是官方文档并没有讲如何动态配置。<br>不过我们翻看 Spring Cloud Gateway 源码，会发现类 <code>org.springframework.cloud.gateway.actuate.GatewayControllerEndpoint</code> 中提供了网关配置的 RESTful 接口，默认是没有启用的。<br>在配置类 <code>org.springframework.cloud.gateway.config.GatewayAutoConfiguration</code> 中配置了 <code>GatewayControllerEndpoint</code></p>
+<figure class="highlight less"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="variable">@Configuration</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="variable">@ConditionalOnClass</span>(Health.class)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">protected static class GatewayActuatorConfiguration &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="variable">@Bean</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="variable">@ConditionalOnEnabledEndpoint</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    public GatewayControllerEndpoint gatewayControllerEndpoint(RouteDefinitionLocator routeDefinitionLocator, List&lt;GlobalFilter&gt; globalFilters,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">                                                            List&lt;GatewayFilterFactory&gt; GatewayFilters, RouteDefinitionWriter routeDefinitionWriter,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">                                                            RouteLocator routeLocator) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="selector-tag">return</span> <span class="selector-tag">new</span> <span class="selector-tag">GatewayControllerEndpoint</span>(routeDefinitionLocator, globalFilters, GatewayFilters, routeDefinitionWriter, routeLocator);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>也就是说在存在 <code>org.springframework.boot.actuate.health.Health</code> 时启用，我们想用自带的接口就需要添加 actuator 依赖</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">dependency</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="tag">&lt;<span class="name">groupId</span>&gt;</span>org.springframework.boot<span class="tag">&lt;/<span class="name">groupId</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="tag">&lt;<span class="name">artifactId</span>&gt;</span>spring-boot-starter-actuator<span class="tag">&lt;/<span class="name">artifactId</span>&gt;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;/<span class="name">dependency</span>&gt;</span></span></pre></td></tr></table></figure>
+
+<p>并且还要将 actuator 的端点暴露出来</p>
+<figure class="highlight dts"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">management:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">  endpoints:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">    web:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">      exposure:</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="symbol">        include:</span> <span class="string">"*"</span></span></pre></td></tr></table></figure>
+
+<p>然后我们就能通过自带的 <code>GatewayControllerEndpoint</code> 的 RESTful API 修改运行时的路由了<br><a href="http://image.winrains.cn/2019/11/ac639-5c43e5a86d371.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/11/ac639-5c43e5a86d371.png" alt="GatewayControllerEndpoint"></a></p>
+<p><a href="http://image.winrains.cn/2019/11/ac639-5c43e5a86d371.png" target="_blank" rel="noopener">GatewayControllerEndpoint</a></p>
+<p>此时我们已经能实现之前的目标了<br><a href="http://image.winrains.cn/2019/11/18946-5c43dbee1a7f0.png" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/11/18946-5c43dbee1a7f0.png" alt="JVM 级别的动态路由"></a></p>
+<p><a href="http://image.winrains.cn/2019/11/18946-5c43dbee1a7f0.png" target="_blank" rel="noopener">JVM 级别的动态路由</a></p>
+<p>但是 Gateway 自带的这套是仅仅支持了 JVM 级别的动态路由，不能序列化存储的。<br>默认的实现：</p>
+<figure class="highlight kotlin"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// GatewayAutoConfiguration</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="meta">@Bean</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="meta">@ConditionalOnMissingBean(RouteDefinitionRepository.class)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> InMemoryRouteDefinitionRepository inMemoryRouteDefinitionRepository() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> new InMemoryRouteDefinitionRepository();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"> </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="comment">// InMemoryRouteDefinitionRepository</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">InMemoryRouteDefinitionRepository</span> <span class="title">implements</span> <span class="title">RouteDefinitionRepository</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">final</span> Map&lt;String, RouteDefinition&gt; routes = synchronizedMap(new LinkedHashMap&lt;String, RouteDefinition&gt;());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">@Override</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> Mono&lt;<span class="built_in">Void</span>&gt; save(Mono&lt;RouteDefinition&gt; route) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> route.flatMap( r -&gt; &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">            routes.put(r.getId(), r);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">return</span> Mono.empty();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        &#125;);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">@Override</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> Mono&lt;<span class="built_in">Void</span>&gt; delete(Mono&lt;String&gt; routeId) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> routeId.flatMap(id -&gt; &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (routes.containsKey(id)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">                routes.remove(id);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">return</span> Mono.empty();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">return</span> Mono.defer(() -&gt; Mono.error(new NotFoundException(<span class="string">"RouteDefinition not found: "</span>+routeId)));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">        &#125;);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">@Override</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> Flux&lt;RouteDefinition&gt; getRouteDefinitions() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> Flux.fromIterable(routes.values());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>这样就导致我们的路由配置要分散存储在两个地方：Config Server 和 内存中，非常不利于管理。<br>另外在生产环境使用的话，Gateway 一定是一个集群，一个个去调用每个实例的 refresh 端口并不利于扩展。</p>
+<h1 id="Spring-Cloud-Gateway-路由加载过程"><a href="#Spring-Cloud-Gateway-路由加载过程" class="headerlink" title="Spring Cloud Gateway 路由加载过程"></a>Spring Cloud Gateway 路由加载过程</h1><p>看了上面的源码后，是不是感觉其实我们完全可以替换掉 <code>InMemoryRouteDefinitionRepository</code> 来用 DB 或 Redis 做持久化存储，来实现持久化的动态路由。<br>不过在动手之前，我们还是要先看一下 Gateway 的路由加载过程，这样才更好的实现我们的需求。<br><a href="http://image.winrains.cn/2019/11/1a6ef-5c43e88daf621.jpg" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/11/1a6ef-5c43e88daf621.jpg" alt="Gateway 路由加载过程"></a></p>
+<p><a href="http://image.winrains.cn/2019/11/1a6ef-5c43e88daf621.jpg" target="_blank" rel="noopener">Gateway 路由加载过程</a></p>
+<ol>
+<li><p><code>DispatcherHandler</code> 接管用户请求</p>
+</li>
+<li><pre><code>RoutePredicateHandlerMapping
+<figure class="highlight markdown"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="code">    路由匹配</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="bullet">   1. </span>根据 <span class="code">`RouteLocator`</span> 获取 <span class="code">`RouteDefinitionLocator`</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="bullet">   2. </span>返回多个 <span class="code">`RouteDefinitionLocator.getRouteDefinitions()`</span> 的路由定义信息</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="bullet">3. </span><span class="code">`FilteringWebHandler`</span> 执行路由定义中的 filter 最后路由到具体的业务服务中</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">从加载流程上可以看出，我们要扩展动态路由的话，最核心的是要从 <span class="code">`RouteDefinitionLocator`</span> 上入手。</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="section"># 持久化的分布式动态路由组件</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">我们现在可以对 Gateway 做一些扩展来改善上述的问题。</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"><span class="section">## 扩展思路</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line"><span class="bullet">1. </span>增加一个路由管理模块</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line"><span class="bullet">   - </span>参考 <span class="code">`GatewayControllerEndpoint`</span> 实现</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="bullet">   - </span>路由配置全部存储在 MySQL 中（Config Server 还需要，但不再存储路由配置了）</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="bullet">   - </span>启动时将路由配置加载到 Redis 中，运行时双写</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="bullet">   - </span>提供 RESTful API 以便脚本调用</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line"><span class="bullet">   - </span>前端页面可以配合 JSON Viewer 或类似插件，便于修改展示</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line"><span class="bullet">2. </span>网关模块扩展</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"><span class="bullet">   - </span>提供一个 <span class="code">`RouteDefinitionRepository`</span>，使它直接从 Redis 获取路由配置</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line"><span class="bullet">   - </span>网关集群刷新路由配置，这里用 Redis Pub/Sub 来充当 MQ 来实现</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">[<span class="string">![持久化的动态路由</span>](<span class="link">http://image.winrains.cn/2019/11/ddc74-5c44059040245.png</span>)](<span class="link">http://image.winrains.cn/2019/11/ddc74-5c44059040245.png</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">[<span class="string">持久化的动态路由</span>](<span class="link">http://image.winrains.cn/2019/11/ddc74-5c44059040245.png</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">注：用 Redis 一方面是为了支持 WebFlux (Reactor) 的背压（Backpressure），另一方面是为了刷新 Gateway 集群。</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line"><span class="section">## 具体实现</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line"><span class="section">### 路由管理模块</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">数据库的表结构</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">[<span class="string">![表结构</span>](<span class="link">http://image.winrains.cn/2019/11/5210f-5c440fbda30ca.png</span>)](<span class="link">http://image.winrains.cn/2019/11/5210f-5c440fbda30ca.png</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">[<span class="string">表结构</span>](<span class="link">http://image.winrains.cn/2019/11/5210f-5c440fbda30ca.png</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">定义相关实体，这里参考 Gateway 源码的相关定义，涉及到三个类：</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line"><span class="bullet">- </span><span class="code">`org.springframework.cloud.gateway.route.RouteDefinition`</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line"><span class="bullet">- </span><span class="code">`org.springframework.cloud.gateway.handler.predicate.PredicateDefinition`</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line"><span class="bullet">- </span><span class="code">`org.springframework.cloud.gateway.filter.FilterDefinition`</span></span></pre></td></tr></table></figure>
+</code></pre></li>
+</ol>
+<p>public class GatewayRoute {<br>    private String                           routeId;<br>    private String                           uri;<br>    private Integer                          order;<br>    private List<GatewayPredicateDefinition> predicates;<br>    private List<GatewayFilterDefinition>    filters;<br>    private Long                             id;<br>    private LocalDateTime                    createTime;<br>    private LocalDateTime                    updateTime;<br>    private EntityStatus                     status;<br>}<br>public class GatewayPredicateDefinition {<br>    private String name;<br>    private Map&lt;String, String&gt; args = new LinkedHashMap&lt;&gt;();<br>}<br>public class GatewayFilterDefinition {<br>    private String name;<br>    private Map&lt;String, String&gt; args = new LinkedHashMap&lt;&gt;();<br>}</p>
+<figure class="highlight autohotkey"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">Controller 参考 `GatewayControllerEndpoint` 实现即可。因为我的实现是软删除，所以对创建 / 更新做了明确区分。</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">注意里边有个 `refresh()` 方法，并不是像 `GatewayControllerEndpoint` 一样发 `RefreshRoutesEvent`，而是往 Redis publish 了一条消息。</span></pre></td></tr></table></figure>
+
+<p>@Slf4j<br>@RestController<br>@RequestMapping(“”)<br>public class GatewayDynamicRouteController {<br>    @Autowired<br>    private GatewayRouteService gatewayRouteService;<br>    /**<br>     * 创建路由<br>     *<br>     * @param model<br>     * @return<br>     <em>/<br>    @PostMapping(“/routes”)<br>    public Mono&lt;ResponseEntity<Map>&gt; create(@RequestBody Mono<GatewayRoute> model) {<br>        return model.flatMap(r -&gt; {<br>            String routeId = r.getRouteId();<br>            return gatewayRouteService.findOneByRouteId(routeId)<br>                    .defaultIfEmpty(new GatewayRoute())<br>                    .flatMap(old -&gt; {<br>                        if (old.getId() != null) {<br>                            return Mono.defer(() -&gt; Mono.just(ResponseEntity.status(HttpStatus.FORBIDDEN).body(buildRetBody(403, “routeId “ + routeId + “ 已存在”, null))));<br>                        }<br>                        log.info(“[ROUTE] <biz> creating. {}”, defer(() -&gt; JsonUtils.toJSON(r)));<br>                        return gatewayRouteService.insert(Mono.just(r))<br>                                .flatMap(id -&gt; {<br>                                    return Mono.just((ResponseEntity.created(URI.create(“/routes/“ + id))<br>                                            .body(buildRetBody(0, “success”, ImmutableMap.of(“id”, id)))));<br>                                });<br>                    });<br>        });<br>    }<br>    /*</em><br>     * 修改路由<br>     *<br>     * @param id<br>     * @param model<br>     * @return<br>     <em>/<br>    @PutMapping(“/routes/{id}”)<br>    public Mono&lt;ResponseEntity<Map>&gt; update(@PathVariable Long id, @RequestBody Mono<GatewayRoute> model) {<br>        return model.flatMap(r -&gt; {<br>            String routeId = r.getRouteId();<br>            return gatewayRouteService.findOneById(id)<br>                    .flatMap(old -&gt; {<br>                        if (old == null) {<br>                            return Mono.defer(() -&gt; Mono.just(ResponseEntity.status(HttpStatus.FORBIDDEN).body(buildRetBody(403, “routeId “ + routeId + “ 还未创建”, null))));<br>                        }<br>                        log.info(“[ROUTE] <biz> updating. id:{}\n  before:{}\n  after:{}”,<br>                                id, defer(() -&gt; JsonUtils.toJSON(old)), defer(() -&gt; JsonUtils.toJSON(r)));<br>                        return gatewayRouteService.update(Mono.just(r))<br>                                .then(Mono.defer(() -&gt; Mono.just((ResponseEntity.ok(buildRetBody(0, “success”, null))))));<br>                    });<br>        });<br>    }<br>    /*</em><br>     * @param id<br>     * @param status 0 正常，1 删除<br>     * @return<br>     <em>/<br>    @PutMapping(“/routes/{id}/{status}”)<br>    public Mono&lt;ResponseEntity<Object>&gt; updateStatus(@PathVariable Long id, @PathVariable Integer status) {<br>        EntityStatus entityStatus = EntityStatus.fromValue(status);<br>        if (entityStatus == null) {<br>            return Mono.defer(() -&gt; Mono.just(ResponseEntity.status(HttpStatus.BAD_REQUEST).build()));<br>        }<br>        return gatewayRouteService.updateStatus(id, entityStatus)<br>                .then(Mono.defer(() -&gt; Mono.just(ResponseEntity.ok().build())))<br>                .onErrorResume(t -&gt; t instanceof NotFoundException, t -&gt; Mono.just(ResponseEntity.notFound().build()));<br>    }<br>    /*</em><br>     * 获取单个路由信息<br>     *<br>     * @param id<br>     * @return<br>     <em>/<br>    @GetMapping(“/routes/{id}”)<br>    public Mono&lt;ResponseEntity<GatewayRoute>&gt; route(@PathVariable Long id) {<br>        return gatewayRouteService.findOneById(id)<br>                .map(ResponseEntity::ok)<br>                .switchIfEmpty(Mono.just(ResponseEntity.notFound().build()));<br>    }<br>    /*</em><br>     * 刷新路由<br>     *<br>     * @return<br>     */<br>    @PostMapping(“/routes/refresh”)<br>    public Mono&lt;ResponseEntity<Object>&gt; refresh() {<br>        return gatewayRouteService.refresh()<br>                .map(aLong -&gt; {<br>                    if (aLong &gt; 0) {<br>                        return ResponseEntity.ok().build();<br>                    } else {<br>                        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();<br>                    }<br>                });<br>    }<br>    private Map&lt;String, Object&gt; buildRetBody(int code, String msg, Object data) {<br>        Map&lt;String, Object&gt; map = new HashMap&lt;&gt;();<br>        map.put(“code”, code);<br>        map.put(“message”, msg);<br>        map.put(“data”, data);<br>        return map;<br>    }<br>}</p>
+<figure class="highlight autohotkey"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">### 网关模块</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">重写一个新的 `RouteDefinitionRepository`，主要是要实现 `getRouteDefinitions()` 方法。</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">对于 `save` 和 `delete` 这两个方法，我是故意不处理的，因为路由的管理均在上边的路由管理模块实现了，网关模块只关注路由的获取。</span></pre></td></tr></table></figure>
+<p>@Slf4j<br>@Component<br>public class DynamicRouteDefinitionRepository implements RouteDefinitionRepository {<br>    @Autowired<br>    private ReactiveRedisTemplate&lt;String, String&gt; redisTemplate;<br>    @Override<br>    public Flux<RouteDefinition> getRouteDefinitions() {<br>        return redisTemplate.opsForHash()<br>                .values(GATEWAY_ROUTES)<br>                .map(json -&gt; JsonUtils.fromJson(json.toString(), RouteDefinition.class));<br>    }<br>    @Override<br>    public Mono<Void> save(Mono<RouteDefinition> route) {<br>        return Mono.empty();<br>    }<br>    @Override<br>    public Mono<Void> delete(Mono<String> routeId) {<br>        return Mono.empty();<br>    }<br>}</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">除此之外，为了配合路由管理模块实现网关集群的刷新路由配置，网关模块里还需要加一个 Redis 的配置以订阅刷新消息。</span></pre></td></tr></table></figure>
+
+<p>@Slf4j<br>@Configuration<br>public class RedisConfig {<br>    @Bean<br>    ReactiveRedisMessageListenerContainer container(GatewayRouteService routeService, ReactiveRedisConnectionFactory connectionFactory) {<br>        ReactiveRedisMessageListenerContainer container = new ReactiveRedisMessageListenerContainer(connectionFactory);<br>        Runtime.getRuntime().addShutdownHook(new Thread(() -&gt; {<br>            container.destroyLater().subscribe();<br>        }));<br>        container.receive(topic())<br>                .map(p -&gt; p.getMessage())<br>                .subscribe(message -&gt; {<br>                    log.info(“Received &lt;{}&gt;”, message);<br>                    routeService.publishRefreshEvent();<br>                });<br>        return container;<br>    }<br>    @Bean<br>    public ChannelTopic topic() {<br>        return new ChannelTopic(“gateway-route-refresh-topic”);<br>    }<br>}</p>
+<figure class="highlight clean"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">自此也就大功告成了～</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">### 配置格式</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">这样的动态路由，是用 JSON 格式来配置的，如果格式不对，可是要报 <span class="number">500</span> 错误的！</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">这里简单举个栗子：</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">如果我们在配置文件里要配的路由是这样</span></pre></td></tr></table></figure>
+<p>spring:<br>  cloud:<br>    gateway:<br>      routes:<br>        - id: user-api<br>          uri: <a href="http://user-api:8080" target="_blank" rel="noopener">http://user-api:8080</a><br>          order: 0<br>          predicates:<br>            - Path=/user/**<br>            - Weight=user-service, 90<br>          filters:<br>            - StripPrefix=1</p>
+<figure class="highlight fortran"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">那么翻译成 JSON 格式就是要这样（其中 <span class="keyword">status</span> 是我自己加的，可以忽略）</span></pre></td></tr></table></figure>
+<p>{<br>  “routeId”: “user-api”,<br>  “uri”: “<a href="http://user-api:8080&quot;" target="_blank" rel="noopener">http://user-api:8080&quot;</a>,<br>  “order”: 0,<br>  “predicates”: [<br>    {<br>      “name”: “Path”,<br>      “args”: {<br>        “pattern”: “/user/**”<br>      }<br>    },<br>    {<br>      “name”: “Weight”,<br>      “args”: {<br>        “weight.group”: “user-service”,<br>        “weight.weight”: “90”<br>      }<br>    }<br>  ],<br>  “filters”: [<br>    {<br>      “name”: “StripPrefix”,<br>      “args”: {<br>        “parts”: “1”<br>      }<br>    }<br>  ],<br>  “status”: 0<br>}</p>
+<p>```</p>
+<p>至于其中 <code>predicate</code> 和 <code>filter</code> 的 <code>name</code> 字段都还好理解，即使是 yaml 格式的我们也是要写的。这个有相关的文档，目前的规则就是 <code>RoutePredicateFactory</code> 和 <code>GatewayFilterFactory</code> 这两个接口下所有的实现类去掉这两个后缀后的名字（见 <code>org.springframework.cloud.gateway.support.NameUtils</code>）。<br>那么 <code>args</code> 里边的 key 的名字又是哪来的呢？<br>这个没有文档，翻看源码发现此处的 key 有两种配置方式：</p>
+<ol>
+<li>用<code>_genkey_0</code>、<code>_genkey_1</code>…<code>_genkey_n</code> 这种形式，比较方便但是可读性比较差，还得注意顺序。（这个的源码也在 NameUtils 里）</li>
+<li>另一种就是像我上边例子中写的，这需要去各个 <code>RoutePredicateFactory</code> 和 <code>GatewayFilterFactory</code> 的源码找对应的命名规则。（还需要参考 <code>org.springframework.cloud.gateway.support.ShortcutConfigurable</code>）</li>
+</ol>
+<blockquote>
+<p>作者：windmt</p>
+<p>来源：<a href="https://windmt.com/2019/01/20/spring-cloud-20-gateway-dynamic-routing/" target="_blank" rel="noopener">https://windmt.com/2019/01/20/spring-cloud-20-gateway-dynamic-routing/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/10/Spring-Cloud%EF%BC%8819%EF%BC%89%EF%BC%9ASpring-Cloud-Gateway%EF%BC%88%E8%AF%BB%E5%8F%96%E3%80%81%E4%BF%AE%E6%94%B9-Request-Body%EF%BC%89/" rel="prev" title="Spring Cloud（19）：Spring Cloud Gateway（读取、修改 Request Body）">
+      <i class="fa fa-chevron-left"></i> Spring Cloud（19）：Spring Cloud Gateway（读取、修改 Request Body）
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/10/Spring-Cloud-%E4%B8%8E%E5%93%8D%E5%BA%94%E5%BC%8F%E5%BE%AE%E6%9C%8D%E5%8A%A1/" rel="next" title="Spring Cloud 与响应式微服务">
+      Spring Cloud 与响应式微服务 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#为什么需要动态路由？"><span class="nav-number">1.</span> <span class="nav-text">为什么需要动态路由？</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#Spring-Cloud-Gateway-默认动态路由实现"><span class="nav-number">2.</span> <span class="nav-text">Spring Cloud Gateway 默认动态路由实现</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#Spring-Cloud-Gateway-路由加载过程"><span class="nav-number">3.</span> <span class="nav-text">Spring Cloud Gateway 路由加载过程</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

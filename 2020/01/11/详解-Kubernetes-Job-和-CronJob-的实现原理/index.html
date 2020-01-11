@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="之前介绍了 Kubernetes 中用于长期提供服务的 ReplicaSet、Deployment、StatefulSet 和 DaemonSet 等资源，但是作为一个容器编排引擎，任务和定时任务的支持是一个必须要支持的功能。Kubernetes 中使用 Job 和 CronJob 两个资源分别提供了一次性任务和定时任务的特性，这两种对象也使用控制器模型来实现资源的管理，我们在这篇文章种就会介绍它">
+<meta property="og:type" content="article">
+<meta property="og:title" content="详解 Kubernetes Job 和 CronJob 的实现原理">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;11&#x2F;%E8%AF%A6%E8%A7%A3-Kubernetes-Job-%E5%92%8C-CronJob-%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="之前介绍了 Kubernetes 中用于长期提供服务的 ReplicaSet、Deployment、StatefulSet 和 DaemonSet 等资源，但是作为一个容器编排引擎，任务和定时任务的支持是一个必须要支持的功能。Kubernetes 中使用 Job 和 CronJob 两个资源分别提供了一次性任务和定时任务的特性，这两种对象也使用控制器模型来实现资源的管理，我们在这篇文章种就会介绍它">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;292b5-2019-03-05-Job-Topology.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;874c2-2019-03-05-CronJob-Topology.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;75c5d-2019-03-05-Job-FlowChart.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;de240-2019-03-05-Job-Kill-More-Pods.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;4b302-2019-03-05-Job-Create-More-Pods.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;c5983-2019-03-05-CronJobController-FlowChart.png">
+<meta property="og:updated_time" content="2020-01-11T02:55:50.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;292b5-2019-03-05-Job-Topology.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/11/%E8%AF%A6%E8%A7%A3-Kubernetes-Job-%E5%92%8C-CronJob-%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>详解 Kubernetes Job 和 CronJob 的实现原理 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/11/%E8%AF%A6%E8%A7%A3-Kubernetes-Job-%E5%92%8C-CronJob-%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          详解 Kubernetes Job 和 CronJob 的实现原理
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-11 10:55:50" itemprop="dateCreated datePublished" datetime="2020-01-11T10:55:50+08:00">2020-01-11</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">其它技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/Kubernetes/" itemprop="url" rel="index">
+                    <span itemprop="name">Kubernetes</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>之前介绍了 Kubernetes 中用于长期提供服务的 <a href="https://draveness.me/kubernetes-replicaset" target="_blank" rel="noopener">ReplicaSet</a>、<a href="https://draveness.me/kubernetes-deployment" target="_blank" rel="noopener">Deployment</a>、<a href="https://draveness.me/kubernetes-statefulset" target="_blank" rel="noopener">StatefulSet</a> 和 <a href="https://draveness.me/kubernetes-daemonset" target="_blank" rel="noopener">DaemonSet</a> 等资源，但是作为一个容器编排引擎，任务和定时任务的支持是一个必须要支持的功能。<br>Kubernetes 中使用 Job 和 CronJob 两个资源分别提供了一次性任务和定时任务的特性，这两种对象也使用控制器模型来实现资源的管理，我们在这篇文章种就会介绍它们的实现原理。</p>
+<a id="more"></a>
+
+<h2 id="概述"><a href="#概述" class="headerlink" title="概述"></a>概述</h2><p>Kubernetes 中的 Job 可以创建并且保证一定数量 Pod 的成功停止，当 Job 持有的一个 Pod 对象成功完成任务之后，Job 就会记录这一次 Pod 的成功运行；当一定数量的Pod 的任务执行结束之后，当前的 Job 就会将它自己的状态标记成结束。<br><img src="http://image.winrains.cn/2019/11/292b5-2019-03-05-Job-Topology.png" alt="Job-Topology"><br>上述图片中展示了一个 <code>spec.completions=3</code> 的任务的状态随着 Pod 的成功执行而更新和迁移状态的过程，从图中我们能比较清楚的看到 Job 和 Pod 之间的关系，假设我们有一个用于计算圆周率的如下任务：</p>
+<figure class="highlight less"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="attribute">apiVersion</span>: batch/v1</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="attribute">kind</span>: Job</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="attribute">metadata</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="attribute">name</span>: pi</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="attribute">spec</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  <span class="attribute">completions</span>: <span class="number">10</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  <span class="attribute">parallelism</span>: <span class="number">5</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  <span class="attribute">template</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="attribute">spec</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">      <span class="attribute">containers</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">      - <span class="attribute">name</span>: pi</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="attribute">image</span>: perl</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="attribute">command</span>: [<span class="string">"perl"</span>,  <span class="string">"-Mbignum=bpi"</span>, <span class="string">"-wle"</span>, <span class="string">"print bpi(2000)"</span>]</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">      <span class="attribute">restartPolicy</span>: Never</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">  <span class="attribute">backoffLimit</span>: <span class="number">4</span></span></pre></td></tr></table></figure>
+
+<p>当我们在 Kubernetes 中创建上述任务时，使用 <code>kubectl</code> 能够观测到以下的信息：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">$ k apply -f job.yaml</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">job.batch/pi created</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">$ kubectl <span class="keyword">get</span> job --watch</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">NAME  COMPLETIONS   DURATION   AGE</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">pi    <span class="number">0</span>/<span class="number">10</span>          <span class="number">1</span>s         <span class="number">1</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">pi    <span class="number">1</span>/<span class="number">10</span>          <span class="number">36</span>s        <span class="number">36</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">pi    <span class="number">2</span>/<span class="number">10</span>          <span class="number">46</span>s        <span class="number">46</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">pi    <span class="number">3</span>/<span class="number">10</span>          <span class="number">54</span>s        <span class="number">54</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">pi    <span class="number">4</span>/<span class="number">10</span>          <span class="number">60</span>s        <span class="number">60</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">pi    <span class="number">5</span>/<span class="number">10</span>          <span class="number">65</span>s        <span class="number">65</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">pi    <span class="number">6</span>/<span class="number">10</span>          <span class="number">90</span>s        <span class="number">90</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">pi    <span class="number">7</span>/<span class="number">10</span>          <span class="number">99</span>s        <span class="number">99</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">pi    <span class="number">8</span>/<span class="number">10</span>          <span class="number">104</span>s       <span class="number">104</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">pi    <span class="number">9</span>/<span class="number">10</span>          <span class="number">107</span>s       <span class="number">107</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">pi    <span class="number">10</span>/<span class="number">10</span>         <span class="number">109</span>s       <span class="number">109</span>s</span></pre></td></tr></table></figure>
+
+<p>由于任务 <code>pi</code> 在配置时指定了 <code>spec.completions=10</code>，所以当前的任务需要等待 10 个 Pod 的成功执行，另一个比较重要的 <code>spec.parallelism=5</code> 表示最多有多少个并发执行的任务，如果 <code>spec.parallelism=1</code> 那么所有的任务都会依次顺序执行，只有前一个任务执行成功时，后一个任务才会开始工作。<br><img src="http://image.winrains.cn/2019/11/874c2-2019-03-05-CronJob-Topology.png" alt="CronJob-Topology"><br>每一个 Job 对象都会持有一个或者多个 Pod，而每一个 CronJob 就会持有多个 Job 对象，CronJob 能够按照时间对任务进行调度，它与 <a href="https://en.wikipedia.org/wiki/Cron" target="_blank" rel="noopener">crontab</a> 非常相似，我们可以使用 Cron 格式快速指定任务的调度时间：</p>
+<figure class="highlight less"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="attribute">apiVersion</span>: batch/v1beta1</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="attribute">kind</span>: CronJob</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="attribute">metadata</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="attribute">name</span>: pi</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="attribute">spec</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  <span class="attribute">schedule</span>: <span class="string">"*/1 * * * *"</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  <span class="attribute">jobTemplate</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="attribute">spec</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">      <span class="attribute">completions</span>: <span class="number">2</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">      <span class="attribute">parallelism</span>: <span class="number">1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">      <span class="attribute">template</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="attribute">spec</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">          <span class="attribute">containers</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">          - <span class="attribute">name</span>: pi</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            <span class="attribute">image</span>: perl</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            <span class="attribute">command</span>: [<span class="string">"perl"</span>,  <span class="string">"-Mbignum=bpi"</span>, <span class="string">"-wle"</span>, <span class="string">"print bpi(2000)"</span>]</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">          <span class="attribute">restartPolicy</span>: OnFailure</span></pre></td></tr></table></figure>
+
+<p>上述的 CronJob 对象被创建之后，每分钟都会创建一个新的 Job 对象，所有的 CronJob 创建的任务都会带有调度时的时间戳，例如：pi-1551660600 和 pi-1551660660 两个任务：</p>
+<figure class="highlight lsl"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">$ k get cronjob --watch</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">NAME   SCHEDULE      SUSPEND   <span class="literal">ACTIVE</span>   LAST SCHEDULE   AGE</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">pi    */<span class="number">1</span> * * * *    False     <span class="number">0</span>        &lt;none&gt;          <span class="number">3</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">pi    */<span class="number">1</span> * * * *    False     <span class="number">1</span>        <span class="number">1</span>s              <span class="number">7</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">$ k get job --watch</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">NAME            COMPLETIONS   DURATION   AGE</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">pi<span class="number">-1551660600</span>   <span class="number">0</span>/<span class="number">3</span>   <span class="number">0</span>s    <span class="number">0</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">pi<span class="number">-1551660600</span>   <span class="number">1</span>/<span class="number">3</span>   <span class="number">16</span>s   <span class="number">16</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">pi<span class="number">-1551660600</span>   <span class="number">2</span>/<span class="number">3</span>   <span class="number">31</span>s   <span class="number">31</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">pi<span class="number">-1551660600</span>   <span class="number">3</span>/<span class="number">3</span>   <span class="number">44</span>s   <span class="number">44</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">pi<span class="number">-1551660660</span>   <span class="number">0</span>/<span class="number">3</span>         <span class="number">1</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">pi<span class="number">-1551660660</span>   <span class="number">0</span>/<span class="number">3</span>   <span class="number">1</span>s    <span class="number">1</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">pi<span class="number">-1551660660</span>   <span class="number">1</span>/<span class="number">3</span>   <span class="number">14</span>s   <span class="number">14</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">pi<span class="number">-1551660660</span>   <span class="number">2</span>/<span class="number">3</span>   <span class="number">28</span>s   <span class="number">28</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">pi<span class="number">-1551660660</span>   <span class="number">3</span>/<span class="number">3</span>   <span class="number">42</span>s   <span class="number">43</span>s</span></pre></td></tr></table></figure>
+
+<p>CronJob 中保存的任务其实是有上限的，<code>spec.successfulJobsHistoryLimit</code> 和 <code>spec.failedJobsHistoryLimit</code> 分别记录了能够保存的成功或者失败的任务上限，超过这个上限的任务都会被删除，默认情况下这两个属性分别为 <code>spec.successfulJobsHistoryLimit=3</code> 和 <code>spec.failedJobsHistoryLimit=1</code>。</p>
+<h2 id="任务"><a href="#任务" class="headerlink" title="任务"></a>任务</h2><p>Job 遵循 Kubernetes 的控制器模式进行设计，在发生需要监听的事件时，Informer 就会调用控制器中的回调将需要处理的资源 Job 加入队列，而控制器持有的工作协程就会处理这些任务。<br><img src="http://image.winrains.cn/2019/11/75c5d-2019-03-05-Job-FlowChart.png" alt="Job-FlowChart"><br>用于处理 Job 资源的 <code>JobController</code> 控制器会监听 Pod 和 Job 这两个资源的变更事件，而资源的同步还是需要运行 <code>syncJob</code> 方法。</p>
+<h3 id="同步"><a href="#同步" class="headerlink" title="同步"></a>同步</h3><p><code>syncJob</code> 是 <code>JobController</code> 中主要用于同步 Job 资源的方法，这个方法的主要作用就是对资源进行同步，它的大体架构就是先获取一些当前同步的基本信息，然后调用 <code>manageJob</code> 方法管理 Job 对应的 Pod 对象，最后计算出处于 <code>active</code>、<code>failed</code> 和 <code>succeed</code> 三种状态的 Pod 数量并更新 Job 的状态：</p>
+<figure class="highlight lisp"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">func (<span class="name">jm</span> *JobController) syncJob(key string) (bool, error) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    ns, name, _ := cache.SplitMetaNamespaceKey(key)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    sharedJob, _ := jm.jobLister.Jobs(ns).Get(name)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    job := *sharedJob</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    jobNeedsSync <span class="symbol">:=</span> jm.expectations.SatisfiedExpectations(<span class="name">key</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    pods, _ <span class="symbol">:=</span> jm.getPodsForJob(<span class="name">&amp;job</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    activePods <span class="symbol">:=</span> controller.FilterActivePods(<span class="name">pods</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    active <span class="symbol">:=</span> int32(<span class="name">len</span>(<span class="name">activePods</span>))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    succeeded, failed <span class="symbol">:=</span> getStatus(<span class="name">pods</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    conditions <span class="symbol">:=</span> len(<span class="name">job</span>.Status.Conditions)</span></pre></td></tr></table></figure>
+
+<p>这一部分代码会从 apiserver 中该名字对应的 Job 对象，然后获取 Job 对应的 Pod 数组并根据计算不同状态 Pod 的数量，为之后状态的更新和比对做准备。</p>
+<figure class="highlight mipsasm"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">var manageJobErr error</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">if <span class="keyword">jobNeedsSync </span>&amp;&amp; <span class="keyword">job.DeletionTimestamp </span>== nil &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    active, manageJobErr = <span class="keyword">jm.manageJob(activePods, </span>succeeded, &amp;<span class="keyword">job)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">&#125;</span></span></pre></td></tr></table></figure>
+
+<p>准备工作完成之后，会调用 <code>manageJob</code> 方法，该方法主要负责管理 Job 持有的一系列 Pod 的运行，它最终会返回目前集群中当前 Job 对应的活跃任务的数量。</p>
+<figure class="highlight cos"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">    completions := succeeded</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    complete := false</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> <span class="keyword">job</span>.Spec.Completions == nil &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> succeeded &gt; <span class="number">0</span> &amp;&amp; active == <span class="number">0</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">            complete = true</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    &#125; <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> completions &gt;= *<span class="keyword">job</span>.Spec.Completions &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">            complete = true</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> complete &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">job</span>.Status.Conditions = append(<span class="keyword">job</span>.Status.Conditions, newCondition(batch.JobComplete, <span class="string">""</span>, <span class="string">""</span>))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        now := metav1.Now()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">job</span>.Status.CompletionTime = &amp;now</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> <span class="keyword">job</span>.Status.Active != active || <span class="keyword">job</span>.Status.Succeeded != succeeded || <span class="keyword">job</span>.Status.Failed != failed || len(<span class="keyword">job</span>.Status.Conditions) != conditions &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">job</span>.Status.Active = active</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">job</span>.Status.Succeeded = succeeded</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">job</span>.Status.Failed = failed</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        jm.updateHandler(&amp;<span class="keyword">job</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> forget, manageJobErr</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>最后的这段代码会将 Job 规格中设置的 <code>spec.completions</code> 和已经完成的任务数量进行比对，确认当前的 Job 是否已经结束运行，如果任务已经结束运行就会更新当前 Job 的完成时间，同时当 <code>JobController</code> 发现有一些状态没有正确同步时，也会调用 <code>updateHandler</code> 更新资源的状态。</p>
+<h3 id="并行执行"><a href="#并行执行" class="headerlink" title="并行执行"></a>并行执行</h3><p>Pod 的创建和删除都是由 <code>manageJob</code> 这个方法负责的，这个方法根据 Job 的 <code>spec.parallelism</code> 配置对目前集群中的节点进行创建和删除。<br><img src="http://image.winrains.cn/2019/11/de240-2019-03-05-Job-Kill-More-Pods.png" alt="Job-Kill-More-Pods"><br>如果当前正在执行的活跃节点数量超过了 <code>spec.parallelism</code>，那么就会按照创建的升删除多余的任务，删除任务时会使用 <code>DeletePod</code> 方法：</p>
+<figure class="highlight lisp"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">func (<span class="name">jm</span> *JobController) manageJob(activePods []*v1.Pod, succeeded int32, job *batch.Job) (int32, error) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    active := int32(len(activePods))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    parallelism := *job.Spec.Parallelism</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    if active &gt; parallelism &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        diff <span class="symbol">:=</span> active - parallelism</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        sort.Sort(<span class="name">controller</span>.ActivePods(<span class="name">activePods</span>))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        active -= diff</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        wait <span class="symbol">:=</span> sync.WaitGroup&#123;&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        wait.Add(<span class="name">int</span>(<span class="name">diff</span>))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        for i <span class="symbol">:=</span> int32(<span class="number">0</span>)<span class="comment">; i &lt; diff; i++ &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">            go func(<span class="name">ix</span> int32) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">                defer wait.Done()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">                jm.podControl.DeletePod(<span class="name">job</span>.Namespace, activePods[ix].Name, job)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">            &#125;(<span class="name">i</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        wait.Wait()</span></pre></td></tr></table></figure>
+
+<p>当正在活跃的节点数量小于 <code>spec.parallelism</code> 时，我们就会根据当前未完成的任务数和并行度计算出最大可以处于活跃的 Pod 个数 <code>wantActive</code> 以及与当前的活跃 Pod 数相差的 <code>diff</code>：</p>
+<figure class="highlight properties"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="meta">&#125;</span> <span class="string">else if active &lt; parallelism &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="attr">wantActive</span> :<span class="string">= int32(0)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="attr">if</span> <span class="string">job.Spec.Completions == nil &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="attr">if</span> <span class="string">succeeded &gt; 0 &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">            <span class="attr">wantActive</span> = <span class="string">active</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="meta">&#125;</span> <span class="string">else &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            <span class="attr">wantActive</span> = <span class="string">parallelism</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="attr">&#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">&#125;</span> <span class="string">else &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        <span class="attr">wantActive</span> = <span class="string">*job.Spec.Completions - succeeded</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="attr">if</span> <span class="string">wantActive &gt; parallelism &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">            <span class="attr">wantActive</span> = <span class="string">parallelism</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="attr">&#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    <span class="attr">&#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    <span class="attr">diff</span> :<span class="string">= wantActive - active</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    <span class="attr">if</span> <span class="string">diff &lt; 0 &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="attr">diff</span> = <span class="string">0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    <span class="attr">&#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">    <span class="attr">active</span> <span class="string">+= diff</span></span></pre></td></tr></table></figure>
+
+<p>在方法的最后就会以批量的方式并行创建 Pod，所有 Pod 的创建都是通过 <code>CreatePodsWithControllerRef</code> 方法在 Goroutine 中执行的。<br><img src="http://image.winrains.cn/2019/11/4b302-2019-03-05-Job-Create-More-Pods.png" alt="Job-Create-More-Pods"><br>这里会使用 <code>WaitGroup</code> 等待每个 Batch 中创建的结果返回才会执行下一个 Batch，Batch 的大小是从 1 开始指数增加的，以冷启动的方式避免首次创建的任务过多造成失败：</p>
+<figure class="highlight mipsasm"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">wait </span>:= <span class="keyword">sync.WaitGroup&#123;&#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>       for <span class="keyword">batchSize </span>:= int32(integer.IntMin(int(<span class="keyword">diff), </span>controller.SlowStartInitialBatchSize))<span class="comment">; diff &gt; 0; batchSize = integer.Int32Min(2*batchSize, diff) &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">wait.Add(int(batchSize))</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>           for i := int32(<span class="number">0</span>)<span class="comment">; i &lt; batchSize; i++ &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">                go func() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">                    defer <span class="keyword">wait.Done()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>                   <span class="keyword">jm.podControl.CreatePodsWithControllerRef(job.Namespace, </span>&amp;<span class="keyword">job.Spec.Template, </span><span class="keyword">job, </span>metav1.NewControllerRef(<span class="keyword">job, </span>controllerKind))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">                &#125;()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">wait.Wait()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>           <span class="keyword">diff </span>-= <span class="keyword">batchSize</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>       &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    return active, nil</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>通过对 <code>manageJob</code> 的分析，我们其实能够看出这个方法就是根据规格中的配置对 Pod 进行管理，它在较多并行时删除 Pod，较少并行时创建 Pod，也算是一个简单的资源利用和调度机制，代码非常直白并且容易理解，不需要花太大的篇幅。</p>
+<h2 id="定时任务"><a href="#定时任务" class="headerlink" title="定时任务"></a>定时任务</h2><p>用于管理 CronJob 资源的 <code>CronJobController</code> 虽然也使用了控制器模式，但是它的实现与其他的控制器不太一样，他没有从 Informer 中接受其他消息变动的通知，而是直接访问 apiserver 中的数据：<br><img src="http://image.winrains.cn/2019/11/c5983-2019-03-05-CronJobController-FlowChart.png" alt="CronJobController-FlowChart"><br>从 apiserver 中获取了 Job 和 CronJob 的信息之后就会调用 <code>JobControl</code> 向 apiserver 发起请求创建新的 Job 资源，这一个过程都是由 <code>CronJobController</code> 的 <code>syncAll</code> 方法驱动的，我们接下来就来介绍这一方法的实现。</p>
+<h3 id="同步-1"><a href="#同步-1" class="headerlink" title="同步"></a>同步</h3><p><code>syncAll</code> 方法会从 apiserver 中取出所有的 Job 和 CronJob 对象，然后通过 <code>groupJobsByParent</code> 将任务按照 <code>spec.ownerReferences</code> 进行分类并遍历去同步所有的 CronJob：</p>
+<figure class="highlight roboconf"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">func (jm *CronJobController) syncAll() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="attribute">jl, _</span> := jm<span class="variable">.kubeClient</span><span class="variable">.BatchV</span>1()<span class="variable">.Jobs</span>(metav1<span class="variable">.NamespaceAll</span>)<span class="variable">.List</span>(metav1<span class="variable">.ListOptions</span>&#123;&#125;)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    js := jl<span class="variable">.Items</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    sjl, _ := jm<span class="variable">.kubeClient</span><span class="variable">.BatchV</span>1beta1()<span class="variable">.CronJobs</span>(metav1<span class="variable">.NamespaceAll</span>)<span class="variable">.List</span>(metav1<span class="variable">.ListOptions</span>&#123;&#125;)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    sjs := sjl<span class="variable">.Items</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    jobsBySj := groupJobsByParent(js)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    for _, sj := range sjs &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        syncOne(&amp;sj, jobsBySj[sj<span class="variable">.UID</span>], time<span class="variable">.Now</span>(), jm<span class="variable">.jobControl</span>, jm<span class="variable">.sjControl</span>, jm<span class="variable">.recorder</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        cleanupFinishedJobs(&amp;sj, jobsBySj[sj<span class="variable">.UID</span>], jm<span class="variable">.jobControl</span>, jm<span class="variable">.sjControl</span>, jm<span class="variable">.recorder</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p><code>syncOne</code> 就是用于同步单个 CronJob 对象的方法，这个方法会首先遍历全部的 Job 对象，只保留正在运行的活跃对象并更新 CronJob 的状态：</p>
+<figure class="highlight mipsasm"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">func <span class="keyword">syncOne(sj </span>*<span class="keyword">batchv1beta1.CronJob, </span><span class="keyword">js </span>[]<span class="keyword">batchv1.Job, </span>now time.Time, <span class="keyword">jc </span><span class="keyword">jobControlInterface, </span>sjc sjControlInterface, recorder record.EventRecorder) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    childrenJobs := make(map[types.UID]<span class="keyword">bool)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>   for _, <span class="keyword">j </span>:= range <span class="keyword">js </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        childrenJobs[<span class="keyword">j.ObjectMeta.UID] </span>= true</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        found := inActiveList(*sj, <span class="keyword">j.ObjectMeta.UID)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>       if found &amp;&amp; IsJobFinished(&amp;<span class="keyword">j) </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            deleteFromActiveList(sj, <span class="keyword">j.ObjectMeta.UID)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>       &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    for _, <span class="keyword">j </span>:= range sj.Status.Active &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        if found := childrenJobs[<span class="keyword">j.UID]; </span>!found &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">            deleteFromActiveList(sj, <span class="keyword">j.UID)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>       &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    updatedSJ, _ := sjc.UpdateStatus(sj)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    *sj = *updatedSJ</span></pre></td></tr></table></figure>
+
+<p>随后的 <code>getRecentUnmetScheduleTimes</code> 方法会根据 CronJob 的调度配置 <code>spec.schedule</code> 和上一次执行任务的时间计算出我们缺失的任务次数。</p>
+<figure class="highlight roboconf"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">times, _ := getRecentUnmetScheduleTimes(*sj, now)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">if len(times) == 0 &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="attribute">return</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="attribute">&#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="attribute">scheduledTime</span> := times[len(times)-1]</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">if sj<span class="variable">.Spec</span><span class="variable">.ConcurrencyPolicy</span> == batchv1beta1<span class="variable">.ForbidConcurrent</span> &amp;&amp; len(sj<span class="variable">.Status</span><span class="variable">.Active</span>) &gt; 0 &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    return</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">if sj<span class="variable">.Spec</span><span class="variable">.ConcurrencyPolicy</span> == batchv1beta1<span class="variable">.ReplaceConcurrent</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    for _, j := range sj<span class="variable">.Status</span><span class="variable">.Active</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        job, _ := jc<span class="variable">.GetJob</span>(j<span class="variable">.Namespace</span>, j<span class="variable">.Name</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        if !deleteJob(sj, job, jc, recorder) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            return</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>如果现在需要调度新的任务，但是当前已经存在活跃的任务，就会根据并发策略的配置执行不同的操作：</p>
+<ol>
+<li>使用 <code>ForbidConcurrent</code> 策略跳过这一次任务的调度直接返回；</li>
+<li>使用 <code>ReplaceConcurrent</code> 策略获取并删除全部活跃的任务，通过创建新的 Pod 替换这些正在执行的活跃 Pod；</li>
+</ol>
+<figure class="highlight mipsasm"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">jobReq, </span>_ := getJobFromTemplate(sj, <span class="keyword">scheduledTime)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>   <span class="keyword">jobResp, </span>_ := <span class="keyword">jc.CreateJob(sj.Namespace, </span><span class="keyword">jobReq)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>   ref,_ := getRef(<span class="keyword">jobResp)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>   sj.Status.Active = append(sj.Status.Active, *ref)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    sj.Status.LastScheduleTime = &amp;metav1.Time&#123;Time: <span class="keyword">scheduledTime&#125;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword"> </span>   sjc.UpdateStatus(sj)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    return</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>在方法的最后，它会从 CronJob 的 <code>spec.jobTemplate</code> 中拿到创建 Job 使用的模板并调用 <code>JobControl</code> 的 <code>CreateJob</code> 向 apiserver 发起创建任务的 HTTP 请求，接下来的操作就都是由 <code>JobController</code> 负责了。</p>
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>Job 作为 Kubernetes 中用于处理任务的资源，与其他的资源没有太多的区别，它也使用 Kubernetes 中常见的控制器模式，监听 Informer 中的事件并运行 <code>syncHandler</code> 同步任务<br>而 CronJob 由于其功能的特殊性，每隔 10s 会从 apiserver 中取出资源并进行检查是否应该触发调度创建新的资源，需要注意的是 CronJob 并不能保证在准确的目标时间执行，执行会有一定程度的滞后。<br>两个控制器的实现都比较清晰，只是边界条件比较多，分析其实现原理时一定要多注意。</p>
+<h2 id="相关文章"><a href="#相关文章" class="headerlink" title="相关文章"></a>相关文章</h2><ul>
+<li>基础<ul>
+<li><a href="https://draveness.me/distributed-transaction-principle" target="_blank" rel="noopener">分布式事务的实现原理</a></li>
+<li><a href="https://draveness.me/message-delivery" target="_blank" rel="noopener">分布式系统与消息的投递</a></li>
+</ul>
+</li>
+<li>数据库<ul>
+<li><a href="https://draveness.me/dynamo" target="_blank" rel="noopener">分布式键值存储 Dynamo 的实现原理</a></li>
+<li><a href="https://draveness.me/bigtable-leveldb" target="_blank" rel="noopener">浅析 Bigtable 和 LevelDB 的实现</a></li>
+</ul>
+</li>
+<li>分布式协调 &amp; 服务发现<ul>
+<li><a href="https://draveness.me/zookeeper-chubby" target="_blank" rel="noopener">详解分布式协调服务 ZooKeeper</a></li>
+<li><a href="https://draveness.me/etcd-introduction" target="_blank" rel="noopener">高可用分布式存储 etcd 的实现原理</a></li>
+<li><a href="https://draveness.me/dns-coredns" target="_blank" rel="noopener">详解 DNS 与 CoreDNS 的实现原理</a></li>
+</ul>
+</li>
+<li>容器编排<ul>
+<li><a href="https://draveness.me/understanding-kubernetes" target="_blank" rel="noopener">谈 Kubernetes 的架构设计与实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-object-intro" target="_blank" rel="noopener">从 Kubernetes 中的对象谈起</a></li>
+<li><a href="https://draveness.me/kubernetes-pod" target="_blank" rel="noopener">详解 Kubernetes Pod 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-service" target="_blank" rel="noopener">详解 Kubernetes Service 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-volume" target="_blank" rel="noopener">详解 Kubernetes Volume 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-replicaset" target="_blank" rel="noopener">详解 Kubernetes ReplicaSet 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-deployment" target="_blank" rel="noopener">详解 Kubernetes Deployment 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-statefulset" target="_blank" rel="noopener">详解 Kubernetes StatefulSet 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-daemonset" target="_blank" rel="noopener">详解 Kubernetes DaemonSet 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-job-cronjob" target="_blank" rel="noopener">详解 Kubernetes Job 和 CronJob 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-garbage-collector" target="_blank" rel="noopener">详解 Kubernetes 垃圾收集器 的实现原理</a></li>
+</ul>
+</li>
+</ul>
+<h2 id="Referenece"><a href="#Referenece" class="headerlink" title="Referenece"></a>Referenece</h2><ul>
+<li><a href="https://kubernetes.io/docs/concepts/workloads/controllers/jobs-run-to-completion/" target="_blank" rel="noopener">Jobs - Run to Completion · Kubernetes</a></li>
+<li><a href="https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/" target="_blank" rel="noopener">CronJob · Kubernetes</a></li>
+<li><a href="https://kubernetes.io/docs/tasks/job/parallel-processing-expansion/" target="_blank" rel="noopener">Parallel Processing using Expansions</a></li>
+<li>[Coarse Parallel Processing Using a Work Queue](<a href="https://draveness.me/Coarse" target="_blank" rel="noopener">https://draveness.me/Coarse</a> Parallel Processing Using a Work Queue)</li>
+<li><a href="https://kubernetes.io/docs/tasks/job/fine-parallel-processing-work-queue/" target="_blank" rel="noopener">Fine Parallel Processing Using a Work Queue</a></li>
+<li><a href="https://kubernetes.io/docs/tasks/job/automated-tasks-with-cron-jobs/" target="_blank" rel="noopener">Running Automated Tasks with a CronJob</a></li>
+</ul>
+<blockquote>
+<p>作者：Draveness</p>
+<p>来源：<a href="https://draveness.me/kubernetes-job-cronjob" target="_blank" rel="noopener">https://draveness.me/kubernetes-job-cronjob</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/11/%E8%AF%A6%E8%A7%A3-Kubernetes-DaemonSet-%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/" rel="prev" title="详解 Kubernetes DaemonSet 的实现原理">
+      <i class="fa fa-chevron-left"></i> 详解 Kubernetes DaemonSet 的实现原理
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/11/%E4%B8%BA%E4%BB%80%E4%B9%88-DNS-%E4%BD%BF%E7%94%A8-UDP-%E5%8D%8F%E8%AE%AE/" rel="next" title="为什么 DNS 使用 UDP 协议">
+      为什么 DNS 使用 UDP 协议 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#概述"><span class="nav-number">1.</span> <span class="nav-text">概述</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#任务"><span class="nav-number">2.</span> <span class="nav-text">任务</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#同步"><span class="nav-number">2.1.</span> <span class="nav-text">同步</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#并行执行"><span class="nav-number">2.2.</span> <span class="nav-text">并行执行</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#定时任务"><span class="nav-number">3.</span> <span class="nav-text">定时任务</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#同步-1"><span class="nav-number">3.1.</span> <span class="nav-text">同步</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#总结"><span class="nav-number">4.</span> <span class="nav-text">总结</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#相关文章"><span class="nav-number">5.</span> <span class="nav-text">相关文章</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Referenece"><span class="nav-number">6.</span> <span class="nav-text">Referenece</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

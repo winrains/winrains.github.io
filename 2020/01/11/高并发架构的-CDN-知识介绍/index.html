@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="对一次网络请求过程的了解程度，一是展现你的专业知识；二是深刻的理解，让你在大型网站架构中做出更适合、可靠的架构。而DNS是这一切的出发点，本文结合一张常用架构图，来描述一下这个过程。">
+<meta name="keywords" content="高并发,CDN">
+<meta property="og:type" content="article">
+<meta property="og:title" content="高并发架构的 CDN 知识介绍">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;11&#x2F;%E9%AB%98%E5%B9%B6%E5%8F%91%E6%9E%B6%E6%9E%84%E7%9A%84-CDN-%E7%9F%A5%E8%AF%86%E4%BB%8B%E7%BB%8D&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="对一次网络请求过程的了解程度，一是展现你的专业知识；二是深刻的理解，让你在大型网站架构中做出更适合、可靠的架构。而DNS是这一切的出发点，本文结合一张常用架构图，来描述一下这个过程。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191211153937-d61e1.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191211153940-8f110.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191211153942-1de01.png">
+<meta property="og:updated_time" content="2020-01-11T03:51:18.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191211153937-d61e1.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/11/%E9%AB%98%E5%B9%B6%E5%8F%91%E6%9E%B6%E6%9E%84%E7%9A%84-CDN-%E7%9F%A5%E8%AF%86%E4%BB%8B%E7%BB%8D/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>高并发架构的 CDN 知识介绍 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/11/%E9%AB%98%E5%B9%B6%E5%8F%91%E6%9E%B6%E6%9E%84%E7%9A%84-CDN-%E7%9F%A5%E8%AF%86%E4%BB%8B%E7%BB%8D/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          高并发架构的 CDN 知识介绍
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-11 11:51:18" itemprop="dateCreated datePublished" datetime="2020-01-11T11:51:18+08:00">2020-01-11</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">其它技术</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>对一次网络请求过程的了解程度，一是展现你的专业知识；二是深刻的理解，让你在大型网站架构中做出更适合、可靠的架构。而DNS是这一切的出发点，本文结合一张常用架构图，来描述一下这个过程。</p>
+<a id="more"></a>
+
+<h1 id="部署架构"><a href="#部署架构" class="headerlink" title="部署架构"></a>部署架构</h1><p>大型的web服务，我们的部署架构一般如下图。先上图再解释。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191211153937-d61e1.png" alt="大流量架构图"></p>
+<p>这里来解释下，为什么要这样架构。 首先客户端的请求会通过 <code>DNS</code> 获取到对应的服务器IP（实际上是LB的ip地址），这一层会有 <strong>DNS的负载均衡</strong>，并且如果是静态站资源会进入到CDN，这里DNS与CDN如何完成接棒的过程，后面会详细解释。 当请求到达LB层的时候（应用层协议是HTTP协议），这一层又会做一次负载均衡（可能用LVS或者Nginx做）。这里我们有两种不同的处理方式，一条路径会进入到代理集群，一条路径直接进入到应用集群。这是为什么？</p>
+<h2 id="LB到代理集群"><a href="#LB到代理集群" class="headerlink" title="LB到代理集群"></a>LB到代理集群</h2><p>通过最顶层的LB负载均衡后到达代理机器，这里不直接进入到应用集群，还要搞一层代理的目的主要是方便我们在代理集群进行各种高级（骚）操作。</p>
+<p>比如：请求日志收集，自定义缓存，自定义的负载均衡，自定义的路由规则制定（跨机房，路由分组）</p>
+<h2 id="LB到应用集群"><a href="#LB到应用集群" class="headerlink" title="LB到应用集群"></a>LB到应用集群</h2><p>上面到代理层有那么多好处，为什么还有绕过代理层这条路径存在呢？这主要是针对大流量服务。因为代理层因为有很多额外的操作，导致响应会变长，路径增加，到下一个集群多了一次网络传输往返。</p>
+<p>所以，一般针对大流量服务，为了防止代理被打满，响应更快，会直接在外网LB上进行负载到应用集群。</p>
+<p>通过上面的分割后，最终都会到达应用集群，每一台机器上我们会部署一台 <code>Nginx</code> 来按照域名转到对应服务，当然这里完全也可以不是 <code>Nginx</code> ，比如微服务，这里可能是一个 <code>SideCard</code> 代理。这里主要是为了便于说明我们后面全部都是当成Nginx。服务调用 <code>DB</code> <code>Cache</code> 等，都是通过域名，这是为了负载均衡，请求时，会通过内网DNS服务，完成域名解析，然后拿到内网的 <code>LB</code> 的IP。然后再这里进行内网的负载均衡，会根据域名的端口来检查你是写操作、还是读操作返回IP。常规一点会保证是单点写入，多点读取。来完成数据一致性的保障。</p>
+<p>整个大体过程如此，接下来我们详细说一下 <code>DNS</code> 与 <code>CDN</code> 相关的工作原理。</p>
+<h1 id="DNS如何实现IP查找"><a href="#DNS如何实现IP查找" class="headerlink" title="DNS如何实现IP查找"></a>DNS如何实现IP查找</h1><p>为了后面说清楚CDN，这里先介绍DNS的解析过程。当然此类文章网络上已经极多。但是我还是想按照我的理解来说一下DNS是如何工作的。</p>
+<p>在整个DNS过程中有四个重要概念，下面解释下。</p>
+<p><strong>DNS Resolver</strong> - 递归解析器，主要是接收客户端发出的域名解析请求，并发送 DNS query 查询请求。对于客户端来说它不需要任何操劳，等待 DNS Resolver 告诉自己域名转IP的结果就好。</p>
+<p><strong>Root Server</strong> - 这是转换IP执行的第一步查询，根服务器并不会保存具体的域名IP映射信息。它就像一个索引服务器，会告诉你下一步该去那台 <strong>TLD Server</strong> 查询。</p>
+<p><strong>TLD Server</strong> - 这是顶级域名服务器，是执行IP查询的第二步，这里会告诉 <strong>DNS Resolver</strong> 权威域名服务器的地址。</p>
+<p><strong>Authoriative Server</strong> - 权威域名服务器就是包含了完整的机器名的域名，例如：<a href="http://www.example.com" target="_blank" rel="noopener">www.example.com</a> ，在这台机器上保存了这个具体域名对应的IP地址。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191211153940-8f110.png" alt="dns-lookup-diagram"></p>
+<p>下面根据图中的十个步骤说一下每一步都在干嘛。</p>
+<ol>
+<li>一个用户在浏览器输入了：example.com，这时会产生一个 DNS 查询，从而进入到 DNS Resolver中；</li>
+<li>Resolver 会进入到 root server 进行查询；</li>
+<li>root server 返回了 TLD server 的地址，查询请求转向顶级域名服务，这里是 .com 服务器。</li>
+<li>递归解析器向 .com 服务器发送一个请求；</li>
+<li>TLD server 收到请求后会返回 example.com 权威服务器的地址；</li>
+<li>递归解析器又发了一个向权威服务器查询的请求，至此权威服务器查询自己的映射表拿到IP；</li>
+<li>返回查询到的IP给了 DNS Resolver；</li>
+<li>DNS Resolver返回IP给浏览器，浏览器将会用这个IP来建立连接，发起请求;</li>
+<li>客户端通过这个IP地址，发起一个 HTTP 请求；</li>
+<li>服务器解析请求，并返回数据到浏览器。</li>
+</ol>
+<p>这里需要补充一点是，上面每一步其实都有DNS缓存的设计。比如：</p>
+<ul>
+<li>浏览器会缓存DNS的结果，（chrome://net-internals/#dns）</li>
+<li>操作系统的DNS模块会缓存</li>
+<li>后面的每一层级也都有缓存</li>
+</ul>
+<p>所以很多时候，我们的解析过程并不是要顺序执行完这8个步骤。这就跟我们自己开发的应用服务一样，层层缓存，有缓存就读取缓存结果，缓存实现就执行完整流程。</p>
+<h2 id="DNS的解析分类"><a href="#DNS的解析分类" class="headerlink" title="DNS的解析分类"></a>DNS的解析分类</h2><p>DNS有多种解析记录可以设置，我这里介绍三个很常用的设计。</p>
+<p><strong>A记录</strong> - 被称为IP指向，用户设置自域名指到对应的IP主机上。如果想要利用A记录实现 <strong>负载均衡</strong> 需要主机商的支持。 <strong>CNAME记录</strong> - 它相当于为一个主机名设置一个别名，而且该记录不能直接使用IP，只能是另一个主机的别名。CDN主要就是利用该记录来完成的。如果有A记录与CNAME记录同时存在，A记录会被优先使用，换句话说CNAME记录不会生效。 <strong>NS记录</strong> - 用来设置一个域名的权威服务器路径，该记录只会对子域名生效。这个地方可以设置IP也可以设置另外一个权威服务器的域名。需要重点指出的是它的优先级高于A记录，并且它在DNS解析过程中，会跳过2，3，4，5步。</p>
+<p>了解完了DNS的步骤，接下来就进入到CDN部分的分析。</p>
+<h1 id="CDN访问加速度"><a href="#CDN访问加速度" class="headerlink" title="CDN访问加速度"></a>CDN访问加速度</h1><p>什么是CDN呢？中文翻译过来就是内容分发网络。看张图。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191211153942-1de01.png" alt="2circles"></p>
+<p>没有CDN的时候，不管哪里的用户访问我们的站点，都需要到我们数据中心来获取数据(单纯的DNS过程)。而有了CDN之后，用户根据自己的地理位置会选择距离自己最近的缓存数据中心来获取数据。不会每次都到源站（应用服务器）来获取数据。为了理解这个过程，我们是如果在完整的DNS过程中，实现CDN的呢？</p>
+<p>接下来我们需要回答两个问题。</p>
+<ol>
+<li>CDN带来了什么好处。</li>
+<li>如何解析到CDN。</li>
+</ol>
+<h2 id="CDN带来的好处"><a href="#CDN带来的好处" class="headerlink" title="CDN带来的好处"></a>CDN带来的好处</h2><p>了解一个东西之前最好知道它能干什么，带来的好处是什么。然后我们再去看它的运行原理。对于CDN有以下几个方面的好处。</p>
+<h3 id="提高页面加载速度"><a href="#提高页面加载速度" class="headerlink" title="提高页面加载速度"></a>提高页面加载速度</h3><p>这是最显而易见的一个优势，通过上面的图，大家也可以直观感受下，用户访问距离自己最近的机器，速度肯定是最快的。并且网站的加载速度越快那么用户体验越优秀，你的网站更会受到对应用户的喜爱。至于如何实现就近访问的，后面原理部分介绍。</p>
+<h3 id="增加内容的冗余"><a href="#增加内容的冗余" class="headerlink" title="增加内容的冗余"></a>增加内容的冗余</h3><p>CDN是一个典型的分布式架构，它通过增加数据的冗余，一方面保障在大流量面前有多台服务器能够提供相同的数据；另一方面当部分机器出现故障时，可以进行自动转移。</p>
+<h3 id="节省带宽"><a href="#节省带宽" class="headerlink" title="节省带宽"></a>节省带宽</h3><p>如果大家自己买过云服务就知道，带宽每增加一点价格就飙升。使用CDN后，由于流量被分流了，那么原机器带宽要求自然就降低了。当然带宽费用降低了，你还需要为CDN付费。</p>
+<h3 id="保障服务安全"><a href="#保障服务安全" class="headerlink" title="保障服务安全"></a>保障服务安全</h3><p>CDN可防止的攻击：<code>DDOS攻击</code>，该攻击就是通过巨大流量打满你的带宽，让你丧失服务能力。那么由于CDN的存在，它将巨大的流量进行了分流。那么源站压力自然小了。这其实也是高并发需要考虑的。</p>
+<p>CDN目前不仅仅是只能缓存静态的HTML、CSS、JS、VIDEO，现在还有能够缓存动态接口内容的CDN，这为我们在架构高并发的服务时，提供了更多的手段进行选择。</p>
+<h2 id="CDN工作原理"><a href="#CDN工作原理" class="headerlink" title="CDN工作原理"></a>CDN工作原理</h2><p>在介绍DNS的时候，介绍了客户端是如何获取到IP地址的。那么有了CDN之后，这个过程该怎么处理呢？</p>
+<p>CDN其实更像是放在应用服务器与用户之间的一层缓存。所以如果DNS的时候，返回给客户端的是CDN机器的IP而不是应用的IP，那么自然就走到了CDN机器上。</p>
+<p>为了实现上述目的，我们会为该域名配置一个 <code>CNAME</code>（大家注意上面提到的CNAME与A记录的优先级），那么这个CNAME是最终如何解析到对应的CDN机器呢？其实流程与DNS解析是一样的。当发现一个域名设置了CNAME时，DNS解析器会继续解析这个CNAME别名（其实就是另一个域名）。对这个CNAME解析的时候会用到全局负载DNS解析，它会根据访问者的地理位置信息返回对应的IP（CDN机器的IP）。因此客户端实际上得到的是距离它最近的CDN机器的IP地址。</p>
+<p>如果说用户访问CDN，但是CDN上没有对应内容会怎么办？此时CDN机器其实会根据自身专用的DNS解析服务，根据域名得到源站的IP，然后向源站发送请求获取数据，并把这些数据缓存到本地，方便后续使用；同时返回本次结果，完成本次请求的访问。</p>
+<p>需要说一下的是，CDN其实也是分层的。距离用户最近的称之为边缘节点。而CDN的中心服务器集群被称为二级缓存。在上面就是应用部署的源站。一般边缘节点没数据就去找二级缓存，二级缓存没数据就去找源站（被称为回源）。</p>
+<h1 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h1><p>关于 <code>DNS</code> 的过程，文中是以流程介绍为主，至于更细节的依赖协议、传输过程都忽略了。 关于CDN也是我们经常用到的性能提升手段，后续要写的秒杀相关文章，就会用到它来提升性能。特别是CDN的分布式设计、解析过程在我们平常设计应用架构时非常有参考意义。</p>
+<blockquote>
+<p>作者：大愚Talk</p>
+<p>来源：<a href="https://juejin.im/post/5cc681fc6fb9a0320e73e31e" target="_blank" rel="noopener">https://juejin.im/post/5cc681fc6fb9a0320e73e31e</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E9%AB%98%E5%B9%B6%E5%8F%91/" rel="tag"># 高并发</a>
+              <a href="/tags/CDN/" rel="tag"># CDN</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/11/%E6%8E%A7%E5%88%B6%E7%A1%AC%E4%BB%B6%E4%BB%8B%E7%BB%8D/" rel="prev" title="控制硬件介绍">
+      <i class="fa fa-chevron-left"></i> 控制硬件介绍
+    </a></div>
+      <div class="post-nav-item"></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#部署架构"><span class="nav-number">1.</span> <span class="nav-text">部署架构</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#LB到代理集群"><span class="nav-number">1.1.</span> <span class="nav-text">LB到代理集群</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#LB到应用集群"><span class="nav-number">1.2.</span> <span class="nav-text">LB到应用集群</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#DNS如何实现IP查找"><span class="nav-number">2.</span> <span class="nav-text">DNS如何实现IP查找</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#DNS的解析分类"><span class="nav-number">2.1.</span> <span class="nav-text">DNS的解析分类</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#CDN访问加速度"><span class="nav-number">3.</span> <span class="nav-text">CDN访问加速度</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#CDN带来的好处"><span class="nav-number">3.1.</span> <span class="nav-text">CDN带来的好处</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#提高页面加载速度"><span class="nav-number">3.1.1.</span> <span class="nav-text">提高页面加载速度</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#增加内容的冗余"><span class="nav-number">3.1.2.</span> <span class="nav-text">增加内容的冗余</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#节省带宽"><span class="nav-number">3.1.3.</span> <span class="nav-text">节省带宽</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#保障服务安全"><span class="nav-number">3.1.4.</span> <span class="nav-text">保障服务安全</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#CDN工作原理"><span class="nav-number">3.2.</span> <span class="nav-text">CDN工作原理</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#小结"><span class="nav-number">4.</span> <span class="nav-text">小结</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="背景MySQL由于自身简单、高效、可靠的特点，成为小米内部使用最广泛的数据库，但是当数据量达到千万&#x2F;亿级别的时候，MySQL的相关操作会变的非常迟缓；如果这时还有实时BI展示的需求，对于mysql来说是一种灾难。为了解决sql查询慢，查不了的业务痛点，我们探索出一套完整的实时同步，即席查询的解决方案，本文主要从实时同步的角度介绍相关工作。早期业务借助Sqoop将Mysql中的数据同步到Hive来进">
+<meta property="og:type" content="article">
+<meta property="og:title" content="MySQL 数据实时同步实践">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;11&#x2F;MySQL-%E6%95%B0%E6%8D%AE%E5%AE%9E%E6%97%B6%E5%90%8C%E6%AD%A5%E5%AE%9E%E8%B7%B5&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="背景MySQL由于自身简单、高效、可靠的特点，成为小米内部使用最广泛的数据库，但是当数据量达到千万&#x2F;亿级别的时候，MySQL的相关操作会变的非常迟缓；如果这时还有实时BI展示的需求，对于mysql来说是一种灾难。为了解决sql查询慢，查不了的业务痛点，我们探索出一套完整的实时同步，即席查询的解决方案，本文主要从实时同步的角度介绍相关工作。早期业务借助Sqoop将Mysql中的数据同步到Hive来进">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191126084026-43561.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191126084026-6f51f.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191126084026-596d3.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191126084027-2b8bd.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191126084027-bba41.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191126084027-52d60.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191126084027-521af.jpeg">
+<meta property="og:updated_time" content="2020-01-11T01:47:32.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;20191126084026-43561.jpeg">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/11/MySQL-%E6%95%B0%E6%8D%AE%E5%AE%9E%E6%97%B6%E5%90%8C%E6%AD%A5%E5%AE%9E%E8%B7%B5/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>MySQL 数据实时同步实践 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/11/MySQL-%E6%95%B0%E6%8D%AE%E5%AE%9E%E6%97%B6%E5%90%8C%E6%AD%A5%E5%AE%9E%E8%B7%B5/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          MySQL 数据实时同步实践
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-11 09:47:32" itemprop="dateCreated datePublished" datetime="2020-01-11T09:47:32+08:00">2020-01-11</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index">
+                    <span itemprop="name">数据库</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/MySQL/" itemprop="url" rel="index">
+                    <span itemprop="name">MySQL</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="背景"><a href="#背景" class="headerlink" title="背景"></a><strong>背景</strong></h1><p>MySQL由于自身简单、高效、可靠的特点，成为小米内部使用最广泛的数据库，但是当数据量达到千万/亿级别的时候，MySQL的相关操作会变的非常迟缓；如果这时还有实时BI展示的需求，对于mysql来说是一种灾难。<br>为了解决sql查询慢，查不了的业务痛点，我们探索出一套完整的实时同步，即席查询的解决方案，本文主要从实时同步的角度介绍相关工作。<br>早期业务借助Sqoop将Mysql中的数据同步到Hive来进行数据分析，使用过程中也带来了一些问题：</p>
+<ul>
+<li>虽然Sqoop支持增量同步但还属于粗粒度的离线同步，无法满足实时性的需求</li>
+<li>每次同步Sqoop以sql的方式向Mysql发出数据请求也在一定程度上对Mysql带来一定的压力</li>
+<li>同时Hive对数据更新的支持也相对较弱</li>
+</ul>
+<p>为了更有效地连接前端业务数据系统（MySQL）和后端统计分析系统（查询分析引擎），我们需要一套实时同步MySQL数据的解决方案。</p>
+<a id="more"></a>
+
+<h1 id="小米内部实践"><a href="#小米内部实践" class="headerlink" title="小米内部实践**"></a>小米内部实践**</h1><p>如何能够做到数据的实时同步呢？我们想到了MySQL主从复制时使用的binlog日志，它记录了所有的 DDL 和 DML 语句（除了数据查询语句select、show等），以事件形式记录，还包含语句所执行的消耗时间<br>下面来看一下MySQL主从复制的原理，主要有以下几个步骤：</p>
+<ol>
+<li>master（主库）在每次准备提交事务完成数据更新前，将改变记录到二进制日志(binary log)中</li>
+<li>slave（从库）发起连接，连接到master，请求获取指定位置的binlog文件</li>
+<li>master创建dump线程，推送binlog的slave</li>
+<li>slave启动一个I/O线程来读取主库上binary log中的事件，并记录到slave自己的中继日志(relay log)中</li>
+<li>slave还会起动一个SQL线程，该线程从relay log中读取事件并在备库执行，完成数据同步</li>
+<li>slave记录自己的binlog</li>
+</ol>
+<p><img src="http://image.winrains.cn/2019/11/20191126084026-43561.jpeg" alt="小米技术分享：Mysql数据实时同步实践"></p>
+<p>binlog记录了Mysql数据的实时变化，是数据同步的基础，服务需要做的就是遵守Mysql的协议，将自己伪装成Mysql的slave来监听业务从库，完成数据实时同步。<br>结合小米内部系统特点，构建了Mysql数据同步服务–-LCSBinlog，作为一种独立的数据接入方式整合在Talos Platform中，Talos Platform作为大数据集成的基础解决方案，以自研消息队列Talos为数据总线，连接各种系统为主要目标，提供丰富的数据Source输入和数据Sink输出，并且Talos天然支持流式计算，因此业务可以充分利用Talos Platform互联互通的特性，并结合自身的业务需求实现更加高阶的业务场景。</p>
+<p><img src="http://image.winrains.cn/2019/11/20191126084026-6f51f.jpeg" alt="小米技术分享：Mysql数据实时同步实践"></p>
+<p>上图是Talos Platform中的整体流程架构，其中标红部分是目前LCSBinlog在小米内部使用最广泛的一条链路：Mysql —&gt; Talos —&gt; Kudu —&gt; BI，数据同步到kudu后借助Sparksql查询引擎为上层BI系统提供即席查询服务，Kudu和Sparksql的整合细节可以参见往期内容：<a href="http://mp.weixin.qq.com/s?__biz=MzUxMDQxMDMyNg==&mid=2247485952&idx=1&sn=0b89096865f1033207efc90d936f49ed&chksm=f9022139ce75a82f5aa505db71312fb3642c0111c3818abf3b726d7a1ad79971c4c7611daab6&scene=21#wechat_redirect" target="_blank" rel="noopener">告别”纷纷扰扰”—小米OLAP服务架构演进</a></p>
+<h1 id="LCSBinlog服务的主体架构"><a href="#LCSBinlog服务的主体架构" class="headerlink" title="LCSBinlog服务的主体架构"></a><strong>LCSBinlog服务的主体架构</strong></h1><p>服务一共有两种角色<br>Master ：主要负责作业的调度，<br>Worker： 主要完成具体的数据同步任务<br>在Worker上运行两种作业：</p>
+<ol>
+<li>BinlogSyncJob：每一个mysql库都会对应这样一个Job，将binlog日志完整地写入到服务创建的Talos topic中</li>
+<li>MysqlSyncJob：同步历史数据，消费binlog数据，过滤特定库表数据实时同步至用户配置的topic中</li>
+</ol>
+<p>服务整体依赖于Zookeeper来同步服务状态，记录作业调度信息和标记作业运行状态；在kudu表中记录作业同步进度</p>
+<p><img src="http://image.winrains.cn/2019/11/20191126084026-596d3.jpeg" alt="小米技术分享：Mysql数据实时同步实践"></p>
+<p>控制流程如下：</p>
+<ol>
+<li>Worker节点通过在Zookeeper上注册告知自己可以被调度</li>
+<li>通过在Zookeeper上抢占EPHEMERAL临时节点实现Master的HA</li>
+<li>用户在融合云（Web）上注册BinlogSource同步任务</li>
+<li>Master周期性从配置服务读取Binlog同步作业配置</li>
+<li>Master更新Zookeeper中的调度信息</li>
+<li>Worker节点 根据Zookeeper上的调度信息启动新分配任务，停止配置失效任务；作业启动后完成数据实时同步并周期性将同步进度记录在kudu中</li>
+<li>服务上报监控信息到Falcon平台，作业异常退出发送报警邮件</li>
+</ol>
+<h1 id="如何保障数据正确性"><a href="#如何保障数据正确性" class="headerlink" title="如何保障数据正确性"></a><strong>如何保障数据正确性</strong></h1><p><strong>&gt;&gt;&gt;&gt;</strong>顺序性<br>用户配置的每一个BinlogSource 都会绑定一个Talos的topic，在进行消费的时候需要保证同一条mysql记录操作的顺序性，消息队列Talos是无法保证全局消息有序的，只能保证partition内部有序。<br>对于配置分库分表或者多库同步任务的BinlogSource，服务会根据库表信息进行hash，将数据写入相应的partiton，保证同一张表的数据在一个partition中，使得下游消费数据的顺序性；<br>对于单表同步的作业目前使用一个partition保证其数据有序。<br><strong>&gt;&gt;&gt;&gt;</strong>一致性<br>如何保证在作业异常退出后，作业重新启动能够完整地将mysql中的数据同步到下游系统，主要依赖于以下三点</p>
+<ol>
+<li>服务会记录作业同步的offset，重启后从上次commit的offset继续消费</li>
+<li>Binlog数据的顺序性保证了即便数据被重复消费（未commit的数据），也能对同一条记录的操作以相同的顺序执行</li>
+<li>下游存储系统kudu，Es ，Redis基于主键的操作能够保证binlog重复回放后数据的最终一致性</li>
+</ol>
+<h1 id="应用场景"><a href="#应用场景" class="headerlink" title="应用场景"></a><strong>应用场景</strong></h1><p>有了这份数据我们可以做些什么事情呢，本节例举了几种常见的应用场景<br><strong>&gt;&gt;&gt;&gt;</strong>实时更新缓存<br>业务查询类服务往往会在mysql之上架设一个缓存，减少对底层数据库的访问；当mysql库数据变化时，如果缓存还没有过期那么就会拿到过期的数据，业务期望能够实时更新缓存；<br>利用binlog服务，根据策略实时将数据同步到redis中，这样就能够保证了缓存中数据有效性，减少了对数据库的调用，从而提高整体性能。</p>
+<p><img src="http://image.winrains.cn/2019/11/20191126084027-2b8bd.jpeg" alt="小米技术分享：Mysql数据实时同步实践"></p>
+<p><strong>&gt;&gt;&gt;&gt;</strong>异步处理，系统解耦<br>随着业务的发展，同一份数据可能有不同的分析用途，数据成功写入到mysql的同时也需要被同步到其他系统；如果用同步的方式处理，一方面拉长了一次事务整个流程，另一方面系统间也会相互影响<br>数据在mysql中操作成功后才会记录在binlog中，保证下游处理到时的一致性；使用binlog服务完成数据的下发，有助于系统的解耦<br>关于异步处理，系统解耦在<a href="http://mp.weixin.qq.com/s?__biz=MzUxMDQxMDMyNg==&mid=2247485986&idx=1&sn=795b2121c71df3780dfe15620351d388&chksm=f902211bce75a80dac5993b2393b6063f6bba6649fa3f58c02ad7773b6e68b7a8144b8a2637a&scene=21#wechat_redirect" target="_blank" rel="noopener">消息队列价值思考</a>一文中有更深入的解读<br><strong>&gt;&gt;&gt;&gt;</strong>即席查询的BI系统<br>就如文章开篇提到的，mysql在一定场景下的性能瓶颈，mysql数据同步到kudu后可以借助sparksql完成性能的提升<br>因为同样是sql接口，对使用者的切换成本也是较低的，数据同步到更适合的存储中进行查询，也能够避免因大查询而对原mysql库其他查询的影响<br>目前小米内部稳定运行3000+的同步作业，使用binlog服务同步数据到kudu中；小米内部BI明星产品XDATA借助整套同步流程很好地支持了运营、sql分析同学日常统计分析的需求</p>
+<h1 id="如何使用Binlog数据"><a href="#如何使用Binlog数据" class="headerlink" title="如何使用Binlog数据"></a><strong>如何使用Binlog数据</strong></h1><p>用户接入数据的时候要求mysql库开启binlog日志格式必须为Row模式：记录的是每一行记录的每个字段变化前后的值，虽然会造成binlog数据量的增多，但是能够确保每一条记录准确性，避免数据同步不一致情况的出现<br>最终通过监听binlog日志，LCSBinlog服务将数据转换成如下的数据结构，写入用户注册的Topic中， 目前Sink服务使用SparkStreaming实时转储数据到kudu中，后续也将逐步迁移到Flink上以提升资源利用、降低延迟</p>
+<p><img src="http://image.winrains.cn/2019/11/20191126084027-bba41.jpeg" alt="小米技术分享：Mysql数据实时同步实践"></p>
+<p>业务用户也可以根据我们提供的数据格式，实时消费Talos数据以实现更复杂的业务逻辑，下表为每一种数据操作，是否保存修改前后的列表</p>
+<p><img src="http://image.winrains.cn/2019/11/20191126084027-52d60.jpeg" alt="小米技术分享：Mysql数据实时同步实践"></p>
+<h1 id="疑难杂症"><a href="#疑难杂症" class="headerlink" title="疑难杂症"></a><strong>疑难杂症</strong></h1><p>下面分享2个上线后遇到的有趣问题<br><strong>&gt;&gt;&gt;&gt;</strong>数据不一致问题，业务使用唯一索引<br>业务接入一段时间后, 发现部分表会偶尔存在kudu表的数据条目数多于同步的mysql表的数据条目数，我们将多出来的数据与mysql产生的binlog日志经过一一对比，发现用户在mysql表中设置了唯一索引，通过唯一索引修改了主键，而kudu中的数据是通过主键标识或更新一条记录的，于是update操作变成了insert操作，这就造成了原来的1条记录变成了2条。<br>解决办法：对于这种类型的表，LCSBinlog服务会把一次Update操作转换成一条Delete数据和一条Insert数据<br><strong>&gt;&gt;&gt;&gt;</strong>Full Dump同步历史数据时，客户端超时<br>服务刚上线的时候，通过jdbc 执行sql的方式完成全量历史数据的同步，在同步的过程中会发现dump任务会卡顿很长时间才会返回结果，当数据量很大会出现超时同步失败的情况，会造成数据的延迟。调研后发现使用mysql官方jdbc在客户端查询数据的时候，默认为从服务器一次取出所有数据放在客户端内存中，fetch size参数不起作用，当一条SQL返回数据量较大时可能会出现OOM<br>解决办法：当statement设置以下属性时，采用的是流数据接收方式，每次只从服务器接收部份数据，直到所有数据处理完毕。优化后历史数据同步稳定运行，对mysql端的压力也很小</p>
+<p><img src="http://image.winrains.cn/2019/11/20191126084027-521af.jpeg" alt="小米技术分享：Mysql数据实时同步实践"></p>
+<h1 id="总结"><a href="#总结" class="headerlink" title="总结"></a><strong>总结</strong></h1><p>MySQL以Binlog日志的方式记录数据变化，基于流式数据的Change Data Caputre (CDC)机制实现了LCSBinlog服务，<br>本文主要对LCSBinlog的服务架构、应用场景以及在小米内部的实践经验进行了介绍，也和大家分享了我们实际中遇到的问题和解决方案，希望能够帮助到大家理解服务的原理，带来启发，也欢迎大家和我们一起交流。</p>
+<blockquote>
+<p>作者：刘心光</p>
+<p>来源：<a href="https://www.toutiao.com/a6762642571031216654/" target="_blank" rel="noopener">https://www.toutiao.com/a6762642571031216654/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/11/IntelliJ-IDEA-2019-%E5%BF%AB%E6%8D%B7%E9%94%AE%E5%BC%80%E5%8F%91%E6%89%8B%E5%86%8C/" rel="prev" title="IntelliJ IDEA 2019 快捷键开发手册">
+      <i class="fa fa-chevron-left"></i> IntelliJ IDEA 2019 快捷键开发手册
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/11/%E5%B0%8F%E7%B1%B3%E6%B6%88%E6%81%AF%E9%98%9F%E5%88%97%E7%9A%84%E5%AE%9E%E8%B7%B5/" rel="next" title="小米消息队列的实践">
+      小米消息队列的实践 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#背景"><span class="nav-number">1.</span> <span class="nav-text">背景</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#小米内部实践"><span class="nav-number">2.</span> <span class="nav-text">小米内部实践**</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#LCSBinlog服务的主体架构"><span class="nav-number">3.</span> <span class="nav-text">LCSBinlog服务的主体架构</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#如何保障数据正确性"><span class="nav-number">4.</span> <span class="nav-text">如何保障数据正确性</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#应用场景"><span class="nav-number">5.</span> <span class="nav-text">应用场景</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#如何使用Binlog数据"><span class="nav-number">6.</span> <span class="nav-text">如何使用Binlog数据</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#疑难杂症"><span class="nav-number">7.</span> <span class="nav-text">疑难杂症</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#总结"><span class="nav-number">8.</span> <span class="nav-text">总结</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

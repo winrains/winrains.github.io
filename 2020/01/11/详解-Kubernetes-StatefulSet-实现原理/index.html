@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="在 Kubernetes 的世界中，ReplicaSet 和 Deployment 主要用于处理无状态的服务，无状态服务的需求往往非常简单并且轻量，每一个无状态节点存储的数据在重启之后就会被删除，虽然这种服务虽然常见，但是我们仍然需要有状态的服务来实现一些特殊的需求，StatefulSet 就是 Kubernetes 为了运行有状态服务引入的资源，例如 Zookeeper、Kafka 等。这篇文章">
+<meta property="og:type" content="article">
+<meta property="og:title" content="详解 Kubernetes StatefulSet 实现原理">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;11&#x2F;%E8%AF%A6%E8%A7%A3-Kubernetes-StatefulSet-%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="在 Kubernetes 的世界中，ReplicaSet 和 Deployment 主要用于处理无状态的服务，无状态服务的需求往往非常简单并且轻量，每一个无状态节点存储的数据在重启之后就会被删除，虽然这种服务虽然常见，但是我们仍然需要有状态的服务来实现一些特殊的需求，StatefulSet 就是 Kubernetes 为了运行有状态服务引入的资源，例如 Zookeeper、Kafka 等。这篇文章">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;2019-11-29_110407.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;2019-11-29_110522.jpg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;6f385-2019-02-28-kubernetes-statefulset-parititon.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;37d29-2019-02-28-kubernetes-statefulset-ordinal.png">
+<meta property="og:updated_time" content="2020-01-11T02:54:25.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;2019-11-29_110407.jpg">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/11/%E8%AF%A6%E8%A7%A3-Kubernetes-StatefulSet-%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>详解 Kubernetes StatefulSet 实现原理 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/11/%E8%AF%A6%E8%A7%A3-Kubernetes-StatefulSet-%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          详解 Kubernetes StatefulSet 实现原理
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-11 10:54:25" itemprop="dateCreated datePublished" datetime="2020-01-11T10:54:25+08:00">2020-01-11</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">其它技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/Kubernetes/" itemprop="url" rel="index">
+                    <span itemprop="name">Kubernetes</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>在 Kubernetes 的世界中，<a href="https://draveness.me/kubernetes-replicaset" target="_blank" rel="noopener">ReplicaSet</a> 和 <a href="https://draveness.me/kubernetes-deployment" target="_blank" rel="noopener">Deployment</a> 主要用于处理无状态的服务，无状态服务的需求往往非常简单并且轻量，每一个无状态节点存储的数据在重启之后就会被删除，虽然这种服务虽然常见，但是我们仍然需要有状态的服务来实现一些特殊的需求，StatefulSet 就是 Kubernetes 为了运行有状态服务引入的资源，例如 Zookeeper、Kafka 等。<br>这篇文章会介绍 Kubernetes 如何在集群中运行有状态服务，同时会分析这些有状态服务 StatefulSet 的同步过程以及实现原理。</p>
+<a id="more"></a>
+
+<h2 id="概述"><a href="#概述" class="headerlink" title="概述"></a>概述</h2><p>StatefulSet 是用于管理有状态应用的工作负载对象，与 <a href="https://draveness.me/kubernetes-replicaset" target="_blank" rel="noopener">ReplicaSet</a> 和 <a href="https://draveness.me/kubernetes-deployment" target="_blank" rel="noopener">Deployment</a> 这两个对象不同，StatefulSet 不仅能管理 Pod 的对象，还它能够保证这些 Pod 的顺序性和唯一性。<br>与 Deployment 一样，StatefulSet 也使用规格中声明的 <code>template</code> 模板来创建 Pod 资源，但是这些 Pod 相互之间是不能替换的；除此之外 StatefulSet 会为每个 Pod 设置一个单独的持久标识符，这些用于标识序列的标识符在发生调度时也不会丢失。</p>
+<figure class="highlight less"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="attribute">apiVersion</span>: apps/v1</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="attribute">kind</span>: StatefulSet</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="attribute">metadata</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="attribute">name</span>: web</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="attribute">spec</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  <span class="attribute">serviceName</span>: <span class="string">"nginx"</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  <span class="attribute">replicas</span>: <span class="number">2</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  <span class="attribute">selector</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="attribute">matchLabels</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">      <span class="attribute">app</span>: nginx</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">  <span class="attribute">template</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    <span class="attribute">metadata</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">      <span class="attribute">labels</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="attribute">app</span>: nginx</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    <span class="attribute">spec</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">      <span class="attribute">containers</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">      - <span class="attribute">name</span>: nginx</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        <span class="attribute">image</span>: k8s.gcr.io/<span class="attribute">nginx-slim</span>:<span class="number">0.8</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        <span class="attribute">volumeMounts</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        - <span class="attribute">name</span>: www</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">          <span class="attribute">mountPath</span>: /usr/share/nginx/html</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">  <span class="attribute">volumeClaimTemplates</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">  - <span class="attribute">metadata</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">      <span class="attribute">name</span>: www</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">    <span class="attribute">spec</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">      <span class="attribute">accessModes</span>: [ <span class="string">"ReadWriteOnce"</span> ]</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">      <span class="attribute">resources</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">        <span class="attribute">requests</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">          <span class="attribute">storage</span>: <span class="number">1</span>Gi</span></pre></td></tr></table></figure>
+
+<p>如果我们在 Kubernetes 集群中创建如上所示的 StatefulSet 对象，会得到以下结果，Kubernetes 不仅会创建 StatefulSet 对象，还会自动创建两个 Pod 副本：</p>
+<figure class="highlight lsl"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">$ kubectl get statefulsets.apps</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">kNAME   READY   AGE</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">web    <span class="number">2</span>/<span class="number">2</span>     <span class="number">2</span>m27s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">$ kubectl get pods</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">NAME    READY   STATUS    RESTARTS   AGE</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">web<span class="number">-0</span>   <span class="number">1</span>/<span class="number">1</span>     Running   <span class="number">0</span>          <span class="number">2</span>m31s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">web<span class="number">-1</span>   <span class="number">1</span>/<span class="number">1</span>     Running   <span class="number">0</span>          <span class="number">105</span>s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">$ kubectl get persistentvolumes</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM               STORAGECLASS       REASON   AGE</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">pvc<span class="number">-19</span>ef374f<span class="number">-39</span>d1<span class="number">-11e9</span>-b870<span class="number">-9</span>efb418608da   <span class="number">1</span>Gi        RWO            Delete           Bound    <span class="section">default</span>/www-web<span class="number">-1</span>   do-block-storage            <span class="number">21</span>m</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">pvc-fe53d5f7<span class="number">-39</span>d0<span class="number">-11e9</span>-b870<span class="number">-9</span>efb418608da   <span class="number">1</span>Gi        RWO            Delete           Bound    <span class="section">default</span>/www-web<span class="number">-0</span>   do-block-storage            <span class="number">21</span>m</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">$ kubectl get persistentvolumeclaims</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">NAME        STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS       AGE</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">www-web<span class="number">-0</span>   Bound    pvc-fe53d5f7<span class="number">-39</span>d0<span class="number">-11e9</span>-b870<span class="number">-9</span>efb418608da   <span class="number">1</span>Gi        RWO            do-block-storage   <span class="number">21</span>m</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">www-web<span class="number">-1</span>   Bound    pvc<span class="number">-19</span>ef374f<span class="number">-39</span>d1<span class="number">-11e9</span>-b870<span class="number">-9</span>efb418608da   <span class="number">1</span>Gi        RWO            do-block-storage   <span class="number">21</span>m</span></pre></td></tr></table></figure>
+
+<p>除此之外，上述 YAML 文件中的 <code>volumeClaimTemplates</code> 配置还会创建持久卷<code>PersistentVolume</code> 和用于绑定持久卷和 Pod 的 <code>PersistentVolumeClaim</code> 资源；两个 Pod 对象名中包含了它们的序列号，该序列号会在 StatefulSet 存在的时间内保持不变，哪怕 Pod 被重启或者重新调度，也不会出现任何的改变。</p>
+<p><img src="http://image.winrains.cn/2019/11/2019-11-29_110407.jpg" alt="img"></p>
+<p>StatefulSet 的拓扑结构和其他用于部署的资源其实比较类似，比较大的区别在于 StatefulSet 引入了 PV 和 PVC 对象来持久存储服务产生的状态，这样所有的服务虽然可以被杀掉或者重启，但是其中的数据由于 PV 的原因不会丢失。</p>
+<blockquote>
+<p>这里不会展开介绍 PV 和 PVC，感兴趣的读者可以阅读 <a href="https://draveness.me/kubernetes-volume" target="_blank" rel="noopener">详解 Kubernetes Volume 的实现原理</a> 了解 Kubernetes 存储系统的实现原理。</p>
+</blockquote>
+<h2 id="实现原理"><a href="#实现原理" class="headerlink" title="实现原理"></a>实现原理</h2><p>与 <a href="https://draveness.me/kubernetes-replicaset" target="_blank" rel="noopener">ReplicaSet</a> 和 <a href="https://draveness.me/kubernetes-deployment" target="_blank" rel="noopener">Deployment</a> 资源一样，StatefulSet 也使用控制器的方式实现，它主要由 <code>StatefulSetController</code>、<code>StatefulSetControl</code> 和 <code>StatefulPodControl</code> 三个组件协作来完成 StatefulSet 的管理，<code>StatefulSetController</code> 会同时从 <code>PodInformer</code> 和 <code>ReplicaSetInformer</code> 中接受增删改事件并将事件推送到队列中：</p>
+<p><img src="http://image.winrains.cn/2019/11/2019-11-29_110522.jpg" alt="img"></p>
+<p>控制器 <code>StatefulSetController</code> 会在 <code>Run</code> 方法中启动多个 Goroutine 协程，这些协程会从队列中获取待处理的 StatefulSet 资源进行同步，接下来我们会先介绍 Kubernetes 同步 StatefulSet 的过程。</p>
+<h3 id="同步"><a href="#同步" class="headerlink" title="同步"></a>同步</h3><p><code>StatefulSetController</code> 使用 <code>sync</code> 方法同步 StatefulSet 资源，这是同步该资源的唯一入口，下面是这个方法的具体实现：</p>
+<figure class="highlight stata"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">func (<span class="keyword">ssc</span> *StatefulSetController) sync(key string) <span class="keyword">error</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    namespace, name, _ := cache.SplitMetaNamespaceKey(key)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">set</span>, _ := <span class="keyword">ssc</span>.setLister.StatefulSets(namespace).<span class="built_in">Get</span>(name)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">ssc</span>.adoptOrphanRevisions(<span class="keyword">set</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    selector, _ := metav1.LabelSelectorAsSelector(<span class="keyword">set</span>.Spec.Selector)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    pods, _ := <span class="keyword">ssc</span>.getPodsForStatefulSet(<span class="keyword">set</span>, selector)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> <span class="keyword">ssc</span>.syncStatefulSet(<span class="keyword">set</span>, pods)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">func (<span class="keyword">ssc</span> *StatefulSetController) syncStatefulSet(<span class="keyword">set</span> *apps.StatefulSet, pods []*v1.Pod) <span class="keyword">error</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">ssc</span>.control.UpdateStatefulSet(<span class="keyword">set</span>.DeepCopy(), pods); <span class="keyword">err</span> != nil</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> nil</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<ol>
+<li>先重新获取 StatefulSet 对象；</li>
+<li>收养集群中与 StatefulSet 有关的孤立控制器版本；</li>
+<li>获取当前 StatefulSet 对应的全部 Pod 副本；</li>
+<li>调用 <code>syncStatefulSet</code> 方法同步资源；</li>
+</ol>
+<p><code>syncStatefulSet</code> 方法只是将方法的调用转发到了一个 <code>StatefulSetControlInterface</code> 的实现 <code>defaultStatefulSetControl</code> 上，<code>StatefulSetControlInterface</code> 定义了用与控制 StatefulSet 和 Pod 副本的接口，这里调用的 <code>UpdateStatefulSet</code> 函数执行了一个 StatefulSet 的核心逻辑，它会负责获取 StatefulSet 版本、更新 StatefulSet 以及它的状态和历史：</p>
+<figure class="highlight stata"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">func (<span class="keyword">ssc</span> *defaultStatefulSetControl) UpdateStatefulSet(<span class="keyword">set</span> *apps.StatefulSet, pods []*v1.Pod) <span class="keyword">error</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    revisions, <span class="keyword">err</span> := <span class="keyword">ssc</span>.ListRevisions(<span class="keyword">set</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    history.SortControllerRevisions(revisions)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    currentRevision, updateRevision, collisionCount, <span class="keyword">err</span> := <span class="keyword">ssc</span>.getStatefulSetRevisions(<span class="keyword">set</span>, revisions)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    status, <span class="keyword">err</span> := <span class="keyword">ssc</span>.updateStatefulSet(<span class="keyword">set</span>, currentRevision, updateRevision, collisionCount, pods)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">ssc</span>.updateStatefulSetStatus(<span class="keyword">set</span>, status)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> <span class="keyword">ssc</span>.truncateHistory(<span class="keyword">set</span>, pods, revisions, currentRevision, updateRevision)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>它会使用默认的单调递增策略，按照升序依次创建副本并按照降序删除副本，当出现 Pod 处于不健康的状态时，那么新的 Pod 就不会被创建，<code>StatefulSetController</code> 会等待 Pod 恢复后继续执行下面的逻辑。<br>上述代码会在获取 StatefulSet 的历史版本之后调用 <code>updateStatefulSet</code> 方法开始更新 StatefulSet，这个将近 300 行的代码会按照执行以下的执行：</p>
+<ol>
+<li>将当前 StatefulSet 持有的 Pod 副本按照序列号进行分组，超出数量的副本将被分入 <code>condemned</code> 中等待后续的删除操作，这次同步中需要保留的副本将进入 <code>replicas</code> 分组；</li>
+<li>对当前的 StatefulSet 进行扩容，让集群达到目标的副本数；</li>
+<li>获取副本数组中第一个不健康的 Pod；</li>
+<li>根据副本的序列号检查各个副本的状态；<ul>
+<li>如果发现了失败的副本就会进行重启；</li>
+<li>如果当前副本没有正常运行就会退出循环，直到当前副本达到正常运行的状态；</li>
+</ul>
+</li>
+<li>按照降序依次删除 <code>condemned</code> 数组中的副本；</li>
+<li>按照降序依次更新 <code>replicas</code> 数组中的副本；</li>
+</ol>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(ssc *defaultStatefulSetControl)</span> <span class="title">updateStatefulSet</span><span class="params">(set *apps.StatefulSet, currentRevision *apps.ControllerRevision, updateRevision *apps.ControllerRevision, collisionCount <span class="keyword">int32</span>, pods []*v1.Pod)</span> <span class="params">(*apps.StatefulSetStatus, error)</span></span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    currentSet, _ := ApplyRevision(set, currentRevision)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    updateSet, _ := ApplyRevision(set, updateRevision)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    status := apps.StatefulSetStatus&#123;&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// ...</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    replicaCount := <span class="keyword">int</span>(*set.Spec.Replicas)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    replicas := <span class="built_in">make</span>([]*v1.Pod, replicaCount)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    condemned := <span class="built_in">make</span>([]*v1.Pod, <span class="number">0</span>, <span class="built_in">len</span>(pods))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    unhealthy := <span class="number">0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">var</span> firstUnhealthyPod *v1.Pod</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">for</span> i := <span class="keyword">range</span> pods &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> ord := getOrdinal(pods[i]); <span class="number">0</span> &lt;= ord &amp;&amp; ord &lt; replicaCount &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            replicas[ord] = pods[i]</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        &#125; <span class="keyword">else</span> <span class="keyword">if</span> ord &gt;= replicaCount &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            condemned = <span class="built_in">append</span>(condemned, pods[i])</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    sort.Sort(ascendingOrdinal(condemned))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">for</span> ord := <span class="number">0</span>; ord &lt; replicaCount; ord++ &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> replicas[ord] == <span class="literal">nil</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">            replicas[ord] = newVersionedStatefulSetPod(currentSet, updateSet, currentRevision.Name, updateRevision.Name, ord)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr></table></figure>
+
+<p>这里通过 StatefulSet 应该持有的副本数对当前的副本进行分组，一部分是需要保证存活的 <code>replicas</code>，另一部分是需要被终止的副本 <code>condemned</code>，如果分组后的 <code>replicas</code> 数量不足，就会通过 <code>newVersionedStatefulSetPod</code> 函数创建新的 Pod，不过这里的 Pod 也只是待创建的模板。<br><img src="http://image.winrains.cn/2019/11/6f385-2019-02-28-kubernetes-statefulset-parititon.png" alt="kubernetes-statefulset-parititon"><br>拿到线上应该存在的 <code>replicas</code> 数组时，我们就可以进行通过 <code>CreateStatefulPod</code> 进行扩容了，每个 Pod 的更新和创建都会等待前面所有 Pod 正常运行，它会调用 <code>isFailed</code>、<code>isCreated</code>、<code>isTerminating</code> 等方法保证每一个 Pod 都正常运行时才会继续处理下一个 Pod，如果使用滚动更新策略，那么会在完成扩容之后才会对当前的 Pod 进行更新：</p>
+<figure class="highlight pgsql"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span> i := range replicas &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> isFailed(replicas[i]) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        ssc.podControl.DeleteStatefulPod(<span class="keyword">set</span>, replicas[i])</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        replicas[i] = newVersionedStatefulSetPod(i)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> !isCreated(replicas[i]) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        ssc.podControl.CreateStatefulPod(<span class="keyword">set</span>, replicas[i])</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> &amp;status, nil</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> isTerminating(replicas[i]) || !isRunningAndReady(replicas[i]) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> &amp;status, nil</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> identityMatches(<span class="keyword">set</span>, replicas[i]) &amp;&amp; storageMatches(<span class="keyword">set</span>, replicas[i]) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">continue</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">replica</span> := replicas[i].DeepCopy()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    ssc.podControl.UpdateStatefulPod(updateSet, <span class="keyword">replica</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>当 <code>StatefulSetController</code> 处理完副本的创建和更新任务之后，就开始删除需要抛弃的节点了，节点的删除也需要确定按照降序依次进行：</p>
+<figure class="highlight cmake"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">    for <span class="keyword">target</span> := len(condemned) - <span class="number">1</span>; <span class="keyword">target</span> &gt;= <span class="number">0</span>; <span class="keyword">target</span>-- &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> isTerminating(condemned[<span class="keyword">target</span>]) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">return</span> &amp;status, nil</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> !isRunningAndReady(condemned[<span class="keyword">target</span>]) &amp;&amp; condemned[<span class="keyword">target</span>] != firstUnhealthyPod &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">return</span> &amp;status, nil</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        ssc.podControl.DeleteStatefulPod(<span class="keyword">set</span>, condemned[<span class="keyword">target</span>])</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> &amp;status, nil</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    updateMin := <span class="number">0</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> <span class="keyword">set</span>.Spec.UpdateStrategy.RollingUpdate != nil &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        updateMin = int(*<span class="keyword">set</span>.Spec.UpdateStrategy.RollingUpdate.Partition)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    for <span class="keyword">target</span> := len(replicas) - <span class="number">1</span>; <span class="keyword">target</span> &gt;= updateMin; <span class="keyword">target</span>-- &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> getPodRevision(replicas[<span class="keyword">target</span>]) != updateRevision.Name &amp;&amp; !isTerminating(replicas[<span class="keyword">target</span>]) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">            ssc.podControl.DeleteStatefulPod(<span class="keyword">set</span>, replicas[<span class="keyword">target</span>])</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">return</span> &amp;status, err</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> !isHealthy(replicas[<span class="keyword">target</span>]) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">return</span> &amp;status, nil</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> &amp;status, nil</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>我们首先会删除待抛弃列表中的副本，其次根据滚动更新 <code>RollingUpdate</code> 的配置从高到低依次删除所有 Pod 版本已经过时的节点，所有删除节点的方式都会通过 <code>DeleteStatefulPod</code> 方法进行，该方法会通过客户端的接口直接根据 Pod 名称删除对应的资源。</p>
+<h3 id="序列号"><a href="#序列号" class="headerlink" title="序列号"></a>序列号</h3><p>Pod 的序列号（Ordinal）是其唯一性和顺序性的保证，在创建和删除 StatefulSet 的副本时，我们都需要按照 Pod 的序列号对它们按照顺序操作，副本的创建会按照序列号升序处理，副本的更新和删除会按照序列号降序处理。<br><img src="http://image.winrains.cn/2019/11/37d29-2019-02-28-kubernetes-statefulset-ordinal.png" alt="kubernetes-statefulset-ordina"><br>创建 StatefulSet 中的副本时，就会在 <code>newStatefulSetPod</code> 函数中传入当前 Pod 的 <code>ordinal</code> 信息，该方法会调用 <code>GetPodFromTemplate</code> 获取 <code>StatefulSet</code> 中的 Pod 模板并且初始化 Pod 的 <code>metadata</code> 和引用等配置：</p>
+<figure class="highlight swift"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">newStatefulSetPod</span><span class="params">(<span class="keyword">set</span> *apps.StatefulSet, ordinal int)</span></span> *v1.<span class="type">Pod</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    pod, <span class="number">_</span> := controller.<span class="type">GetPodFromTemplate</span>(&amp;<span class="keyword">set</span>.<span class="type">Spec</span>.<span class="type">Template</span>, <span class="keyword">set</span>, metav1.<span class="type">NewControllerRef</span>(<span class="keyword">set</span>, controllerKind))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    pod.<span class="type">Name</span> = getPodName(<span class="keyword">set</span>, ordinal)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    initIdentity(<span class="keyword">set</span>, pod)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    updateStorage(<span class="keyword">set</span>, pod)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> pod</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">getPodName</span><span class="params">(<span class="keyword">set</span> *apps.StatefulSet, ordinal int)</span></span> string &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> fmt.<span class="type">Sprintf</span>(<span class="string">"%s-%d"</span>, <span class="keyword">set</span>.<span class="type">Name</span>, ordinal)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p><code>getPodName</code> 函数的实现非常简单，它将 StatefulSet 的名字和传入的序列号通过破折号连接起来组成我们经常见到的 <code>web-0</code>、<code>web-1</code> 等形式的副本名；<code>initIdentity</code> 会更新 Pod 的主机名、资源名、命名空间标签，而 <code>updateStorage</code> 会为待创建的副本设置卷：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">updateStorage</span><span class="params">(set *apps.StatefulSet, pod *v1.Pod)</span></span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    currentVolumes := pod.Spec.Volumes</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    claims := getPersistentVolumeClaims(set, pod)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    newVolumes := <span class="built_in">make</span>([]v1.Volume, <span class="number">0</span>, <span class="built_in">len</span>(claims))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">for</span> name, claim := <span class="keyword">range</span> claims &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        newVolumes = <span class="built_in">append</span>(newVolumes, v1.Volume&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">            Name: name,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">            VolumeSource: v1.VolumeSource&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">                PersistentVolumeClaim: &amp;v1.PersistentVolumeClaimVolumeSource&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">                    ClaimName: claim.Name,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">                    ReadOnly: <span class="literal">false</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">                &#125;,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            &#125;,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        &#125;)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">for</span> i := <span class="keyword">range</span> currentVolumes &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> _, ok := claims[currentVolumes[i].Name]; !ok &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">            newVolumes = <span class="built_in">append</span>(newVolumes, currentVolumes[i])</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">    pod.Spec.Volumes = newVolumes</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>设置卷的配置主要来自于 StatefulSet 规格中的 <code>volumeClaimTemplates</code> 模板，所有卷相关的配置信息都会通过该方法传递过来。<br>Pod 通过当前名字存储自己对应的序列号，在 <code>StatefulSetController</code> 同步时就会从 Pod 的名字中取出序列号并进行排序，随后的各种循环就可以选择使用正序或者倒序的方式依次处理各个节点了。</p>
+<h3 id="删除"><a href="#删除" class="headerlink" title="删除"></a>删除</h3><p>当我们删除一个 Kubernetes 中的 StatefulSet 资源时，它对应的全部 Pod 副本都会被 <a href="https://draveness.me/kubernetes-garbage-collector" target="_blank" rel="noopener">垃圾收集器</a> 自动删除，该收集器在检查到当前 Pod 的 <code>metadata.ownerReferences</code> 已经不再存在时就会删除 Pod 资源，读者可以阅读 <a href="https://draveness.me/kubernetes-garbage-collector" target="_blank" rel="noopener">垃圾收集器</a> 了解具体的执行过程和实现原理。</p>
+<figure class="highlight lsl"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">$ kubectl delete statefulsets.apps web</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">statefulset.apps <span class="string">"web"</span> deleted</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">$ kubectl get pods --watch</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">NAME    READY   STATUS    RESTARTS   AGE</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">web<span class="number">-2</span>   <span class="number">1</span>/<span class="number">1</span>   Terminating   <span class="number">0</span>     <span class="number">14</span>h</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">web<span class="number">-1</span>   <span class="number">1</span>/<span class="number">1</span>   Terminating   <span class="number">0</span>     <span class="number">14</span>h</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">web<span class="number">-0</span>   <span class="number">1</span>/<span class="number">1</span>   Terminating   <span class="number">0</span>     <span class="number">14</span>h</span></pre></td></tr></table></figure>
+
+<p>我们会发现除了 StatefulSet 和 Pod 之外的任何其他资源都没有被删除，之前创建的 <code>PersistentVolume</code> 和 <code>PersistentVolumeClaim</code> 对象都没有发生任何的变化，这也是 StatefulSet 的行为，它会在服务被删除之后仍然保留其中的状态，也就是数据，这些数据就都存储在 <code>PersistentVolume</code> 中。<br>如果我们重新创建相同的 StatefulSet，它还会使用之前的 PV 和 PVC 对象，不过也可以选择手动删除所有的 PV 和 PVC 来生成新的存储，这两个对象都属于 Kubernetes 的存储系统，感兴趣的读者可以通过 <a href="https://draveness.me/kubernetes-volume" target="_blank" rel="noopener">存储系统</a> 了解 Kubernetes 中 Volume 的设计和实现。</p>
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>StatefulSet 是 Kubernetes 为了处理有状态服务引入的概念，在有状态服务中，它为无序和短暂的 Pod 引入了顺序性和唯一性，使得 Pod 的创建和删除更容易被掌控和预测，同时加入 PV 和 PVC 对象来存储这些 Pod 的状态，我们可以使用 StatefulSet 实现一些偏存储的有状态系统，例如 Zookeeper、Kafka、MongoDB 等，这些系统大多数都需要持久化的存储数据，防止在服务宕机时发生数据丢失。</p>
+<h2 id="相关文章"><a href="#相关文章" class="headerlink" title="相关文章"></a>相关文章</h2><ul>
+<li>基础<ul>
+<li><a href="https://draveness.me/distributed-transaction-principle" target="_blank" rel="noopener">分布式事务的实现原理</a></li>
+<li><a href="https://draveness.me/message-delivery" target="_blank" rel="noopener">分布式系统与消息的投递</a></li>
+</ul>
+</li>
+<li>数据库<ul>
+<li><a href="https://draveness.me/dynamo" target="_blank" rel="noopener">分布式键值存储 Dynamo 的实现原理</a></li>
+<li><a href="https://draveness.me/bigtable-leveldb" target="_blank" rel="noopener">浅析 Bigtable 和 LevelDB 的实现</a></li>
+</ul>
+</li>
+<li>分布式协调 &amp; 服务发现<ul>
+<li><a href="https://draveness.me/zookeeper-chubby" target="_blank" rel="noopener">详解分布式协调服务 ZooKeeper</a></li>
+<li><a href="https://draveness.me/etcd-introduction" target="_blank" rel="noopener">高可用分布式存储 etcd 的实现原理</a></li>
+<li><a href="https://draveness.me/dns-coredns" target="_blank" rel="noopener">详解 DNS 与 CoreDNS 的实现原理</a></li>
+</ul>
+</li>
+<li>容器编排<ul>
+<li><a href="https://draveness.me/understanding-kubernetes" target="_blank" rel="noopener">谈 Kubernetes 的架构设计与实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-object-intro" target="_blank" rel="noopener">从 Kubernetes 中的对象谈起</a></li>
+<li><a href="https://draveness.me/kubernetes-pod" target="_blank" rel="noopener">详解 Kubernetes Pod 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-service" target="_blank" rel="noopener">详解 Kubernetes Service 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-volume" target="_blank" rel="noopener">详解 Kubernetes Volume 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-replicaset" target="_blank" rel="noopener">详解 Kubernetes ReplicaSet 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-deployment" target="_blank" rel="noopener">详解 Kubernetes Deployment 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-statefulset" target="_blank" rel="noopener">详解 Kubernetes StatefulSet 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-daemonset" target="_blank" rel="noopener">详解 Kubernetes DaemonSet 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-job-cronjob" target="_blank" rel="noopener">详解 Kubernetes Job 和 CronJob 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-garbage-collector" target="_blank" rel="noopener">详解 Kubernetes 垃圾收集器 的实现原理</a></li>
+</ul>
+</li>
+</ul>
+<h2 id="Reference"><a href="#Reference" class="headerlink" title="Reference"></a>Reference</h2><ul>
+<li><a href="https://stackoverflow.com/questions/41583672/kubernetes-deployments-vs-statefulsets" target="_blank" rel="noopener">Kubernetes Deployments vs StatefulSets</a></li>
+<li><a href="https://kubernetes.io/blog/2016/12/statefulset-run-scale-stateful-applications-in-kubernetes/" target="_blank" rel="noopener">StatefulSet: Run and Scale Stateful Applications Easily in Kubernetes</a></li>
+<li><a href="https://kubernetes.io/docs/tutorials/stateful-application/zookeeper/" target="_blank" rel="noopener">Running ZooKeeper, A Distributed System Coordinator</a></li>
+<li><a href="https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/" target="_blank" rel="noopener">StatefulSets · Kubernetes</a></li>
+<li><a href="https://cloud.google.com/kubernetes-engine/docs/concepts/statefulset#partitioning_rolling_updates" target="_blank" rel="noopener">StatefulSet · Kubernetes Engine</a></li>
+</ul>
+<blockquote>
+<p>作者：Draveness</p>
+<p>来源：<a href="https://draveness.me/kubernetes-statefulset" target="_blank" rel="noopener">https://draveness.me/kubernetes-statefulset</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/11/%E8%AF%A6%E8%A7%A3-Kubernetes-Deployment-%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/" rel="prev" title="详解 Kubernetes Deployment 的实现原理">
+      <i class="fa fa-chevron-left"></i> 详解 Kubernetes Deployment 的实现原理
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/11/%E8%AF%A6%E8%A7%A3-Kubernetes-DaemonSet-%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/" rel="next" title="详解 Kubernetes DaemonSet 的实现原理">
+      详解 Kubernetes DaemonSet 的实现原理 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#概述"><span class="nav-number">1.</span> <span class="nav-text">概述</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#实现原理"><span class="nav-number">2.</span> <span class="nav-text">实现原理</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#同步"><span class="nav-number">2.1.</span> <span class="nav-text">同步</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#序列号"><span class="nav-number">2.2.</span> <span class="nav-text">序列号</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#删除"><span class="nav-number">2.3.</span> <span class="nav-text">删除</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#总结"><span class="nav-number">3.</span> <span class="nav-text">总结</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#相关文章"><span class="nav-number">4.</span> <span class="nav-text">相关文章</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Reference"><span class="nav-number">5.</span> <span class="nav-text">Reference</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

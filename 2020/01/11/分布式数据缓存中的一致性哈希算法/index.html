@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="一致性哈希算法在分布式缓存领域的 MemCache，负载均衡领域的 Nginx 以及各类 RPC 框架中都有广泛的应用，它主要是为了解决传统哈希函数添加哈希表槽位数后要将关键字重新映射的问题。 本文会介绍一致性哈希算法的原理及其实现，并给出其不同哈希函数实现的性能数据对比，探讨Redis 集群的数据分片实现等，文末会给出实现的具体 github 地址。">
+<meta name="keywords" content="分布式">
+<meta property="og:type" content="article">
+<meta property="og:title" content="分布式数据缓存中的一致性哈希算法">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;11&#x2F;%E5%88%86%E5%B8%83%E5%BC%8F%E6%95%B0%E6%8D%AE%E7%BC%93%E5%AD%98%E4%B8%AD%E7%9A%84%E4%B8%80%E8%87%B4%E6%80%A7%E5%93%88%E5%B8%8C%E7%AE%97%E6%B3%95&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="一致性哈希算法在分布式缓存领域的 MemCache，负载均衡领域的 Nginx 以及各类 RPC 框架中都有广泛的应用，它主要是为了解决传统哈希函数添加哈希表槽位数后要将关键字重新映射的问题。 本文会介绍一致性哈希算法的原理及其实现，并给出其不同哈希函数实现的性能数据对比，探讨Redis 集群的数据分片实现等，文末会给出实现的具体 github 地址。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212101417-cbfd3.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212101420-bb6b5.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212101422-ef753.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212101423-6b8ca.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212101424-d2400.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212101425-a7e50.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212101427-3e4bc.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212101428-3aa74.png">
+<meta property="og:updated_time" content="2020-01-11T03:38:43.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212101417-cbfd3.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/11/%E5%88%86%E5%B8%83%E5%BC%8F%E6%95%B0%E6%8D%AE%E7%BC%93%E5%AD%98%E4%B8%AD%E7%9A%84%E4%B8%80%E8%87%B4%E6%80%A7%E5%93%88%E5%B8%8C%E7%AE%97%E6%B3%95/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>分布式数据缓存中的一致性哈希算法 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/11/%E5%88%86%E5%B8%83%E5%BC%8F%E6%95%B0%E6%8D%AE%E7%BC%93%E5%AD%98%E4%B8%AD%E7%9A%84%E4%B8%80%E8%87%B4%E6%80%A7%E5%93%88%E5%B8%8C%E7%AE%97%E6%B3%95/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          分布式数据缓存中的一致性哈希算法
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-11 11:38:43" itemprop="dateCreated datePublished" datetime="2020-01-11T11:38:43+08:00">2020-01-11</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">其它技术</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>一致性哈希算法在分布式缓存领域的 MemCache，负载均衡领域的 Nginx 以及各类 RPC 框架中都有广泛的应用，它主要是为了解决传统哈希函数添加哈希表槽位数后要将关键字重新映射的问题。</p>
+<p>本文会介绍一致性哈希算法的原理及其实现，并给出其不同哈希函数实现的性能数据对比，探讨Redis 集群的数据分片实现等，文末会给出实现的具体 github 地址。</p>
+<a id="more"></a>
+
+<h2 id="Memcached-与客户端分布式缓存"><a href="#Memcached-与客户端分布式缓存" class="headerlink" title="Memcached 与客户端分布式缓存"></a>Memcached 与客户端分布式缓存</h2><p>Memcached 是一个高性能的分布式缓存系统，然而服务端没有分布式功能，各个服务器不会相互通信。它的分布式实现依赖于客户端的程序库，这也是 Memcached 的一大特点。比如第三方的 spymemcached 客户端就基于一致性哈希算法实现了其分布式缓存的功能。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212101417-cbfd3.png" alt="img"></p>
+<p>其具体步骤如下:</p>
+<ul>
+<li>向 Memcached 添加数据，首先客户端的算法根据 key 值计算出该 key 对应的服务器。</li>
+<li>服务器选定后，保存缓存数据。</li>
+<li>获取数据时，对于相同的 key ，客户端的算法可以定位到相同的服务器，从而获取数据。</li>
+</ul>
+<p>在这个过程中，客户端的算法首先要保证缓存的数据尽量均匀地分布在各个服务器上，其次是当个别服务器下线或者上线时，会出现数据迁移，应该尽量减少需要迁移的数据量。</p>
+<p>客户端算法是客户端分布式缓存性能优劣的关键。</p>
+<p>普通的哈希表算法一般都是计算出哈希值后，通过取余操作将 key 值映射到不同的服务器上，但是当服务器数量发生变化时，取余操作的除数发生变化，所有 key 所映射的服务器几乎都会改变，这对分布式缓存系统来说是不可以接收的。</p>
+<p>一致性哈希算法能尽可能减少了服务器数量变化所导致的缓存迁移。</p>
+<h2 id="哈希算法"><a href="#哈希算法" class="headerlink" title="哈希算法"></a>哈希算法</h2><p>首先，一致性哈希算法依赖于普通的哈希算法。大多数同学对哈希算法的理解可能都停留在 JDK 的 <code>hashCode</code> 函数上。其实哈希算法有很多种实现，它们在不同方面都各有优劣，针对不同的场景可以使用不同的哈希算法实现。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212101420-bb6b5.png" alt="img"></p>
+<p>下面，我们会介绍一下几款比较常见的哈希算法，并且了解一下它们在分布均匀程度，哈希碰撞概率和性能等方面的优劣。</p>
+<p>MD5 算法：全称为 Message-Digest Algorithm 5，用于确保信息传输完整一致。是计算机广泛使用的杂凑算法之一，主流编程语言普遍已有 MD5 实现。MD5 的作用是把大容量信息压缩成一种保密的格式（就是把一个任意长度的字节串变换成定长的16进制数字串）。常见的文件完整性校验就是使用 MD5。</p>
+<p>CRC 算法：全称为 CyclicRedundancyCheck，中文名称为循环冗余校验。它是一类重要的，编码和解码方法简单，检错和纠错能力强的哈希算法，在通信领域广泛地用于实现差错控制。</p>
+<p>MurmurHash 算法：高运算性能，低碰撞率，由 Austin Appleby 创建于 2008 年，现已应用到 Hadoop、libstdc++、nginx、libmemcached 等开源系统。Java 界中 Redis，Memcached，Cassandra，HBase，Lucene和Guava 都在使用它。</p>
+<p>FNV 算法：全称为 Fowler-Noll-Vo 算法，是以三位发明人 Glenn Fowler，Landon Curt Noll，Phong Vo 的名字来命名的，最早在 1991 年提出。 FNV 能快速 hash 大量数据并保持较小的冲突率，它的高度分散使它适用于 hash 一些非常相近的字符串，比如 URL，hostname，文件名，text 和 IP 地址等。</p>
+<p>Ketama 算法：一致性哈希算法的实现之一，其他的哈希算法有通用的一致性哈希算法实现，只不过是替换了哈希映射函数而已，但 Ketama 是一整套的流程，我们将在后面介绍。</p>
+<h2 id="一致性哈希算法"><a href="#一致性哈希算法" class="headerlink" title="一致性哈希算法"></a>一致性哈希算法</h2><p>下面，我们以分布式缓存场景为例，分析一下一致性哈希算法环的原理。</p>
+<p>首先将缓存服务器（ ip + 端口号）进行哈希，映射成环上的一个节点，计算出缓存数据 key 值的 hash key，同样映射到环上，并顺时针选取最近的一个服务器节点作为该缓存应该存储的服务器。具体实现见后续的章节。</p>
+<p>比如说，当存在 A，B，C，D 四个缓存服务器时，它们及其 key 值为1的缓存数据在一致性哈希环上的位置如下图所示，根据顺时针取最近一个服务器节点的规则，该缓存数据应该存储在服务器 B 上。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212101422-ef753.png" alt="img"></p>
+<p>当要存储一个 key 值为4的缓存数据时，它在一致性哈希环上的位置如下所示，所以它应该存储在服务器 C 上。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212101423-6b8ca.png" alt="img"></p>
+<p>类似的，key 值为5，6的数据应该存在服务 D 上，key 值为7，8的数据应该存储在服务 A 上。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212101424-d2400.png" alt="img"></p>
+<p>此时，服务器 B 宕机下线，服务器 B 中存储的缓存数据要进行迁移，但由于一致性哈希环的存在，只需要迁移key 值为1的数据，其他的数据的存储服务器不会发生变化。这也是一致性哈希算法比取余映射算法出色的地方。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212101425-a7e50.png" alt="img"></p>
+<p>由于服务器 B 下线，key 值为1的数据顺时针最近的服务器是 C ，所以数据存迁移到服务器 C 上。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212101427-3e4bc.png" alt="img"></p>
+<p>现实情况下，服务器在一致性哈希环上的位置不可能分布的这么均匀，导致了每个节点实际占据环上的区间大小不一。</p>
+<p>这种情况下，可以增加虚节点来解决。通过增加虚节点，使得每个节点在环上所“管辖”的区域更加均匀。这样就既保证了在节点变化时，尽可能小的影响数据分布的变化，而同时又保证了数据分布的均匀。</p>
+<h2 id="具体实现"><a href="#具体实现" class="headerlink" title="具体实现"></a>具体实现</h2><p>下面我们实现 Memcached 分布式缓存场景下的一致性哈希算法，并给出具体的测试性能数据。该实现借鉴了 kiritomoe 博文中的实现和 spymemcached 客户端代码。具体实现请看我的github，地址为 <a href="https://github.com/ztelur/consistent-hash-algorithm。" target="_blank" rel="noopener">github.com/ztelur/cons…</a></p>
+<p><code>NodeLocator</code> 是分布式缓存场景下一致性哈希算法的抽象，它有一个 <code>getPrimary</code> 函数，接收一个缓存数据的 key 值，输出存储该缓存数据的服务器实例。</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public<span class="built_in"> interface </span>NodeLocator &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    MemcachedNode getPrimary(String k);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>下面是通用的一致性哈希算法的实现，它使用 <code>TreeMap</code> 作为一致性哈希环的数据结构，其 <code>ceilingEntry</code> 函数可以获取环上最近的一个节点。<code>buildConsistentHashRing</code> 函数中包含了构建一致性哈希环的过程，默认加入了 12 个虚拟节点。</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">ConsistentHashNodeLocator</span> <span class="keyword">implements</span> <span class="title">NodeLocator</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">final</span> <span class="keyword">static</span> <span class="keyword">int</span> VIRTUAL_NODE_SIZE = <span class="number">12</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">final</span> <span class="keyword">static</span> String VIRTUAL_NODE_SUFFIX = <span class="string">"-"</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">volatile</span> TreeMap&lt;Long, MemcachedNode&gt; hashRing;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">final</span> HashAlgorithm hashAlg;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="title">ConsistentHashNodeLocator</span><span class="params">(List&lt;MemcachedNode&gt; nodes, HashAlgorithm hashAlg)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">this</span>.hashAlg = hashAlg;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">this</span>.hashRing = buildConsistentHashRing(hashAlg, nodes);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">@Override</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> <span class="function">MemcachedNode <span class="title">getPrimary</span><span class="params">(String k)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">long</span> hash = hashAlg.hash(k);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="function"><span class="keyword">return</span> <span class="title">getNodeForKey</span><span class="params">(hashRing, hash)</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="function">MemcachedNode <span class="title">getNodeForKey</span><span class="params">(TreeMap&lt;Long, MemcachedNode&gt; hashRing, <span class="keyword">long</span> hash)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">/* 向右找到第一个key */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        Map.Entry&lt;Long, MemcachedNode&gt; locatedNode = hashRing.ceilingEntry(hash);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">/* 想象成为一个环，超出尾部取出第一个 */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (locatedNode == <span class="keyword">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">            locatedNode = hashRing.firstEntry();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">        <span class="function"><span class="keyword">return</span> locatedNode.<span class="title">getValue</span><span class="params">()</span></span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> TreeMap&lt;Long, MemcachedNode&gt; buildConsistentHashRing(HashAlgorithm hashAlgorithm, List&lt;MemcachedNode&gt; nodes) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        TreeMap&lt;Long, MemcachedNode&gt; virtualNodeRing = <span class="keyword">new</span> TreeMap&lt;&gt;();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">for</span> (MemcachedNode node : nodes) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; VIRTUAL_NODE_SIZE; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">                <span class="comment">// 新增虚拟节点的方式如果有影响，也可以抽象出一个由物理节点扩展虚拟节点的类</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">                virtualNodeRing.put(hashAlgorithm.hash(node.getSocketAddress().toString() + VIRTUAL_NODE_SUFFIX + i), node);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> virtualNodeRing;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>在 <code>getPrimary</code> 函数中，首先使用 <code>HashAlgorithm</code> 计算出 key 值对应的哈希值，然后调用 <code>getNodeForKey</code> 函数从 <code>TreeMap</code> 中获取对应的最近的服务器节点实例。</p>
+<p><code>HashAlgorithm</code> 是对哈希算法的抽象，一致性哈希算法可以使用各种普通的哈希算法，比如说 CRC ，MurmurHash 和 FNV 等。下面，我们将会对比各种哈希算法给该实现带来的性能差异性。</p>
+<h2 id="性能测试"><a href="#性能测试" class="headerlink" title="性能测试"></a>性能测试</h2><p>测试数据是评价一个算法好坏的最为真实有效的方法，量化的思维模式一定要有，这也是程序员进阶的法宝之一。我们以下面四个量化的指标对基于不同哈希函数的一致性哈希算法进行评测。</p>
+<ul>
+<li>统计每个服务器节点存储的缓存数量，计算方差和标准差。测量缓存分布均匀情况，我们可以模拟 50000个缓存数据，分配到100 个服务器，测试最后个节点存储缓存数据量的方差和标准差。</li>
+<li><strong>随机</strong>下线10%的服务器，重新分配缓存，统计缓存迁移比率。测量节点上下线的情况，我们可以模拟 50000 个缓存数据，分配到100 个指定服务器，之后<strong>随机</strong>下线 10 个服务器并重新分配这50000个数据，统计缓存分配到不同服务器的比例，也就是迁移比率。</li>
+<li>使用JMH对不同哈希算法的执行效率进行对比。</li>
+</ul>
+<p>具体评测算法如下。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> NodeLocatorTest &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 测试分布的离散情况</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    @Test</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    public void test<span class="constructor">Distribution()</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        List&lt;MemcachedNode&gt; servers = <span class="keyword">new</span> ArrayList&lt;&gt;<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        for (String ip : ips) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            servers.add(<span class="keyword">new</span> <span class="constructor">MemcachedNode(<span class="params">new</span> InetSocketAddress(<span class="params">ip</span>, 8080)</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 使用不同的DefaultHashAlgorithm进行测试，得出不同的数据</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        NodeLocator nodeLocator = <span class="keyword">new</span> <span class="constructor">ConsistentHashNodeLocator(<span class="params">servers</span>, DefaultHashAlgorithm.NATIVE_HASH)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 构造 50000 随机请求</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        List&lt;String&gt; keys = <span class="keyword">new</span> ArrayList&lt;&gt;<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        for (<span class="built_in">int</span> i = <span class="number">0</span>; i &lt; <span class="number">50000</span>; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">            keys.add(<span class="module-access"><span class="module"><span class="identifier">UUID</span>.</span></span>random<span class="constructor">UUID()</span>.<span class="keyword">to</span><span class="constructor">String()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 统计分布</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        AtomicLongMap&lt;MemcachedNode&gt; atomicLongMap = <span class="module-access"><span class="module"><span class="identifier">AtomicLongMap</span>.</span></span>create<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        for (MemcachedNode server : servers) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">            atomicLongMap.put(server, <span class="number">0</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">        for (String key : keys) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">            MemcachedNode node = nodeLocator.get<span class="constructor">Primary(<span class="params">key</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">            atomicLongMap.get<span class="constructor">AndIncrement(<span class="params">node</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="module-access"><span class="module"><span class="identifier">StatisticsUtil</span>.</span></span>variance(atomicLongMap.<span class="keyword">as</span><span class="constructor">Map()</span>.values<span class="literal">()</span>.<span class="keyword">to</span><span class="constructor">Array(<span class="params">new</span> Long[]&#123;&#125;)</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="module-access"><span class="module"><span class="identifier">StatisticsUtil</span>.</span></span>standard<span class="constructor">Deviation(<span class="params">atomicLongMap</span>.<span class="params">asMap</span>()</span>.values<span class="literal">()</span>.<span class="keyword">to</span><span class="constructor">Array(<span class="params">new</span> Long[]&#123;&#125;)</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 测试节点新增删除后的变化程度</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">    @Test</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">    public void test<span class="constructor">NodeAddAndRemove()</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">        List&lt;MemcachedNode&gt; servers = <span class="keyword">new</span> ArrayList&lt;&gt;<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">        for (String ip : ips) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">            servers.add(<span class="keyword">new</span> <span class="constructor">MemcachedNode(<span class="params">new</span> InetSocketAddress(<span class="params">ip</span>, 8080)</span>));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//随机下线10个服务器, 先shuffle，然后选择0到90，简单模仿随机计算。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">Collections</span>.</span></span>shuffle(servers);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line">        List&lt;MemcachedNode&gt; serverChanged = servers.sub<span class="constructor">List(0, 90)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line">        NodeLocator loadBalance = <span class="keyword">new</span> <span class="constructor">ConsistentHashNodeLocator(<span class="params">servers</span>, DefaultHashAlgorithm.NATIVE_HASH)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line">        NodeLocator changedLoadBalance = <span class="keyword">new</span> <span class="constructor">ConsistentHashNodeLocator(<span class="params">serverChanged</span>, DefaultHashAlgorithm.NATIVE_HASH)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 构造 50000 随机请求</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">49</span></pre></td><td class="code"><pre><span class="line">        List&lt;String&gt; keys = <span class="keyword">new</span> ArrayList&lt;&gt;<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">50</span></pre></td><td class="code"><pre><span class="line">        for (<span class="built_in">int</span> i = <span class="number">0</span>; i &lt; <span class="number">50000</span>; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">51</span></pre></td><td class="code"><pre><span class="line">            keys.add(<span class="module-access"><span class="module"><span class="identifier">UUID</span>.</span></span>random<span class="constructor">UUID()</span>.<span class="keyword">to</span><span class="constructor">String()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">52</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">53</span></pre></td><td class="code"><pre><span class="line">        <span class="built_in">int</span> count = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">54</span></pre></td><td class="code"><pre><span class="line">        for (String invocation : keys) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">55</span></pre></td><td class="code"><pre><span class="line">            MemcachedNode origin = loadBalance.get<span class="constructor">Primary(<span class="params">invocation</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">56</span></pre></td><td class="code"><pre><span class="line">            MemcachedNode changed = changedLoadBalance.get<span class="constructor">Primary(<span class="params">invocation</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">57</span></pre></td><td class="code"><pre><span class="line">           <span class="comment">// 统计发生变化的数值</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">58</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (!origin.get<span class="constructor">SocketAddress()</span>.equals(changed.get<span class="constructor">SocketAddress()</span>)) count++;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">59</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">60</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(count<span class="operator"> / </span><span class="number">50000</span>D);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">61</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">62</span></pre></td><td class="code"><pre><span class="line">    static String<span class="literal">[]</span> ips = &#123;...&#125;;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">63</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>JMH的测试脚本如下所示。</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="meta">@BenchmarkMode</span>(Mode.AverageTime)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="meta">@OutputTimeUnit</span>(TimeUnit.MICROSECONDS)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="meta">@State</span>(Scope.Thread)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">JMHBenchmark</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> NodeLocator nodeLocator;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> List&lt;String&gt; keys;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">@Benchmark</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">test</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">for</span> (String key : keys) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">            MemcachedNode node = nodeLocator.getPrimary(key);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">main</span><span class="params">(String[] args)</span> <span class="keyword">throws</span> RunnerException </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        Options opt = <span class="keyword">new</span> OptionsBuilder()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">                .include(JMHBenchmark<span class="class">.<span class="keyword">class</span>.<span class="title">getSimpleName</span>())</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line"><span class="class">                .<span class="title">forks</span>(1)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line"><span class="class">                .<span class="title">warmupIterations</span>(5)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line"><span class="class">                .<span class="title">measurementIterations</span>(5)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line"><span class="class">                .<span class="title">build</span>()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">new</span> Runner(opt).run();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">@Setup</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">prepare</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">        List&lt;MemcachedNode&gt; servers = <span class="keyword">new</span> ArrayList&lt;&gt;();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">for</span> (String ip : ips) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">            servers.add(<span class="keyword">new</span> MemcachedNode(<span class="keyword">new</span> InetSocketAddress(ip, <span class="number">8080</span>)));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">        nodeLocator = <span class="keyword">new</span> ConsistentHashNodeLocator(servers, DefaultHashAlgorithm.MURMUR_HASH);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// 构造 50000 随机请求</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">        keys = <span class="keyword">new</span> ArrayList&lt;&gt;();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; <span class="number">50000</span>; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">            keys.add(UUID.randomUUID().toString());</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">@TearDown</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">shutdown</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">static</span> String[] ips = &#123;...&#125;;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>分别测试了 JDK 哈希算法，FNV132 算法，CRC 算法，MurmurHash 算法和Ketama 算法，分别对应 <code>DefaultHashAlgorithm</code> 的 <code>NATIVE_HASH</code>，<code>FNV1_32_HASH</code>，<code>CRC_HASH</code>，<code>MURMUR_HASH</code> 和 <code>KETAMA_HASH</code> 。具体数据如下所示。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212101428-3aa74.png" alt="数据表格"></p>
+<h2 id="虚拟槽分区"><a href="#虚拟槽分区" class="headerlink" title="虚拟槽分区"></a>虚拟槽分区</h2><p>有些文章说，Redis 集群并没有使用一致性哈希算法，而是使用虚拟槽分区算法。但是外网（地址见文末）上都说 Redis 使用的虚拟槽分区只是一致性哈希算法的变种，虚拟槽可以允许 Redis 动态扩容。</p>
+<p>或许只有去了解一下Redis的源码才能对这个问题作出准确的回答。请了解的同学积极留言解答，谢谢。</p>
+<blockquote>
+<p>作者：程序员历小冰</p>
+<p>来源：<a href="https://juejin.im/post/5cd807bae51d453abb1397d6" target="_blank" rel="noopener">https://juejin.im/post/5cd807bae51d453abb1397d6</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E5%88%86%E5%B8%83%E5%BC%8F/" rel="tag"># 分布式</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/11/Redis-Cluster-%E7%9A%84%E6%95%B0%E6%8D%AE%E5%88%86%E7%89%87%E6%9C%BA%E5%88%B6/" rel="prev" title="Redis Cluster 的数据分片机制">
+      <i class="fa fa-chevron-left"></i> Redis Cluster 的数据分片机制
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/11/BlockingQueue-%E4%B8%8E-Condition-%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90/" rel="next" title="BlockingQueue 与 Condition 原理解析">
+      BlockingQueue 与 Condition 原理解析 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#Memcached-与客户端分布式缓存"><span class="nav-number">1.</span> <span class="nav-text">Memcached 与客户端分布式缓存</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#哈希算法"><span class="nav-number">2.</span> <span class="nav-text">哈希算法</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#一致性哈希算法"><span class="nav-number">3.</span> <span class="nav-text">一致性哈希算法</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#具体实现"><span class="nav-number">4.</span> <span class="nav-text">具体实现</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#性能测试"><span class="nav-number">5.</span> <span class="nav-text">性能测试</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#虚拟槽分区"><span class="nav-number">6.</span> <span class="nav-text">虚拟槽分区</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="前言 先决条件✔️ 正确安装 RabbitMQ 并将其运行在 localhost:5672 上✔️ 已经了解了 RabbitMQ 中的一些基础概念  在前一篇中，我们实现一个简单的发送、接收消息的程序。在本文中，我们将创建一个工作队列，用于在多个消费者之间分发耗时的任务。工作队列（也称为：任务队列，Task Queues）主要是为了避免等待一些占用大量资源、时间的操作。当我们把任务（Task）当作">
+<meta name="keywords" content="RabbitMQ">
+<meta property="og:type" content="article">
+<meta property="og:title" content="RabbitMQ（2）：工作队列（Work queues）">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;11&#x2F;RabbitMQ%EF%BC%882%EF%BC%89%EF%BC%9A%E5%B7%A5%E4%BD%9C%E9%98%9F%E5%88%97%EF%BC%88Work-queues%EF%BC%89&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="前言 先决条件✔️ 正确安装 RabbitMQ 并将其运行在 localhost:5672 上✔️ 已经了解了 RabbitMQ 中的一些基础概念  在前一篇中，我们实现一个简单的发送、接收消息的程序。在本文中，我们将创建一个工作队列，用于在多个消费者之间分发耗时的任务。工作队列（也称为：任务队列，Task Queues）主要是为了避免等待一些占用大量资源、时间的操作。当我们把任务（Task）当作">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;a2815-006tNc79ly1fq9tchttwrj3098033746.jpg">
+<meta property="og:updated_time" content="2020-01-11T00:55:01.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;a2815-006tNc79ly1fq9tchttwrj3098033746.jpg">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/11/RabbitMQ%EF%BC%882%EF%BC%89%EF%BC%9A%E5%B7%A5%E4%BD%9C%E9%98%9F%E5%88%97%EF%BC%88Work-queues%EF%BC%89/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>RabbitMQ（2）：工作队列（Work queues） | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/11/RabbitMQ%EF%BC%882%EF%BC%89%EF%BC%9A%E5%B7%A5%E4%BD%9C%E9%98%9F%E5%88%97%EF%BC%88Work-queues%EF%BC%89/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          RabbitMQ（2）：工作队列（Work queues）
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-11 08:55:01" itemprop="dateCreated datePublished" datetime="2020-01-11T08:55:01+08:00">2020-01-11</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">其它技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%85%B6%E5%AE%83%E6%8A%80%E6%9C%AF/%E6%B6%88%E6%81%AF%E9%98%9F%E5%88%97/" itemprop="url" rel="index">
+                    <span itemprop="name">消息队列</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><blockquote>
+<p><strong>先决条件</strong><br>✔️ 正确安装 RabbitMQ 并将其运行在 localhost:5672 上<br>✔️ 已经了解了 RabbitMQ 中的一些<a href="https://windmt.com/2018/04/12/rabbitmq-0-introduction/" target="_blank" rel="noopener">基础概念</a></p>
+</blockquote>
+<p>在<a href="https://windmt.com/2018/04/12/rabbitmq-1-hello-world/" target="_blank" rel="noopener">前一篇</a>中，我们实现一个简单的发送、接收消息的程序。在本文中，我们将创建一个工作队列，用于在多个消费者之间分发耗时的任务。<br><a href="http://image.winrains.cn/2019/11/a2815-006tNc79ly1fq9tchttwrj3098033746.jpg" target="_blank" rel="noopener"><img src="http://image.winrains.cn/2019/11/a2815-006tNc79ly1fq9tchttwrj3098033746.jpg" alt="img"></a><br>工作队列（也称为：任务队列，Task Queues）主要是为了避免等待一些占用大量资源、时间的操作。当我们把任务（Task）当作消息发送到队列中，一个运行在后台的工作者（worker）进程就会取出任务然后处理。当你运行多个工作者（workers），任务就会在它们之间共享。<br>这个概念在网络应用中是非常有用的，它可以在短暂的 HTTP 请求中处理一些复杂的任务。</p>
+<a id="more"></a>
+
+<h1 id="准备"><a href="#准备" class="headerlink" title="准备"></a>准备</h1><p>在<a href="https://windmt.com/2018/04/12/rabbitmq-1-hello-world/" target="_blank" rel="noopener">前一篇教程</a>中，我们发送了一条包含”Hello World!” 的消息。现在，我们将发送一些字符串，把这些字符串当作复杂的任务。我们并没有一个真实的复杂任务，类似于图片大小被调整或 pdf 文件被渲染，所以我们通过 sleep () 方法来模拟这种情况。我们在字符串中加上点号（.）来表示任务的复杂程度，一个点（.）将会耗时 1 秒钟。比如 “Hello…” 就会耗时 3 秒钟。<br>如果您尚未设置项目，请参阅<a href="https://windmt.com/2018/04/12/rabbitmq-1-hello-world/" target="_blank" rel="noopener">第一个教程</a>中的设置。我们将遵循与第一个教程相同的模式：创建一个包（tut2）并创建 Tut2Config、Tut2Receiver 和 Tut2Sender。</p>
+<h1 id="代码整合"><a href="#代码整合" class="headerlink" title="代码整合"></a>代码整合</h1><p>首先创建一个新的包（tut2），我们将在这里放置我们的三个类。在配置类 Tut2Config 中，我们设置了两个配置文件 ——tut2 和 work-queues。我们利用 Spring 来将队列 Queue 暴露为一个 bean。我们配置消费者，并定义两个 bean 以对应于上图中的工作进程 receiver1 和 receiver2。</p>
+<h2 id="配置类"><a href="#配置类" class="headerlink" title="配置类"></a>配置类</h2><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="meta">@Profile</span>(&#123;<span class="string">"tut2"</span>, <span class="string">"work-queues"</span>&#125;)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="meta">@Configuration</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">Tut2Config</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">@Bean</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> Queue <span class="title">queue</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> <span class="keyword">new</span> Queue(<span class="string">"work-queues"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">/**</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     * 定义两个消费者，并且给了他们不同的标识</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="comment">     */</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">@Profile</span>(<span class="string">"receiver"</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">static</span> <span class="class"><span class="keyword">class</span> <span class="title">ReceiverConfig</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="meta">@Bean</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="function"><span class="keyword">public</span> Tut2Receiver <span class="title">receiver1</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">return</span> <span class="keyword">new</span> Tut2Receiver(<span class="number">1</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="meta">@Bean</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        <span class="function"><span class="keyword">public</span> Tut2Receiver <span class="title">receiver2</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">return</span> <span class="keyword">new</span> Tut2Receiver(<span class="number">2</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">@Profile</span>(<span class="string">"sender"</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">@Bean</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    <span class="function"><span class="keyword">public</span> Tut2Sender <span class="title">sender</span><span class="params">()</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> <span class="keyword">new</span> Tut2Sender();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h2 id="生产者"><a href="#生产者" class="headerlink" title="生产者"></a>生产者</h2><p>我们简单修改一下生产者的代码，以添加点号（.）的方式来人为的增加该任务的时长，字符串中的每个点号（.）都会增加 1s 的耗时。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> Tut2Sender &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    @Autowired</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> AmqpTemplate template;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    @Autowired</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> Queue queue;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">int</span> dots = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">int</span> count = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    @<span class="constructor">Scheduled(<span class="params">fixedDelay</span> = 1000, <span class="params">initialDelay</span> = 500)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    public void send<span class="literal">()</span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        StringBuilder builder = <span class="keyword">new</span> <span class="constructor">StringBuilder(<span class="string">"Hello"</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (dots++<span class="operator"> == </span><span class="number">3</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            dots = <span class="number">1</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        for (<span class="built_in">int</span> i = <span class="number">0</span>; i &lt; dots; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            builder.append(<span class="character">'.'</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        builder.append(<span class="module-access"><span class="module"><span class="identifier">Integer</span>.</span></span><span class="keyword">to</span><span class="constructor">String(<span class="operator">++</span><span class="params">count</span>)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        String message = builder.<span class="keyword">to</span><span class="constructor">String()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        template.convert<span class="constructor">AndSend(<span class="params">queue</span>.<span class="params">getName</span>()</span>, message);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">" [x] Sent '"</span> + message + <span class="string">"'"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h2 id="消费者"><a href="#消费者" class="headerlink" title="消费者"></a>消费者</h2><p>我们的消费者 Tut2Receiver 通过 doWork () 方法模拟了一个耗时的虚假任务，它需要为消息体中每一个点号（.）模拟 1 秒钟的操作。并且我们为消费者增加了一个实例编号，以知道是哪个实例消费了消息和处理的时长。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">@<span class="constructor">RabbitListener(<span class="params">queues</span> = <span class="string">"work-queues"</span>)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">public <span class="keyword">class</span> Tut2Receiver &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="built_in">int</span> instance;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    public <span class="constructor">Tut2Receiver(<span class="params">int</span> <span class="params">instance</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        this.instance = instance;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    @RabbitHandler</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    public void receive(String <span class="keyword">in</span>) throws InterruptedException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        StopWatch watch = <span class="keyword">new</span> <span class="constructor">StopWatch()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        watch.start<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"instance "</span> + this.instance +</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">                <span class="string">" [x] Received '"</span> + <span class="keyword">in</span> + <span class="string">"'"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">do</span><span class="constructor">Work(<span class="params">in</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        watch.stop<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="module-access"><span class="module"><span class="identifier">System</span>.</span></span>out.println(<span class="string">"instance "</span> + this.instance +</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">                <span class="string">" [x] Done in "</span> + watch.get<span class="constructor">TotalTimeSeconds()</span> + <span class="string">"s"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> void <span class="keyword">do</span><span class="constructor">Work(String <span class="params">in</span>)</span> throws InterruptedException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        for (<span class="built_in">char</span> ch : <span class="keyword">in</span>.<span class="keyword">to</span><span class="constructor">CharArray()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (ch<span class="operator"> == </span><span class="character">'.'</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">                <span class="module-access"><span class="module"><span class="identifier">Thread</span>.</span></span>sleep(<span class="number">1000</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h2 id="运行"><a href="#运行" class="headerlink" title="运行"></a>运行</h2><p>maven 编译</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">mvn clean package -<span class="module-access"><span class="module"><span class="identifier">Dmaven</span>.</span></span>test.skip=<span class="literal">true</span></span></pre></td></tr></table></figure>
+
+<p>运行</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">java -jar target/rabbitmq-tutorial-0.0.1-SNAPSHOT.jar --spring.profiles.<span class="attribute">active</span>=tut2,sender --tutorial.client.<span class="attribute">duration</span>=60000</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">java -jar target/rabbitmq-tutorial-0.0.1-SNAPSHOT.jar --spring.profiles.<span class="attribute">active</span>=tut2,receiver --tutorial.client.<span class="attribute">duration</span>=60000</span></pre></td></tr></table></figure>
+
+<p>输出</p>
+<figure class="highlight smali"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">// Sender</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">Ready ... running for 10000ms</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">[x] Sent 'Hello.1'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">[x] Sent 'Hello..2'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">[x] Sent 'Hello...3'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">[x] Sent 'Hello.4'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">[x] Sent 'Hello..5'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">[x] Sent 'Hello...6'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">[x] Sent 'Hello.7'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">[x] Sent 'Hello..8'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">[x] Sent 'Hello...9'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">// Receiver</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">Ready ... running for 10000ms</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Received 'Hello.1'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Received 'Hello..2'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Done in 1.005s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Received 'Hello...3'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Done in 2.007s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Received 'Hello.4'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Done in 1.005s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Done in 3.01s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Received 'Hello..5'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Received 'Hello...6'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Done in 2.006s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Received 'Hello.7'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Done in 1.002s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Received 'Hello...9'</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Done in 3.01s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Received 'Hello..8'</span></pre></td></tr></table></figure>
+
+<h1 id="prefetch"><a href="#prefetch" class="headerlink" title="prefetch"></a>prefetch</h1><p>从消费者这端的输出可以看出来，instance 1 得到的任务编号始终是奇数（Hello.1，Hello…3，Hello..5，Hello.7），而 instance 2 得到的任务编号始终是偶数。<br>如果感觉这次的输出只是巧合，可以多试几次或通过 <code>--tutorial.client.duration=</code> 调整时长得到更多的输出，而结果肯定都是一样的。<br>这里设计的问题就是之前在<a href="https://windmt.com/2018/04/12/rabbitmq-0-introduction/" target="_blank" rel="noopener">基础概念</a>里讲到的调度策略的问题了。要实现公平调度（Fair dispatch）就是设置 prefetch 的值，实现方式有两种。</p>
+<h2 id="全局设置"><a href="#全局设置" class="headerlink" title="全局设置"></a>全局设置</h2><p>在 <code>application.yml</code> 中设置 <code>spring.rabbitmq.listener.simple.prefetch=1</code> 即可，这会影响到本 Spring Boot 应用中所有使用默认 <code>SimpleRabbitListenerContainerFactory</code> 的消费者。</p>
+<blockquote>
+<p>网上很多人说改配置 <code>pring.rabbitmq.listener.prefetc</code>，实测已经无效，应该是版本的问题。我所使用的版本（RabbitMQ：3.7.4，Spring Boot: 2.0.1.RELEASE），除了 <code>spring.rabbitmq.listener.simple.prefetch</code>，还有一个 <code>spring.rabbitmq.listener.direct.prefetch</code> 可以配置。</p>
+</blockquote>
+<p>改了配置后再运行，可以看到 instance 1 可以获取到”Hello…6”、”Hello…12” 了。</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">Ready <span class="built_in">..</span>. running <span class="keyword">for</span> 60000ms</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Received <span class="string">'Hello.1'</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Received <span class="string">'Hello..2'</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Done <span class="keyword">in</span> 1.004s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Received <span class="string">'Hello...3'</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Done <span class="keyword">in</span> 2.008s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Received <span class="string">'Hello.4'</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Done <span class="keyword">in</span> 1.004s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Received <span class="string">'Hello..5'</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Done <span class="keyword">in</span> 3.012s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Received <span class="string">'Hello...6'</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Done <span class="keyword">in</span> 2.007s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Received <span class="string">'Hello.7'</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Done <span class="keyword">in</span> 1.004s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Received <span class="string">'Hello..8'</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Done <span class="keyword">in</span> 3.011s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Received <span class="string">'Hello...9'</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Done <span class="keyword">in</span> 2.007s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Received <span class="string">'Hello.10'</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Done <span class="keyword">in</span> 1.006s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">instance 2 [x] Received <span class="string">'Hello..11'</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Done <span class="keyword">in</span> 3.01s</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">instance 1 [x] Received <span class="string">'Hello...12'</span></span></pre></td></tr></table></figure>
+
+<h2 id="特定消费者"><a href="#特定消费者" class="headerlink" title="特定消费者"></a>特定消费者</h2><p>上边是改了全局的消费者，如果只针对特定的消费者的话，又怎么处理呢？<br>我们可以通过自定义 <code>RabbitListenerContainerFactory</code> 来实现。</p>
+<figure class="highlight dart"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="meta">@Bean</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">public RabbitListenerContainerFactory&lt;SimpleMessageListenerContainer&gt; prefetchOneRabbitListenerContainerFactory(ConnectionFactory rabbitConnectionFactory) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    SimpleRabbitListenerContainerFactory <span class="keyword">factory</span> = <span class="keyword">new</span> SimpleRabbitListenerContainerFactory();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">factory</span>.setConnectionFactory(rabbitConnectionFactory);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">factory</span>.setPrefetchCount(<span class="number">1</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> <span class="keyword">factory</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>然后在特定的消费者上指定 <code>containerFactory</code></p>
+<figure class="highlight arduino"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">@RabbitListener(queues = <span class="string">"hello"</span>, containerFactory = <span class="string">"prefetchTenRabbitListenerContainerFactory"</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">receive</span><span class="params">(<span class="keyword">String</span> in)</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    System.out.<span class="built_in">println</span>(<span class="string">" [x] Received '"</span> + in + <span class="string">"'"</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>代码地址：<a href="https://github.com/zhaoyibo/rabbitmq-tutorial" target="_blank" rel="noopener">https://github.com/zhaoyibo/rabbitmq-tutorial</a><br>相关文章：</p>
+<ol>
+<li><a href="https://windmt.com/2018/04/12/rabbitmq-0-introduction/" target="_blank" rel="noopener">RabbitMQ（零）：基础概念</a></li>
+<li><a href="https://windmt.com/2018/04/12/rabbitmq-1-hello-world/" target="_blank" rel="noopener">RabbitMQ（一）：Hello World</a></li>
+<li><a href="https://windmt.com/2018/04/12/rabbitmq-2-work-queues/" target="_blank" rel="noopener">RabbitMQ（二）：工作队列（Work queues）</a></li>
+<li><a href="https://windmt.com/2018/04/12/rabbitmq-3-pub-sub/" target="_blank" rel="noopener">RabbitMQ（三）：发布订阅（Publish/Subscribe）</a></li>
+<li><a href="https://windmt.com/2018/04/13/rabbitmq-4-routing/" target="_blank" rel="noopener">RabbitMQ（四）：路由（Routing）</a></li>
+<li><a href="https://windmt.com/2018/04/13/rabbitmq-5-topics/" target="_blank" rel="noopener">RabbitMQ（五）：主题（Topics）</a></li>
+<li><a href="https://windmt.com/2018/04/13/rabbitmq-6-rpc/" target="_blank" rel="noopener">RabbitMQ（六）：远程过程调用（RPC）</a></li>
+</ol>
+<h1 id="参考"><a href="#参考" class="headerlink" title="参考"></a>参考</h1><p><a href="https://www.rabbitmq.com/tutorials/tutorial-two-spring-amqp.html" target="_blank" rel="noopener">RabbitMQ Tutorial Two</a></p>
+<blockquote>
+<p>作者：windmt</p>
+<p>来源：<a href="https://windmt.com/2018/04/12/rabbitmq-2-work-queues/" target="_blank" rel="noopener">https://windmt.com/2018/04/12/rabbitmq-2-work-queues/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/RabbitMQ/" rel="tag"># RabbitMQ</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/10/RabbitMQ%EF%BC%881%EF%BC%89%EF%BC%9AHello-World/" rel="prev" title="RabbitMQ（1）：Hello World">
+      <i class="fa fa-chevron-left"></i> RabbitMQ（1）：Hello World
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/11/RabbitMQ%EF%BC%883%EF%BC%89%EF%BC%9A%E5%8F%91%E5%B8%83%E8%AE%A2%E9%98%85%EF%BC%88Publish-Subscribe%EF%BC%89/" rel="next" title="RabbitMQ（3）：发布订阅（Publish/Subscribe）">
+      RabbitMQ（3）：发布订阅（Publish/Subscribe） <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#前言"><span class="nav-number">1.</span> <span class="nav-text">前言</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#准备"><span class="nav-number">2.</span> <span class="nav-text">准备</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#代码整合"><span class="nav-number">3.</span> <span class="nav-text">代码整合</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#配置类"><span class="nav-number">3.1.</span> <span class="nav-text">配置类</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#生产者"><span class="nav-number">3.2.</span> <span class="nav-text">生产者</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#消费者"><span class="nav-number">3.3.</span> <span class="nav-text">消费者</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#运行"><span class="nav-number">3.4.</span> <span class="nav-text">运行</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#prefetch"><span class="nav-number">4.</span> <span class="nav-text">prefetch</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#全局设置"><span class="nav-number">4.1.</span> <span class="nav-text">全局设置</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#特定消费者"><span class="nav-number">4.2.</span> <span class="nav-text">特定消费者</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#参考"><span class="nav-number">5.</span> <span class="nav-text">参考</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

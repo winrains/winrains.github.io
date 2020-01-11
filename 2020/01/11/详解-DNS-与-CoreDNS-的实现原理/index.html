@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="域名系统（Domain Name System）是整个互联网的电话簿，它能够将可被人理解的域名翻译成可被机器理解 IP 地址，使得互联网的使用者不再需要直接接触很难阅读和理解的 IP 地址。我们在这篇文章中的第一部分会介绍 DNS 的工作原理以及一些常见的 DNS 问题，而第二部分会介绍 DNS 服务 CoreDNS 的架构和实现原理。">
+<meta name="keywords" content="DNS">
+<meta property="og:type" content="article">
+<meta property="og:title" content="详解 DNS 与 CoreDNS 的实现原理">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;11&#x2F;%E8%AF%A6%E8%A7%A3-DNS-%E4%B8%8E-CoreDNS-%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="域名系统（Domain Name System）是整个互联网的电话簿，它能够将可被人理解的域名翻译成可被机器理解 IP 地址，使得互联网的使用者不再需要直接接触很难阅读和理解的 IP 地址。我们在这篇文章中的第一部分会介绍 DNS 的工作原理以及一些常见的 DNS 问题，而第二部分会介绍 DNS 服务 CoreDNS 的架构和实现原理。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;258eb-2018-11-07-coredns-logo.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;96da8-2018-11-07-what-is-dns.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;9a618-2018-11-07-dns-resolution.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;b5ebc-2018-11-07-dns-namespace.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;a5158-2018-11-07-cncf-logo.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;99b23-2018-11-07-coredns-architecture.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;66eaa-2018-11-07-coredns-corefile-example.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;45ffe-2018-11-07-coredns-servers.png">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;3e828-2018-11-07-coredns-plugin-chain.png">
+<meta property="og:updated_time" content="2020-01-11T02:38:49.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;258eb-2018-11-07-coredns-logo.png">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/11/%E8%AF%A6%E8%A7%A3-DNS-%E4%B8%8E-CoreDNS-%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>详解 DNS 与 CoreDNS 的实现原理 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/11/%E8%AF%A6%E8%A7%A3-DNS-%E4%B8%8E-CoreDNS-%E7%9A%84%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          详解 DNS 与 CoreDNS 的实现原理
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-11 10:38:49" itemprop="dateCreated datePublished" datetime="2020-01-11T10:38:49+08:00">2020-01-11</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E7%BD%91%E7%BB%9C%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">网络技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E7%BD%91%E7%BB%9C%E6%8A%80%E6%9C%AF/%E7%BD%91%E7%BB%9C%E5%8D%8F%E8%AE%AE/" itemprop="url" rel="index">
+                    <span itemprop="name">网络协议</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>域名系统（Domain Name System）是整个互联网的电话簿，它能够将可被人理解的域名翻译成可被机器理解 IP 地址，使得互联网的使用者不再需要直接接触很难阅读和理解的 IP 地址。<br><img src="http://image.winrains.cn/2019/11/258eb-2018-11-07-coredns-logo.png" alt="coredns-logo"><br>我们在这篇文章中的第一部分会介绍 DNS 的工作原理以及一些常见的 DNS 问题，而第二部分会介绍 DNS 服务 <a href="https://github.com/coredns/coredns" target="_blank" rel="noopener">CoreDNS</a> 的架构和实现原理。</p>
+<a id="more"></a>
+
+<h2 id="DNS"><a href="#DNS" class="headerlink" title="DNS"></a>DNS</h2><p>域名系统在现在的互联网中非常重要，因为服务器的 IP 地址可能会经常变动，如果没有了 DNS，那么可能 IP 地址一旦发生了更改，当前服务器的客户端就没有办法连接到目标的服务器了，如果我们为 IP 地址提供一个『别名』并在其发生变动时修改别名和 IP 地址的关系，那么我们就可以保证集群对外提供的服务能够相对稳定地被其他客户端访问。<br><img src="http://image.winrains.cn/2019/11/96da8-2018-11-07-what-is-dns.png" alt="what-is-dns"><br>DNS 其实就是一个分布式的树状命名系统，它就像一个去中心化的分布式数据库，存储着从域名到 IP 地址的映射。</p>
+<h3 id="工作原理"><a href="#工作原理" class="headerlink" title="工作原理"></a>工作原理</h3><p>在我们对 DNS 有了简单的了解之后，接下来我们就可以进入 DNS 工作原理的部分了，作为用户访问互联网的第一站，当一台主机想要通过域名访问某个服务的内容时，需要先通过当前域名获取对应的 IP 地址。这时就需要通过一个 DNS 解析器负责域名的解析，下面的图片展示了 DNS 查询的执行过程：<br><img src="http://image.winrains.cn/2019/11/9a618-2018-11-07-dns-resolution.png" alt="dns-resolution"></p>
+<ol>
+<li>本地的 DNS 客户端向 DNS 解析器发出解析 draveness.me 域名的请求；</li>
+<li>DNS 解析器首先会向就近的根 DNS 服务器 <code>.</code> 请求顶级域名 DNS 服务的地址；</li>
+<li>拿到顶级域名 DNS 服务 <code>me.</code> 的地址之后会向顶级域名服务请求负责 <code>dravenss.me.</code> 域名解析的命名服务；</li>
+<li>得到授权的 DNS 命名服务时，就可以根据请求的具体的主机记录直接向该服务请求域名对应的 IP 地址；</li>
+</ol>
+<p>DNS 客户端接受到 IP 地址之后，整个 DNS 解析的过程就结束了，客户端接下来就会通过当前的 IP 地址直接向服务器发送请求。<br>对于 DNS 解析器，这里使用的 DNS 查询方式是<em>迭代查询</em>，每个 DNS 服务并不会直接返回 DNS 信息，而是会返回另一台 DNS 服务器的位置，由客户端依次询问不同级别的 DNS 服务直到查询得到了预期的结果；另一种查询方式叫做<em>递归查询</em>，也就是 DNS 服务器收到客户端的请求之后会直接返回准确的结果，如果当前服务器没有存储 DNS 信息，就会访问其他的服务器并将结果返回给客户端。</p>
+<h3 id="域名层级"><a href="#域名层级" class="headerlink" title="域名层级"></a>域名层级</h3><p>域名层级是一个层级的树形结构，树的最顶层是根域名，一般使用 <code>.</code> 来表示，这篇文章所在的域名一般写作 <code>draveness.me</code>，但是这里的写法其实省略了最后的 <code>.</code>，也就是全称域名（FQDN）<code>dravenss.me.</code>。<br><img src="http://image.winrains.cn/2019/11/b5ebc-2018-11-07-dns-namespace.png" alt="dns-namespace"><br>根域名下面的就是 <code>com</code>、<code>net</code> 和 <code>me</code> 等顶级域名以及次级域名 <code>draveness.me</code>，我们一般在各个域名网站中购买和使用的都是次级域名、子域名和主机名了。</p>
+<h3 id="域名服务器"><a href="#域名服务器" class="headerlink" title="域名服务器"></a>域名服务器</h3><p>既然域名的命名空间是树形的，那么用于处理域名解析的 DNS 服务器也是树形的，只是在树的组织和每一层的职责上有一些不同。DNS 解析器从根域名服务器查找到顶级域名服务器的 IP 地址，又从顶级域名服务器查找到权威域名服务器的 IP 地址，最终从权威域名服务器查出了对应服务的 IP 地址。</p>
+<figure class="highlight vim"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">$ <span class="keyword">dig</span> -t A draveness.<span class="keyword">me</span> +trace</span></pre></td></tr></table></figure>
+
+<p>我们可以使用 dig 命令追踪 <code>draveness.me</code> 域名对应 IP 地址是如何被解析出来的，首先会向预置的 13 组根域名服务器发出请求获取顶级域名的地址：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">.			<span class="number">56335</span>	IN	NS	m.root-servers.net.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">.			<span class="number">56335</span>	IN	NS	b.root-servers.net.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">.			<span class="number">56335</span>	IN	NS	c.root-servers.net.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">.			<span class="number">56335</span>	IN	NS	d.root-servers.net.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">.			<span class="number">56335</span>	IN	NS	e.root-servers.net.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">.			<span class="number">56335</span>	IN	NS	f.root-servers.net.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">.			<span class="number">56335</span>	IN	NS	g.root-servers.net.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">.			<span class="number">56335</span>	IN	NS	h.root-servers.net.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">.			<span class="number">56335</span>	IN	NS	i.root-servers.net.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">.			<span class="number">56335</span>	IN	NS	a.root-servers.net.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">.			<span class="number">56335</span>	IN	NS	j.root-servers.net.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">.			<span class="number">56335</span>	IN	NS	k.root-servers.net.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">.			<span class="number">56335</span>	IN	NS	l.root-servers.net.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">.			<span class="number">56335</span>	IN	RRSIG	NS <span class="number">8</span> <span class="number">0</span> <span class="number">518400</span> <span class="number">20181111050000</span> <span class="number">20181029040000</span> <span class="number">2134</span> . G4NbgLqsAyin2zZFetV6YhBVVI29Xi3kwikHSSmrgkX+lq3sRgp3UuQ3 JQxpJ+bZY7mwzo3NxZWy4pqdJDJ55s92l+SKRt/ruBv2BCnk9CcnIzK+ OuGheC9/Coz/r/<span class="number">33</span>rpV63CzssMTIAAMQBGHUyFvRSkiKJWFVOps7u3TM jcQR0Xp+rJSPxA7f4+tDPYohruYm0nVXGdWhO1CSadXPvmWs1xeeIKvb <span class="number">9</span>sXJ5hReLw6Vs6ZVomq4tbPrN1zycAbZ2tn/RxGSCHMNIeIROQ99kO5N QL9XgjIJGmNVDDYi4OF1+ki48UyYkFocEZnaUAor0pD3Dtpis37MASBQ fr6zqQ==</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">;; Received <span class="number">525</span> bytes <span class="keyword">from</span> <span class="number">8.8</span><span class="number">.8</span><span class="number">.8</span>#<span class="number">53</span>(<span class="number">8.8</span><span class="number">.8</span><span class="number">.8</span>) <span class="keyword">in</span> <span class="number">247</span> ms</span></pre></td></tr></table></figure>
+
+<blockquote>
+<p>根域名服务器是 DNS 中最高级别的域名服务器，这些服务器负责返回顶级域的权威域名服务器地址，这些域名服务器的数量总共有 13 组，域名的格式从上面返回的结果可以看到是 <code>.root-servers.net</code>，每个根域名服务器中只存储了顶级域服务器的 IP 地址，大小其实也只有 2MB 左右，虽然域名服务器总共只有 13 组，但是每一组服务器都通过提供了镜像服务，全球大概也有几百台的根域名服务器在运行。</p>
+</blockquote>
+<p>在这里，我们获取到了以下的 5 条 NS 记录，也就是 5 台 <code>me.</code> 定义域名 DNS 服务器：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">172800</span>	IN	NS	b0.nic.me.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">172800</span>	IN	NS	a2.nic.me.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">172800</span>	IN	NS	b2.nic.me.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">172800</span>	IN	NS	a0.nic.me.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">172800</span>	IN	NS	c0.nic.me.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">86400</span>	IN	DS	<span class="number">2569</span> <span class="number">7</span> <span class="number">1</span> <span class="number">09</span>BA1EB4D20402620881FD9848994417800DB26A</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">86400</span>	IN	DS	<span class="number">2569</span> <span class="number">7</span> <span class="number">2</span> <span class="number">94E798106</span>F033500E67567B197AE9132C0E916764DC743C55A9ECA3C <span class="number">7</span>BF559E2</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">86400</span>	IN	RRSIG	DS <span class="number">8</span> <span class="number">1</span> <span class="number">86400</span> <span class="number">20181113050000</span> <span class="number">20181031040000</span> <span class="number">2134</span> . O81bud61Qh+kJJ26XHzUOtKWRPN0GHoVDacDZ+pIvvD6ef0+HQpyT5nV rhEZXaFwf0YFo08PUzX8g5Pad8bpFj0O<span class="comment">//Q5H2awGbjeoJnlMqbwp6Kl 7O9zzp1YCKmB+ARQgEb7koSCogC9pU7E8Kw/o0NnTKzVFmLq0LLQJGGE Y43ay3Ew6hzpG69lP8dmBHot3TbF8oFrlUzrm5nojE8W5QVTk1QQfrZM 90WBjfe5nm9b4BHLT48unpK3BaqUFPjqYQV19C3xJ32at4OwUyxZuQsa GWl0w9R5TiCTS5Ieupu+Q9fLZbW5ZMEgVSt8tNKtjYafBKsFox3cSJRn irGOmg==</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">;; Received <span class="number">721</span> bytes <span class="keyword">from</span> <span class="number">192.36</span><span class="number">.148</span><span class="number">.17</span>#<span class="number">53</span>(i.root-servers.net) <span class="keyword">in</span> <span class="number">59</span> ms</span></pre></td></tr></table></figure>
+
+<p>当 DNS 解析器从根域名服务器中查询到了顶级域名 <code>.me</code> 服务器的地址之后，就可以访问这些顶级域名服务器其中的一台 <code>b2.nic.me</code> 获取权威 DNS 的服务器的地址了：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">draveness.me.		<span class="number">86400</span>	IN	NS	f1g1ns1.dnspod.net.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">draveness.me.		<span class="number">86400</span>	IN	NS	f1g1ns2.dnspod.net.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">fsip6fkr2u8cf2kkg7scot4glihao6s1.me. <span class="number">8400</span> IN NSEC3 <span class="number">1</span> <span class="number">1</span> <span class="number">1</span> D399EAAB FSJJ1I3A2LHPTHN80MA6Q7J64B15AO5K  NS SOA RRSIG DNSKEY NSEC3PARAM</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">fsip6fkr2u8cf2kkg7scot4glihao6s1.me. <span class="number">8400</span> IN RRSIG NSEC3 <span class="number">7</span> <span class="number">2</span> <span class="number">8400</span> <span class="number">20181121151954</span> <span class="number">20181031141954</span> <span class="number">2208</span> me. eac6+fEuQ6gK70KExV0EdUKnWeqPrzjqGiplqMDPNRpIRD1vkpX7Zd6C oN+c8b2yLoI3s3oLEoUd0bUi3dhyCrxF5n6Ap+sKtEv4zZ7o7CEz5Fw+ fpXHj7VeL+pI8KffXcgtYQGlPlCM/ylGUGYOcExrB/qPQ6f/<span class="number">62</span>xrPWjb +r4=</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">qcolpi5mj0866sefv2jgp4jnbtfrehej.me. <span class="number">8400</span> IN NSEC3 <span class="number">1</span> <span class="number">1</span> <span class="number">1</span> D399EAAB QD4QM6388QN4UMH78D429R72J1NR0U07  NS DS RRSIG</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">qcolpi5mj0866sefv2jgp4jnbtfrehej.me. <span class="number">8400</span> IN RRSIG NSEC3 <span class="number">7</span> <span class="number">2</span> <span class="number">8400</span> <span class="number">20181115151844</span> <span class="number">20181025141844</span> <span class="number">2208</span> me. rPGaTz/LyNRVN3LQL3LO1udby0vy/MhuIvSjNfrNnLaKARsbQwpq2pA9 +jyt4ah8fvxRkGg9aciG1XSt/EVIgdLSKXqE82hB49ZgYDACX6onscgz naQGaCAbUTSGG385MuyxCGvqJdE9kEZBbCG8iZhcxSuvBksG4msWuo3k dTg=</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">;; Received <span class="number">586</span> bytes <span class="keyword">from</span> <span class="number">199.249</span><span class="number">.127</span><span class="number">.1</span>#<span class="number">53</span>(b2.nic.me) <span class="keyword">in</span> <span class="number">267</span> ms</span></pre></td></tr></table></figure>
+
+<p>这里的权威 DNS 服务是作者在域名提供商进行配置的，当有客户端请求 <code>draveness.me</code> 域名对应的 IP 地址时，其实会从作者使用的 DNS 服务商 DNSPod 处请求服务的 IP 地址：</p>
+<figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">draveness</span><span class="selector-class">.me</span>.		600	<span class="selector-tag">IN</span>	<span class="selector-tag">A</span>	123<span class="selector-class">.56</span><span class="selector-class">.94</span><span class="selector-class">.228</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">draveness</span><span class="selector-class">.me</span>.		86400	<span class="selector-tag">IN</span>	<span class="selector-tag">NS</span>	<span class="selector-tag">f1g1ns2</span><span class="selector-class">.dnspod</span><span class="selector-class">.net</span>.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">draveness</span><span class="selector-class">.me</span>.		86400	<span class="selector-tag">IN</span>	<span class="selector-tag">NS</span>	<span class="selector-tag">f1g1ns1</span><span class="selector-class">.dnspod</span><span class="selector-class">.net</span>.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">;; <span class="selector-tag">Received</span> 123 <span class="selector-tag">bytes</span> <span class="selector-tag">from</span> 58<span class="selector-class">.247</span><span class="selector-class">.212</span><span class="selector-class">.36</span><span class="selector-id">#53</span>(<span class="selector-tag">f1g1ns1</span><span class="selector-class">.dnspod</span><span class="selector-class">.net</span>) <span class="selector-tag">in</span> 28 <span class="selector-tag">ms</span></span></pre></td></tr></table></figure>
+
+<p>最终，DNS 解析器从 <code>f1g1ns1.dnspod.net</code> 服务中获取了当前博客的 IP 地址 <code>123.56.94.228</code>，浏览器或者其他设备就能够通过 IP 向服务器获取请求的内容了。<br>从整个解析过程，我们可以看出 DNS 域名服务器大体分成三类，根域名服务、顶级域名服务以及权威域名服务三种，获取域名对应的 IP 地址时，也会像遍历一棵树一样按照从顶层到底层的顺序依次请求不同的服务器。</p>
+<h3 id="胶水记录"><a href="#胶水记录" class="headerlink" title="胶水记录"></a>胶水记录</h3><p>在通过服务器解析域名的过程中，我们看到当请求 <code>me.</code> 顶级域名服务器的时候，其实返回了 <code>b0.nic.me</code> 等域名：</p>
+<figure class="highlight applescript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">me</span>.			<span class="number">172800</span>	IN	NS	b0.nic.<span class="keyword">me</span>.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">me</span>.			<span class="number">172800</span>	IN	NS	a2.nic.<span class="keyword">me</span>.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">me</span>.			<span class="number">172800</span>	IN	NS	b2.nic.<span class="keyword">me</span>.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">me</span>.			<span class="number">172800</span>	IN	NS	a0.nic.<span class="keyword">me</span>.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">me</span>.			<span class="number">172800</span>	IN	NS	c0.nic.<span class="keyword">me</span>.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">...</span></pre></td></tr></table></figure>
+
+<p>就像我们最开始说的，在互联网中想要请求服务，最终一定需要获取 IP 提供服务的服务器的 IP 地址；同理，作为 <code>b0.nic.me</code> 作为一个 DNS 服务器，我也必须获取它的 IP 地址才能获得次级域名的 DNS 信息，但是这里就陷入了一种循环：</p>
+<ol>
+<li>如果想要获取 <code>dravenss.me</code> 的 IP 地址，就需要访问 <code>me</code> 顶级域名服务器 <code>b0.nic.me</code></li>
+<li>如果想要获取 <code>b0.nic.me</code> 的 IP 地址，就需要访问 <code>me</code> 顶级域名服务器 <code>b0.nic.me</code></li>
+<li>如果想要获取 <code>b0.nic.me</code> 的 IP 地址，就需要访问 <code>me</code> 顶级域名服务器 <code>b0.nic.me</code></li>
+<li>…</li>
+</ol>
+<p>为了解决这一个问题，我们引入了胶水记录（Glue Record）这一概念，也就是在出现循环依赖时，直接在上一级作用域返回 DNS 服务器的 IP 地址：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">$ dig +trace +additional draveness.me</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">...</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">172800</span>	IN	NS	a2.nic.me.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">172800</span>	IN	NS	b2.nic.me.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">172800</span>	IN	NS	b0.nic.me.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">172800</span>	IN	NS	a0.nic.me.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">172800</span>	IN	NS	c0.nic.me.</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">86400</span>	IN	DS	<span class="number">2569</span> <span class="number">7</span> <span class="number">1</span> <span class="number">09</span>BA1EB4D20402620881FD9848994417800DB26A</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">86400</span>	IN	DS	<span class="number">2569</span> <span class="number">7</span> <span class="number">2</span> <span class="number">94E798106</span>F033500E67567B197AE9132C0E916764DC743C55A9ECA3C <span class="number">7</span>BF559E2</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">me.			<span class="number">86400</span>	IN	RRSIG	DS <span class="number">8</span> <span class="number">1</span> <span class="number">86400</span> <span class="number">20181116050000</span> <span class="number">20181103040000</span> <span class="number">2134</span> . cT+rcDNiYD9X02M/NoSBombU2ZqW/<span class="number">7</span>WnEi+b/TOPcO7cDbjb923LltFb ugMIaoU0Yj6k0Ydg++DrQOy6E5eeshughcH/<span class="number">6</span>rYEbVlFcsIkCdbd9gOk QkOMH+luvDjCRdZ4L3MrdXZe5PJ5Y45C54V/<span class="number">0</span>XUEdfVKel+NnAdJ1gLE F+aW8LKnVZpEN/Zu88alOBt9+FPAFfCRV9uQ7UmGwGEMU/WXITheRi5L h8VtV9w82E6Jh9DenhVFe2g82BYu9MvEbLZr3MKII9pxgyUE3pt50wGY Mhs40REB0v4pMsEU/KHePsgAfeS/mFSXkiPYPqz2fgke6OHFuwq7MgJk l7RruQ==</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">a0.nic.me.		<span class="number">172800</span>	IN	A	<span class="number">199.253</span><span class="number">.59</span><span class="number">.1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">a2.nic.me.		<span class="number">172800</span>	IN	A	<span class="number">199.249</span><span class="number">.119</span><span class="number">.1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">b0.nic.me.		<span class="number">172800</span>	IN	A	<span class="number">199.253</span><span class="number">.60</span><span class="number">.1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">b2.nic.me.		<span class="number">172800</span>	IN	A	<span class="number">199.249</span><span class="number">.127</span><span class="number">.1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">c0.nic.me.		<span class="number">172800</span>	IN	A	<span class="number">199.253</span><span class="number">.61</span><span class="number">.1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">a0.nic.me.		<span class="number">172800</span>	IN	AAAA	<span class="number">2001</span>:<span class="number">500</span>:<span class="number">53</span>::<span class="number">1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">a2.nic.me.		<span class="number">172800</span>	IN	AAAA	<span class="number">2001</span>:<span class="number">500</span>:<span class="number">47</span>::<span class="number">1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">b0.nic.me.		<span class="number">172800</span>	IN	AAAA	<span class="number">2001</span>:<span class="number">500</span>:<span class="number">54</span>::<span class="number">1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">b2.nic.me.		<span class="number">172800</span>	IN	AAAA	<span class="number">2001</span>:<span class="number">500</span>:<span class="number">4f</span>::<span class="number">1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">c0.nic.me.		<span class="number">172800</span>	IN	AAAA	<span class="number">2001</span>:<span class="number">500</span>:<span class="number">55</span>::<span class="number">1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">;; Received <span class="number">721</span> bytes <span class="keyword">from</span> <span class="number">192.112</span><span class="number">.36</span><span class="number">.4</span>#<span class="number">53</span>(g.root-servers.net) <span class="keyword">in</span> <span class="number">110</span> ms</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">...</span></pre></td></tr></table></figure>
+
+<p>也就是同时返回 NS 记录和 A（或 AAAA） 记录，这样就能够解决域名解析出现的循环依赖问题。</p>
+<h3 id="服务发现"><a href="#服务发现" class="headerlink" title="服务发现"></a>服务发现</h3><p>讲到现在，我们其实能够发现 DNS 就是一种最早的服务发现的手段，通过虽然服务器的 IP 地址可能会经常变动，但是通过相对不会变动的域名，我们总是可以找到提供对应服务的服务器。<br>在微服务架构中，服务注册的方式其实大体上也只有两种，一种是使用 Zookeeper 和 etcd 等配置管理中心，另一种是使用 DNS 服务，比如说 Kubernetes 中的 CoreDNS 服务。<br>使用 DNS 在集群中做服务发现其实是一件比较容易的事情，这主要是因为绝大多数的计算机上都会安装 DNS 服务，所以这其实就是一种内置的、默认的服务发现方式，不过使用 DNS 做服务发现也会有一些问题，因为在默认情况下 DNS 记录的失效时间是 600s，这对于集群来讲其实并不是一个可以接受的时间，在实践中我们往往会启动单独的 DNS 服务满足服务发现的需求。</p>
+<h2 id="CoreDNS"><a href="#CoreDNS" class="headerlink" title="CoreDNS"></a>CoreDNS</h2><p>CoreDNS 其实就是一个 DNS 服务，而 DNS 作为一种常见的服务发现手段，所以很多开源项目以及工程师都会使用 CoreDNS 为集群提供服务发现的功能，Kubernetes 就在集群中使用 CoreDNS 解决服务发现的问题。<br><img src="http://image.winrains.cn/2019/11/a5158-2018-11-07-cncf-logo.png" alt="cncf-logo"><br>作为一个加入 CNCF(Cloud Native Computing Foundation) 的服务 CoreDNS 的实现可以说的非常的简单。</p>
+<h3 id="架构"><a href="#架构" class="headerlink" title="架构"></a>架构</h3><p>整个 CoreDNS 服务都建立在一个使用 Go 编写的 HTTP/2 Web 服务器 <a href="https://github.com/mholt/caddy" target="_blank" rel="noopener">Caddy · GitHub</a> 上，CoreDNS 整个项目可以作为一个 Caddy 的教科书用法。<br><img src="http://image.winrains.cn/2019/11/99b23-2018-11-07-coredns-architecture.png" alt="coredns-architecture"><br>CoreDNS 的大多数功能都是由插件来实现的，插件和服务本身都使用了 Caddy 提供的一些功能，所以项目本身也不是特别的复杂。</p>
+<h4 id="插件"><a href="#插件" class="headerlink" title="插件"></a>插件</h4><p>作为基于 Caddy 的 Web 服务器，CoreDNS 实现了一个插件链的架构，将很多 DNS 相关的逻辑都抽象成了一层一层的插件，包括 Kubernetes 等功能，每一个插件都是一个遵循如下协议的结构体：</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">type (</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    Plugin func(Handler) Handler</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    Handler<span class="built_in"> interface </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        ServeDNS(context.Context, dns.ResponseWriter, <span class="number">*d</span>ns.Msg) (int, error)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        Name() string</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">)</span></pre></td></tr></table></figure>
+
+<p>所以只需要为插件实现 <code>ServeDNS</code> 以及 <code>Name</code> 这两个接口并且写一些用于配置的代码就可以将插件集成到 CoreDNS 中。</p>
+<h4 id="Corefile"><a href="#Corefile" class="headerlink" title="Corefile"></a>Corefile</h4><p>另一个 CoreDNS 的特点就是它能够通过简单易懂的 DSL 定义 DNS 服务，在 Corefile 中就可以组合多个插件对外提供服务：</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">coredns.io:5300 &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    file db.coredns.io</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">example.io:53 &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    log</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    errors</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    file db.example.io</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">example.net:53 &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    file db.example.net</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">.:53 &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    kubernetes</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">   <span class="built_in"> proxy </span>. 8.8.8.8</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    log</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    errors</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    cache</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>对于以上的配置文件，CoreDNS 会根据每一个代码块前面的区和端点对外暴露两个端点提供服务：<br><img src="http://image.winrains.cn/2019/11/66eaa-2018-11-07-coredns-corefile-example.png" alt="coredns-corefile-example"><br>该配置文件对外暴露了两个 DNS 服务，其中一个监听在 5300 端口，另一个在 53 端口，请求这两个服务时会根据不同的域名选择不同区中的插件进行处理。</p>
+<h3 id="原理"><a href="#原理" class="headerlink" title="原理"></a>原理</h3><p>CoreDNS 可以通过四种方式对外直接提供 DNS 服务，分别是 UDP、gRPC、HTTPS 和 TLS：<br><img src="http://image.winrains.cn/2019/11/45ffe-2018-11-07-coredns-servers.png" alt="coredns-servers"><br>但是无论哪种类型的 DNS 服务，最终队会调用以下的 <code>ServeDNS</code> 方法，为服务的调用者提供 DNS 服务：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(s *Server)</span> <span class="title">ServeDNS</span><span class="params">(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)</span></span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    m, _ := edns.Version(r)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    ctx, _ := incrementDepthAndCheck(ctx)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    b := r.Question[<span class="number">0</span>].Name</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">var</span> off <span class="keyword">int</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">var</span> end <span class="keyword">bool</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">var</span> dshandler *Config</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    w = request.NewScrubWriter(r, w)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">for</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> h, ok := s.zones[<span class="keyword">string</span>(b[:l])]; ok &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">            ctx = context.WithValue(ctx, plugin.ServerCtx&#123;&#125;, s.Addr)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> r.Question[<span class="number">0</span>].Qtype != dns.TypeDS &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">                rcode, _ := h.pluginChain.ServeDNS(ctx, w, r)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">            dshandler = h</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        off, end = dns.NextLabel(q, off)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> end &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">break</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> r.Question[<span class="number">0</span>].Qtype == dns.TypeDS &amp;&amp; dshandler != <span class="literal">nil</span> &amp;&amp; dshandler.pluginChain != <span class="literal">nil</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        rcode, _ := dshandler.pluginChain.ServeDNS(ctx, w, r)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        plugin.ClientWrite(rcode)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> h, ok := s.zones[<span class="string">"."</span>]; ok &amp;&amp; h.pluginChain != <span class="literal">nil</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">        ctx = context.WithValue(ctx, plugin.ServerCtx&#123;&#125;, s.Addr)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">        rcode, _ := h.pluginChain.ServeDNS(ctx, w, r)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">        plugin.ClientWrite(rcode)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>在上述这个已经被简化的复杂函数中，最重要的就是调用了『插件链』的 <code>ServeDNS</code> 方法，将来源的请求交给一系列插件进行处理，如果我们使用以下的文件作为 Corefile：</p>
+<figure class="highlight maxima"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="built_in">example</span>.org &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    file /usr/<span class="built_in">local</span>/etc/coredns/<span class="built_in">example</span>.org</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    prometheus     # enable metrics</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">errors</span>         # <span class="built_in">show</span> <span class="built_in">errors</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">log</span>            # enable query logs</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>那么在 CoreDNS 服务启动时，对于当前的 <code>example.org</code> 这个组，它会依次加载 <code>file</code>、<code>log</code>、<code>errors</code> 和 <code>prometheus</code> 几个插件，这里的顺序是由 zdirectives.go 文件定义的，启动的顺序是从下到上：</p>
+<figure class="highlight jboss-cli"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">var Directives = []string&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">  <span class="string">//</span> <span class="string">...</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">  <span class="string">"prometheus"</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">  <span class="string">"errors"</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">  <span class="string">"log"</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">  <span class="string">//</span> <span class="string">...</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">  <span class="string">"file"</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">  <span class="string">//</span> <span class="string">...</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">  <span class="string">"whoami"</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">  <span class="string">"on"</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>因为启动的时候会按照从下到上的顺序依次『包装』每一个插件，所以在真正调用时就是从上到下执行的，这就是因为 <code>NewServer</code> 方法中对插件进行了组合：</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">func NewServer(addr string,<span class="built_in"> group </span>[]<span class="number">*C</span>onfig) (*Server, error) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    s := &amp;Server&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        Addr:        addr,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        zones:       make(map[string]<span class="number">*C</span>onfig),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        connTimeout: 5 * time.Second,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">for</span> _, site := range<span class="built_in"> group </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        s.zones[site.Zone] = site</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> site.registry != <span class="literal">nil</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">for</span> name := range enableChaos &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> _, ok := site.registry[name]; ok &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">                    s.classChaos = <span class="literal">true</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">                    break</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        var stack plugin.Handler</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">for</span> i := len(site.Plugin) - 1; i &gt;= 0; i-- &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">            stack = site.Plugin[i](stack)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">            site.registerHandler(stack)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        site.pluginChain = stack</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    return s, <span class="literal">nil</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>对于 Corefile 里面的每一个配置组，<code>NewServer</code> 都会讲配置组中提及的插件按照一定的顺序组合起来，原理跟 Rack Middleware 的机制非常相似，插件 <code>Plugin</code> 其实就是一个出入参数都是 <code>Handler</code> 的函数：</p>
+<figure class="highlight routeros"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">type (</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    Plugin func(Handler) Handler</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    Handler<span class="built_in"> interface </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        ServeDNS(context.Context, dns.ResponseWriter, <span class="number">*d</span>ns.Msg) (int, error)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        Name() string</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">)</span></pre></td></tr></table></figure>
+
+<p>所以我们可以将它们叠成堆栈的方式对它们进行操作，这样在最后就会形成一个插件的调用链，在每个插件执行方法时都可以通过 <code>NextOrFailure</code> 函数调用下一个插件的 <code>ServerDNS</code> 方法：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">NextOrFailure</span><span class="params">(name <span class="keyword">string</span>, next Handler, ctx context.Context, w dns.ResponseWriter, r *dns.Msg)</span> <span class="params">(<span class="keyword">int</span>, error)</span></span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> next != <span class="literal">nil</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> span := ot.SpanFromContext(ctx); span != <span class="literal">nil</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">            child := span.Tracer().StartSpan(next.Name(), ot.ChildOf(span.Context()))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">defer</span> child.Finish()</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">            ctx = ot.ContextWithSpan(ctx, child)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> next.ServeDNS(ctx, w, r)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> dns.RcodeServerFailure, Error(name, errors.New(<span class="string">"no next plugin found"</span>))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>除了通过 <code>ServeDNS</code> 调用下一个插件之外，我们也可以调用 <code>WriteMsg</code> 方法并结束整个调用链。<br><img src="http://image.winrains.cn/2019/11/3e828-2018-11-07-coredns-plugin-chain.png" alt="coredns-plugin-chain"><br>从插件的堆叠到顺序调用以及错误处理，我们对 CoreDNS 的工作原理已经非常清楚了，接下来我们可以简单介绍几个插件的作用。</p>
+<h4 id="loadbalance"><a href="#loadbalance" class="headerlink" title="loadbalance"></a>loadbalance</h4><p>loadbalance 这个插件的名字就告诉我们，使用这个插件能够提供基于 DNS 的负载均衡功能，在 <code>setup</code> 中初始化时传入了 <code>RoundRobin</code> 结构体：</p>
+<figure class="highlight swift"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">setup</span><span class="params">(<span class="built_in">c</span> *caddy.Controller)</span></span> error &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    err := parse(<span class="built_in">c</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> plugin.<span class="type">Error</span>(<span class="string">"loadbalance"</span>, err)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    dnsserver.<span class="type">GetConfig</span>(<span class="built_in">c</span>).<span class="type">AddPlugin</span>(<span class="function"><span class="keyword">func</span><span class="params">(next plugin.Handler)</span></span> plugin.<span class="type">Handler</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> <span class="type">RoundRobin</span>&#123;<span class="type">Next</span>: next&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    &#125;)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> <span class="literal">nil</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>当用户请求 CoreDNS 服务时，我们会根据插件链调用 loadbalance 这个包中的 <code>ServeDNS</code> 方法，在方法中会改变用于返回响应的 <code>Writer</code>：</p>
+<figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">func</span> (<span class="selector-tag">rr</span> <span class="selector-tag">RoundRobin</span>) <span class="selector-tag">ServeDNS</span>(<span class="selector-tag">ctx</span> <span class="selector-tag">context</span><span class="selector-class">.Context</span>, <span class="selector-tag">w</span> <span class="selector-tag">dns</span><span class="selector-class">.ResponseWriter</span>, <span class="selector-tag">r</span> *<span class="selector-tag">dns</span><span class="selector-class">.Msg</span>) (<span class="selector-tag">int</span>, <span class="selector-tag">error</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="attribute">wrr </span>:= &amp;RoundRobinResponseWriter&#123;w&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="selector-tag">return</span> <span class="selector-tag">plugin</span><span class="selector-class">.NextOrFailure</span>(<span class="selector-tag">rr</span><span class="selector-class">.Name</span>(), <span class="selector-tag">rr</span><span class="selector-class">.Next</span>, <span class="selector-tag">ctx</span>, <span class="selector-tag">wrr</span>, <span class="selector-tag">r</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>所以在最终服务返回响应时，会通过 <code>RoundRobinResponseWriter</code> 的 <code>WriteMsg</code> 方法写入 DNS 消息：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">func (r *RoundRobinResponseWriter) <span class="constructor">WriteMsg(<span class="params">res</span> <span class="operator">*</span><span class="params">dns</span>.Msg)</span> error &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> res.Rcode != dns.RcodeSuccess &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        return r.ResponseWriter.<span class="constructor">WriteMsg(<span class="params">res</span>)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    res.Answer = round<span class="constructor">Robin(<span class="params">res</span>.Answer)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    res.Ns = round<span class="constructor">Robin(<span class="params">res</span>.Ns)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    res.Extra = round<span class="constructor">Robin(<span class="params">res</span>.Extra)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    return r.ResponseWriter.<span class="constructor">WriteMsg(<span class="params">res</span>)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>上述方法会将响应中的 <code>Answer</code>、<code>Ns</code> 以及 <code>Extra</code> 几个字段中数组的顺序打乱：</p>
+<figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">roundRobin</span><span class="params">(in []dns.RR)</span> []<span class="title">dns</span>.<span class="title">RR</span></span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    cname := []dns.RR&#123;&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    address := []dns.RR&#123;&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    mx := []dns.RR&#123;&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    rest := []dns.RR&#123;&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">for</span> _, r := <span class="keyword">range</span> in &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">switch</span> r.Header().Rrtype &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">case</span> dns.TypeCNAME:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">            cname = <span class="built_in">append</span>(cname, r)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">case</span> dns.TypeA, dns.TypeAAAA:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">            address = <span class="built_in">append</span>(address, r)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">case</span> dns.TypeMX:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">            mx = <span class="built_in">append</span>(mx, r)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">default</span>:</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            rest = <span class="built_in">append</span>(rest, r)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    roundRobinShuffle(address)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">    roundRobinShuffle(mx)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">    out := <span class="built_in">append</span>(cname, rest...)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">    out = <span class="built_in">append</span>(out, address...)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    out = <span class="built_in">append</span>(out, mx...)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> out</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>打乱后的 DNS 记录会被原始的 <code>ResponseWriter</code> 结构写回到 DNS 响应中。</p>
+<h4 id="loop"><a href="#loop" class="headerlink" title="loop"></a>loop</h4><p>loop 插件会检测 DNS 解析过程中出现的简单循环依赖，如果我们在 Corefile 中添加如下的内容并启动 CoreDNS 服务，CoreDNS 会向自己发送一个 DNS 查询，看最终是否会陷入循环：</p>
+<figure class="highlight angelscript"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">. &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    loop</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    forward . <span class="number">127.0</span><span class="number">.0</span><span class="number">.1</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>在 CoreDNS 启动时，它会在 <code>setup</code> 方法中调用 <code>Loop.exchange</code> 方法向自己查询一个随机域名的 DNS 记录：</p>
+<figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="selector-tag">func</span> (<span class="selector-tag">l</span> *<span class="selector-tag">Loop</span>) <span class="selector-tag">exchange</span>(<span class="selector-tag">addr</span> <span class="selector-tag">string</span>) (*<span class="selector-tag">dns</span><span class="selector-class">.Msg</span>, <span class="selector-tag">error</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="attribute">m </span>:= <span class="built_in">new</span>(dns.Msg)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    m.<span class="built_in">SetQuestion</span>(l.qname, dns.TypeHINFO)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    return dns.<span class="built_in">Exchange</span>(m, addr)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>如果这个随机域名在 <code>ServeDNS</code> 方法中被查询了两次，那么就说明当前的 DNS 请求陷入了循环需要终止：</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">func (l *Loop) <span class="constructor">ServeDNS(<span class="params">ctx</span> <span class="params">context</span>.Context, <span class="params">w</span> <span class="params">dns</span>.ResponseWriter, <span class="params">r</span> <span class="operator">*</span><span class="params">dns</span>.Msg)</span> (<span class="built_in">int</span>, error) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> r.Question<span class="literal">[<span class="number">0</span>]</span>.Qtype != dns.TypeHINFO &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        return plugin.<span class="constructor">NextOrFailure(<span class="params">l</span>.Name()</span>, l.Next, ctx, w, r)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// ...</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> state.<span class="constructor">Name()</span><span class="operator"> == </span>l.qname &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        l.inc<span class="literal">()</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> l.seen<span class="literal">()</span> &gt; <span class="number">2</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">        log.<span class="constructor">Fatalf(<span class="string">"Forwarding loop detected in \"%s\" zone. Exiting. See https://coredns.io/plugins/loop#troubleshooting. Probe query: \"HINFO %s\"."</span>, <span class="params">l</span>.<span class="params">zone</span>, <span class="params">l</span>.<span class="params">qname</span>)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    return plugin.<span class="constructor">NextOrFailure(<span class="params">l</span>.Name()</span>, l.Next, ctx, w, r)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>就像 loop 插件的 README 中写的，这个插件只能够检测一些简单的由于配置造成的循环问题，复杂的循环问题并不能通过当前的插件解决。</p>
+<h3 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h3><p>如果想要在分布式系统实现服务发现的功能，DNS 以及 CoreDNS 其实是一个非常好的选择，CoreDNS 作为一个已经进入 CNCF 并且在 Kubernetes 中作为 DNS 服务使用的应用，其本身的稳定性和可用性已经得到了证明，同时它基于插件实现的方式非常轻量并且易于使用，插件链的使用也使得第三方插件的定义变得非常的方便。</p>
+<h2 id="相关文章"><a href="#相关文章" class="headerlink" title="相关文章"></a>相关文章</h2><ul>
+<li>基础<ul>
+<li><a href="https://draveness.me/distributed-transaction-principle" target="_blank" rel="noopener">分布式事务的实现原理</a></li>
+<li><a href="https://draveness.me/message-delivery" target="_blank" rel="noopener">分布式系统与消息的投递</a></li>
+</ul>
+</li>
+<li>数据库<ul>
+<li><a href="https://draveness.me/dynamo" target="_blank" rel="noopener">分布式键值存储 Dynamo 的实现原理</a></li>
+<li><a href="https://draveness.me/bigtable-leveldb" target="_blank" rel="noopener">浅析 Bigtable 和 LevelDB 的实现</a></li>
+</ul>
+</li>
+<li>分布式协调 &amp; 服务发现<ul>
+<li><a href="https://draveness.me/zookeeper-chubby" target="_blank" rel="noopener">详解分布式协调服务 ZooKeeper</a></li>
+<li><a href="https://draveness.me/etcd-introduction" target="_blank" rel="noopener">高可用分布式存储 etcd 的实现原理</a></li>
+<li><a href="https://draveness.me/dns-coredns" target="_blank" rel="noopener">详解 DNS 与 CoreDNS 的实现原理</a></li>
+</ul>
+</li>
+<li>容器编排<ul>
+<li><a href="https://draveness.me/understanding-kubernetes" target="_blank" rel="noopener">谈 Kubernetes 的架构设计与实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-object-intro" target="_blank" rel="noopener">从 Kubernetes 中的对象谈起</a></li>
+<li><a href="https://draveness.me/kubernetes-pod" target="_blank" rel="noopener">详解 Kubernetes Pod 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-service" target="_blank" rel="noopener">详解 Kubernetes Service 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-volume" target="_blank" rel="noopener">详解 Kubernetes Volume 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-replicaset" target="_blank" rel="noopener">详解 Kubernetes ReplicaSet 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-deployment" target="_blank" rel="noopener">详解 Kubernetes Deployment 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-statefulset" target="_blank" rel="noopener">详解 Kubernetes StatefulSet 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-daemonset" target="_blank" rel="noopener">详解 Kubernetes DaemonSet 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-job-cronjob" target="_blank" rel="noopener">详解 Kubernetes Job 和 CronJob 的实现原理</a></li>
+<li><a href="https://draveness.me/kubernetes-garbage-collector" target="_blank" rel="noopener">详解 Kubernetes 垃圾收集器 的实现原理</a></li>
+</ul>
+</li>
+</ul>
+<h2 id="References"><a href="#References" class="headerlink" title="References"></a>References</h2><ul>
+<li><a href="https://www.cloudflare.com/learning/dns/what-is-dns/" target="_blank" rel="noopener">What is DNS? How DNS works</a></li>
+<li><a href="https://yq.aliyun.com/articles/58967" target="_blank" rel="noopener">移动互联网时代，如何优化你的网络 —— 域名解析篇</a></li>
+<li><a href="https://coredns.io/2017/06/08/how-queries-are-processed-in-coredns/" target="_blank" rel="noopener">How Queries Are Processed in CoreDNS</a></li>
+<li><a href="https://en.wikipedia.org/wiki/Domain_Name_System" target="_blank" rel="noopener">Domain Name System</a></li>
+<li><a href="https://www.ietf.org/rfc/rfc1035.txt" target="_blank" rel="noopener">DOMAIN NAMES - IMPLEMENTATION AND SPECIFICATION · RFC1035</a></li>
+<li><a href="https://howdns.works/" target="_blank" rel="noopener">A fun and colorful explanation of how DNS works.</a></li>
+<li><a href="https://www.iana.org/domains/root/servers" target="_blank" rel="noopener">Root Servers</a></li>
+<li><a href="https://ns1.com/resources/dns-protocol" target="_blank" rel="noopener">What is the DNS Protocol?</a></li>
+<li><a href="https://en.wikipedia.org/wiki/Root_name_server" target="_blank" rel="noopener">Root name server · Wikipedia</a></li>
+<li><a href="https://coredns.io/2017/03/01/coredns-for-kubernetes-service-discovery-take-2/" target="_blank" rel="noopener">CoreDNS for Kubernetes Service Discovery, Take 2</a></li>
+<li><a href="https://github.com/kubernetes/dns/blob/master/docs/specification.md" target="_blank" rel="noopener">Kubernetes DNS-Based Service Discovery</a></li>
+<li><a href="https://coredns.io/manual/toc/#plugins" target="_blank" rel="noopener">CoreDNS Manual</a></li>
+</ul>
+<blockquote>
+<p>作者：Draveness</p>
+<p>来源：<a href="https://draveness.me/dns-coredns" target="_blank" rel="noopener">https://draveness.me/dns-coredns</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/DNS/" rel="tag"># DNS</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/11/%E8%AF%A6%E8%A7%A3%E5%88%86%E5%B8%83%E5%BC%8F%E5%8D%8F%E8%B0%83%E6%9C%8D%E5%8A%A1-ZooKeeper/" rel="prev" title="详解分布式协调服务 ZooKeeper">
+      <i class="fa fa-chevron-left"></i> 详解分布式协调服务 ZooKeeper
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/11/%E8%B0%88-Kubernetes-%E7%9A%84%E6%9E%B6%E6%9E%84%E8%AE%BE%E8%AE%A1%E4%B8%8E%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/" rel="next" title="谈 Kubernetes 的架构设计与实现原理">
+      谈 Kubernetes 的架构设计与实现原理 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#DNS"><span class="nav-number">1.</span> <span class="nav-text">DNS</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#工作原理"><span class="nav-number">1.1.</span> <span class="nav-text">工作原理</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#域名层级"><span class="nav-number">1.2.</span> <span class="nav-text">域名层级</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#域名服务器"><span class="nav-number">1.3.</span> <span class="nav-text">域名服务器</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#胶水记录"><span class="nav-number">1.4.</span> <span class="nav-text">胶水记录</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#服务发现"><span class="nav-number">1.5.</span> <span class="nav-text">服务发现</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#CoreDNS"><span class="nav-number">2.</span> <span class="nav-text">CoreDNS</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#架构"><span class="nav-number">2.1.</span> <span class="nav-text">架构</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#插件"><span class="nav-number">2.1.1.</span> <span class="nav-text">插件</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#Corefile"><span class="nav-number">2.1.2.</span> <span class="nav-text">Corefile</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#原理"><span class="nav-number">2.2.</span> <span class="nav-text">原理</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#loadbalance"><span class="nav-number">2.2.1.</span> <span class="nav-text">loadbalance</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#loop"><span class="nav-number">2.2.2.</span> <span class="nav-text">loop</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#总结"><span class="nav-number">2.3.</span> <span class="nav-text">总结</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#相关文章"><span class="nav-number">3.</span> <span class="nav-text">相关文章</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#References"><span class="nav-number">4.</span> <span class="nav-text">References</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

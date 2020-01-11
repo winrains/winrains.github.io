@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="我在前段时间写了一篇关于AQS源码解析的文章AbstractQueuedSynchronizer超详细原理解析 ，在文章里边我说JUC包中的大部分多线程相关的类都和AQS相关，今天我们就学习一下依赖于AQS来实现的阻塞队列BlockingQueue的实现原理。本文中的源码未加说明即来自于以ArrayBlockingQueue。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="BlockingQueue 与 Condition 原理解析">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;11&#x2F;BlockingQueue-%E4%B8%8E-Condition-%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="我在前段时间写了一篇关于AQS源码解析的文章AbstractQueuedSynchronizer超详细原理解析 ，在文章里边我说JUC包中的大部分多线程相关的类都和AQS相关，今天我们就学习一下依赖于AQS来实现的阻塞队列BlockingQueue的实现原理。本文中的源码未加说明即来自于以ArrayBlockingQueue。">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212102009-dd585.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212102009-615ae.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212102010-4b353.jpeg">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212102010-6d208.jpeg">
+<meta property="og:updated_time" content="2020-01-11T03:39:20.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;12&#x2F;20191212102009-dd585.jpeg">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/11/BlockingQueue-%E4%B8%8E-Condition-%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>BlockingQueue 与 Condition 原理解析 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/11/BlockingQueue-%E4%B8%8E-Condition-%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          BlockingQueue 与 Condition 原理解析
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-11 11:39:20" itemprop="dateCreated datePublished" datetime="2020-01-11T11:39:20+08:00">2020-01-11</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Java%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Java技术</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>我在前段时间写了一篇关于AQS源码解析的文章<a href="https://mp.weixin.qq.com/s?__biz=MzU2MDYwMDMzNQ==&mid=2247483716&idx=1&sn=22e5160b1fb1068b262d1b0f4fcfc0a0&chksm=fc04c524cb734c327b823acd2cc3ea3ef8620ab2c6c0c1dc1ac6545904f1c3259afd4f2e7450&token=1555684417&lang=zh_CN#rd" target="_blank" rel="noopener">AbstractQueuedSynchronizer超详细原理解析 </a>，在文章里边我说<code>JUC</code>包中的大部分多线程相关的类都和<code>AQS</code>相关，今天我们就学习一下依赖于<code>AQS</code>来实现的阻塞队列<code>BlockingQueue</code>的实现原理。本文中的源码未加说明即来自于以<code>ArrayBlockingQueue</code>。</p>
+<a id="more"></a>
+
+<h2 id="阻塞队列"><a href="#阻塞队列" class="headerlink" title="阻塞队列"></a>阻塞队列</h2><p>相信大多数同学在学习线程池时会了解阻塞队列的概念，熟记各种类型的阻塞队列对线程池初始化的影响。当从阻塞队列获取元素但是队列为空时，当前线程会阻塞直到另一个线程向阻塞队列中添加一个元素；类似的，当向一个阻塞队列加入元素时，如果队列已经满了，当前线程也会阻塞直到另外一个线程从队列中读取一个元素。阻塞队列一般都是先进先出的,用来实现生产者和消费者模式。当发生上述两种情况时，阻塞队列有四种不同的处理方式，这四种方式分别为抛出异常，返回特殊值(null或在是false)，阻塞当前线程直到执行结束，最后一种是只阻塞固定时间，到时后还无法执行成功就放弃操作。这些方法都总结在下边这种表中了。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212102009-dd585.jpeg" alt="函数列表"></p>
+<p>我们就只分析<code>put</code>和<code>take</code>方法。</p>
+<h2 id="put和take函数"><a href="#put和take函数" class="headerlink" title="put和take函数"></a>put和take函数</h2><p>我们都知道，使用同步队列可以很轻松的实现生产者-消费者模式，其实，同步队列就是按照生产者-消费者的模式来实现的，我们可以将<code>put</code>函数看作生产者的操作，<code>take</code>是消费者的操作。</p>
+<p>我们首先看一下<code>ArrayListBlock</code>的构造函数。它初始化了<code>put</code>和<code>take</code>函数中使用到的关键成员变量，分别是<code>ReentrantLock</code>和<code>Condition</code>。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public <span class="constructor">ArrayBlockingQueue(<span class="params">int</span> <span class="params">capacity</span>, <span class="params">boolean</span> <span class="params">fair</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    this.items = <span class="keyword">new</span> Object<span class="literal">[<span class="identifier">capacity</span>]</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    lock = <span class="keyword">new</span> <span class="constructor">ReentrantLock(<span class="params">fair</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    notEmpty = lock.<span class="keyword">new</span><span class="constructor">Condition()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    notFull =  lock.<span class="keyword">new</span><span class="constructor">Condition()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>ReentrantLock是<code>AQS</code>的子类，其<code>newCondition</code>函数返回的<code>Condition</code>接口实例是定义在AQS类内部的<code>ConditionObject</code>实现类。它可以直接调用<code>AQS</code>相关的函数。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212102009-615ae.jpeg" alt="AQS相关类图"></p>
+<p><code>put</code>函数会在队列末尾添加元素，如果队列已经满了，无法添加元素的话，就一直阻塞等待到可以加入为止。函数的源码如下所示。</p>
+<figure class="highlight cs"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">put</span>(<span class="params">E e</span>) throws InterruptedException</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    checkNotNull(e);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    final ReentrantLock <span class="keyword">lock</span> = <span class="keyword">this</span>.<span class="keyword">lock</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">lock</span>.lockInterruptibly(); <span class="comment">//先获得锁</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">while</span> (count == items.length) </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//如果队列满了，就NotFull这个Condition对象上进行等待</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">            notFull.<span class="keyword">await</span>();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        enqueue(e);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125; <span class="keyword">finally</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">lock</span>.unlock();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title">enqueue</span>(<span class="params">E x</span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    final Object[] items = <span class="keyword">this</span>.items;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    items[putIndex] = x;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//这里可以注意的是ArrayBlockingList实际上使用Array实现了一个环形数组，</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">   <span class="comment">//当putIndex达到最大时，就返回到起点，继续插入,</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">   <span class="comment">//当然，如果此时0位置的元素还没有被取走，</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">   <span class="comment">//下次put时，就会因为cout == item.length未被阻塞。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (++putIndex == items.length)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        putIndex = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    count++;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//因为插入了元素，通知等待notEmpty事件的线程。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">    notEmpty.signal();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>我们会发现put函数使用了wait/notify的机制。与一般生产者-消费者的实现方式不同，同步队列使用<code>ReentrantLock</code>和<code>Condition</code>相结合的先获得锁，再等待的机制；而不是<code>Synchronized</code>和<code>Object.wait</code>的机制。这里的区别我们下一节再详细讲解。  看完了生产者相关的<code>put</code>函数，我们再来看一下消费者调用的<code>take</code>函数。<code>take</code>函数在队列为空时会被阻塞，一直到阻塞队列加入了新的元素。</p>
+<figure class="highlight cs"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> E <span class="title">take</span>(<span class="params"></span>) throws InterruptedException</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    final ReentrantLock <span class="keyword">lock</span> = <span class="keyword">this</span>.<span class="keyword">lock</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">lock</span>.lockInterruptibly();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">while</span> (count == <span class="number">0</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//如果队列为空，那么在notEmpty对象上等待，</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//当put函数调用时，会调用notEmpty的notify进行通知。</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">            notEmpty.<span class="keyword">await</span>();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> dequeue();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    &#125; <span class="keyword">finally</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">lock</span>.unlock();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">private</span> E <span class="title">dequeue</span>(<span class="params"></span>)</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    E x = (E) items[takeIndex];</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">    items[takeIndex] = <span class="literal">null</span>; <span class="comment">//取出takeIndex位置的元素</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (++takeIndex == items.length)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">//如果到了尾部，将指针重新调整到头部</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        takeIndex = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">    count--;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">    ....</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">//通知notFull对象上等待的线程</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    notFull.signal();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">return</span> x;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h2 id="await操作"><a href="#await操作" class="headerlink" title="await操作"></a>await操作</h2><p>我们发现<code>ArrayBlockingList</code>并没有使用<code>Object.wait</code>，而是使用的<code>Condition.await</code>，这是为什么呢？其中又有哪些原因呢？  <code>Condition</code>对象可以提供和<code>Object</code>的<code>wait</code>和<code>notify</code>一样的行为，但是后者必须先获取<code>synchronized</code>这个内置的monitor锁，才能调用；而<code>Condition</code>则必须先获取<code>ReentrantLock</code>。这两种方式在阻塞等待时都会将相应的锁释放掉，但是<code>Condition</code>的等待可以中断，这是二者唯一的区别。</p>
+<p>我们先来看一下<code>Condition</code>的<code>wait</code>函数，<code>wait</code>函数的流程大致如下图所示。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212102010-4b353.jpeg" alt="wait操作"></p>
+<p><code>wait</code>函数主要有三个步骤。一是调用<code>addConditionWaiter</code>函数，在condition wait queue队列中添加一个节点，代表当前线程在等待一个消息。然后调用<code>fullyRelease</code>函数，将持有的锁释放掉，调用的是AQS的函数，不清楚的同学可以查看本篇开头的介绍的文章。最后一直调用<code>isOnSyncQueue</code>函数判断节点是否被转移到<code>sync queue</code>队列上，也就是AQS中等待获取锁的队列。如果没有，则进入阻塞状态，如果已经在队列上，则调用<code>acquireQueued</code>函数重新获取锁。</p>
+<figure class="highlight crmsh"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public final void await() throws InterruptedException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    if (Thread.interrupted())</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        throw new InterruptedException();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    //在condition wait队列上添加新的节点</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">Node</span> <span class="title">node</span> = addConditionWaiter();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    //释放当前持有的锁</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    int savedState = fullyRelease(<span class="keyword">node</span><span class="title">);</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line"><span class="title">    int</span> interruptMode = <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    //由于<span class="keyword">node</span><span class="title">在之前是添加到condition</span> wait queue上的，现在判断这个<span class="keyword">node</span><span class="title"></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"><span class="title">    //是否被添加到Sync</span>的获得锁的等待队列上，Sync就是AQS的子类</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    //<span class="keyword">node</span><span class="title">在condition</span> queue上说明还在等待事件的notify,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    //notify函数会将condition queue 上的<span class="keyword">node</span><span class="title">转化到Sync</span>的队列上。</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    while (!isOnSyncQueue(<span class="keyword">node</span><span class="title">)) &#123;</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line"><span class="title">        //node</span>还没有被添加到Sync Queue上，说明还在等待事件通知</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        //所以调用park函数来停止线程执行</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        LockSupport.park(this);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        //判断是否被中断,线程从park函数返回有两种情况，一种是</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">        //其他线程调用了unpark,另外一种是线程被中断</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        if ((interruptMode = checkInterruptWhileWaiting(<span class="keyword">node</span><span class="title">)) != 0</span>)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">            break;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    //代码执行到这里，已经有其他线程调用notify函数，或则被中断，该线程可以继续执行，但是必须先</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    //再次获得调用await函数时的锁．acquireQueued函数在AQS文章中做了介绍．</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    if (acquireQueued(<span class="keyword">node</span><span class="title">, savedState</span>) &amp;&amp; interruptMode != THROW_IE)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">        interruptMode = REINTERRUPT;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">  &amp;emsp;．．．．</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">final int fullyRelease(<span class="keyword">Node</span> <span class="title">node</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">    //AQS的方法，当前已经在锁中了，所以直接操作</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">    boolean failed = <span class="literal">true</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">    try &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">        int savedState = getState();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">        //获取state当前的值，然后保存，以待以后恢复</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">        // release函数是AQS的函数，不清楚的同学请看开头介绍的文章。 </span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">        if (release(savedState)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">            failed = <span class="literal">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">            return savedState;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">        &#125; else &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">            throw new IllegalMonitorStateException();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">    &#125; finally &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">        if (failed)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">node</span>.<span class="title">waitStatus</span> = <span class="keyword">Node</span>.<span class="title">CANCELLED</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line">private int checkInterruptWhileWaiting(<span class="keyword">Node</span> <span class="title">node</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">49</span></pre></td><td class="code"><pre><span class="line">    //中断可能发生在两个阶段中，一是在等待signa时,另外一个是在获得signal之后</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">50</span></pre></td><td class="code"><pre><span class="line">    return Thread.interrupted() ?</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">51</span></pre></td><td class="code"><pre><span class="line">        (transferAfterCancelledWait(<span class="keyword">node</span><span class="title">) ? THROW_IE</span> : REINTERRUPT) :</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">52</span></pre></td><td class="code"><pre><span class="line">        <span class="number">0</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">53</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">54</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">55</span></pre></td><td class="code"><pre><span class="line">final boolean transferAfterCancelledWait(<span class="keyword">Node</span> <span class="title">node</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">56</span></pre></td><td class="code"><pre><span class="line">    //这里要和下边的transferForSignal对应着看，这是线程中断进入的逻辑．那边是signal的逻辑</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">57</span></pre></td><td class="code"><pre><span class="line">    //两边可能有并发冲突，但是成功的一方必须调用enq来进入acquire lock queue中．</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">58</span></pre></td><td class="code"><pre><span class="line">    if (compareAndSetWaitStatus(<span class="keyword">node</span><span class="title">, Node</span>.CONDITION, <span class="number">0</span>)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">59</span></pre></td><td class="code"><pre><span class="line">        enq(<span class="keyword">node</span><span class="title">);</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">60</span></pre></td><td class="code"><pre><span class="line"><span class="title">        return</span> <span class="literal">true</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">61</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">62</span></pre></td><td class="code"><pre><span class="line">    //如果失败了，说明transferForSignal那边成功了，等待<span class="keyword">node</span> <span class="title">进入acquire</span> lock queue</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">63</span></pre></td><td class="code"><pre><span class="line">    while (!isOnSyncQueue(<span class="keyword">node</span><span class="title">))</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">64</span></pre></td><td class="code"><pre><span class="line"><span class="title">        Thread</span>.yield();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">65</span></pre></td><td class="code"><pre><span class="line">    return <span class="literal">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">66</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h2 id="signal操作"><a href="#signal操作" class="headerlink" title="signal操作"></a>signal操作</h2><p><code>signal</code>函数将<code>condition wait queue</code>队列中队首的线程节点转移等待获取锁的<code>sync queue</code>队列中。这样的话，<code>wait</code>函数中调用<code>isOnSyncQueue</code>函数就会返回true，导致<code>wait</code>函数进入最后一步重新获取锁的状态。</p>
+<p>我们这里来详细解析一下<code>condition wait queue</code>和<code>sync queue</code>两个队列的设计原理。<code>condition wait queue</code>是等待消息的队列，因为阻塞队列为空而进入阻塞状态的<code>take</code>函数操作就是在等待阻塞队列不为空的消息。而<code>sync queue</code>队列则是等待获取锁的队列，take函数获得了消息，就可以运行了，但是它还必须等待获取锁之后才能真正进行运行状态。</p>
+<p><code>signal</code>函数的示意图如下所示。</p>
+<p><img src="http://image.winrains.cn/2019/12/20191212102010-6d208.jpeg" alt="notify操作"></p>
+<p><code>signal</code>函数其实就做了一件事情，就是不断尝试调用<code>transferForSignal</code>函数，将<code>condition wait queue</code>队首的一个节点转移到<code>sync queue</code>队列中，直到转移成功。因为一次转移成功，就代表这个消息被成功通知到了等待消息的节点。</p>
+<figure class="highlight crmsh"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">public final void signal() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    if (!isHeldExclusively())</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    //如果当前线程没有获得锁，抛出异常</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        throw new IllegalMonitorStateException();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">Node</span> <span class="title">first</span> = firstWaiter;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    if (first != null)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        //将Condition wait queue中的第一个<span class="keyword">node</span><span class="title">转移到acquire</span> lock queue中．</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        doSignal(first);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">private void doSignal(<span class="keyword">Node</span> <span class="title">first</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    do &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">&amp;emsp;&amp;emsp; //由于生产者的signal在有消费者等待的情况下，必须要通知</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        //一个消费者，所以这里有一个循环，直到队列为空</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        //把first 这个<span class="keyword">node</span><span class="title">从condition</span> queue中删除掉</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        //condition queue的头指针指向<span class="keyword">node</span><span class="title">的后继节点，如果node</span>后续节点为null,那么也将尾指针也置为null</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">        if ( (firstWaiter = first.nextWaiter) == null)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">            lastWaiter = null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">            first.nextWaiter = null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        &#125; while (!transferForSignal(first) &amp;&amp;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">             (first = firstWaiter) != null);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">     //transferForSignal将<span class="keyword">node</span><span class="title">转而添加到Sync</span>的acquire lock 队列</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line"></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">final boolean transferForSignal(<span class="keyword">Node</span> <span class="title">node</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    //如果设置失败，说明该<span class="keyword">node</span><span class="title">已经被取消了,所以返回false</span>,让doSignal继续向下通知其他未被取消的<span class="keyword">node</span><span class="title"></span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line"><span class="title">    if</span> (!compareAndSetWaitStatus(<span class="keyword">node</span><span class="title">, Node</span>.CONDITION, <span class="number">0</span>))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">        return <span class="literal">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">    //将<span class="keyword">node</span><span class="title">添加到acquire</span> lock&amp;emsp;queue中．</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">Node</span> <span class="title">p</span> = enq(<span class="keyword">node</span><span class="title">);</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line"><span class="title">    int</span> ws = p.waitStatus;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">    //需要注意的是这里的<span class="keyword">node</span><span class="title">进行了转化</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line"><span class="title">    //ws</span>&gt;<span class="number">0</span>代表canceled的含义所以直接unpark线程</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">    //如果compareAndSetWaitStatus失败，所以直接unpark,让线程继续执行await中的</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">    //进行isOnSyncQueue判断的while循环,然后进入acquireQueue函数．</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">    //这里失败的原因可能是Lock其他线程释放掉了锁，同步设置p的waitStatus</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">    //如果compareAndSetWaitStatus成功了呢？那么该<span class="keyword">node</span><span class="title">就一直在acquire</span> lock queue中</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">    //等待锁被释放掉再次抢夺锁，然后再unparｋ</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">    if (ws &gt; <span class="number">0</span> || !compareAndSetWaitStatus(p, ws, <span class="keyword">Node</span>.<span class="title">SIGNAL</span>))</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">        LockSupport.unpark(<span class="keyword">node</span>.<span class="title">thread</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">    return <span class="literal">true</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<h2 id="后记"><a href="#后记" class="headerlink" title="后记"></a>后记</h2><p>后边一篇文章主要讲解如何自己使用<code>AQS</code>来创建符合自己业务需求的锁，请大家继续关注我的文章啦．一起进步偶。</p>
+<blockquote>
+<p>作者：程序员历小冰</p>
+<p>来源：<a href="https://juejin.im/post/5c3def86e51d450672352cea" target="_blank" rel="noopener">https://juejin.im/post/5c3def86e51d450672352cea</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/11/%E5%88%86%E5%B8%83%E5%BC%8F%E6%95%B0%E6%8D%AE%E7%BC%93%E5%AD%98%E4%B8%AD%E7%9A%84%E4%B8%80%E8%87%B4%E6%80%A7%E5%93%88%E5%B8%8C%E7%AE%97%E6%B3%95/" rel="prev" title="分布式数据缓存中的一致性哈希算法">
+      <i class="fa fa-chevron-left"></i> 分布式数据缓存中的一致性哈希算法
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/11/AbstractQueuedSynchronizer-%E8%B6%85%E8%AF%A6%E7%BB%86%E5%8E%9F%E7%90%86%E8%A7%A3%E6%9E%90/" rel="next" title="AbstractQueuedSynchronizer 超详细原理解析">
+      AbstractQueuedSynchronizer 超详细原理解析 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#阻塞队列"><span class="nav-number">1.</span> <span class="nav-text">阻塞队列</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#put和take函数"><span class="nav-number">2.</span> <span class="nav-text">put和take函数</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#await操作"><span class="nav-number">3.</span> <span class="nav-text">await操作</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#signal操作"><span class="nav-number">4.</span> <span class="nav-text">signal操作</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#后记"><span class="nav-number">5.</span> <span class="nav-text">后记</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

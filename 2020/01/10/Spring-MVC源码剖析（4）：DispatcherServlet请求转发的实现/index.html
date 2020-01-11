@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.0.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/font-awesome.min.css">
+
+
+<script id="hexo-configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    hostname: new URL('http://congsheng.wang').hostname,
+    root: '/',
+    scheme: 'Gemini',
+    version: '7.6.0',
+    exturl: false,
+    sidebar: {"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},
+    copycode: {"enable":true,"show_result":true,"style":"mac"},
+    back2top: {"enable":true,"sidebar":false,"scrollpercent":false},
+    bookmark: {"enable":false,"color":"#222","save":"auto"},
+    fancybox: false,
+    mediumzoom: false,
+    lazyload: false,
+    pangu: false,
+    comments: {"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},
+    algolia: {
+      appID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    },
+    localsearch: {"enable":true,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},
+    path: 'search.xml',
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}
+  };
+</script>
+
+  <meta name="description" content="SpringMVC完成初始化流程之后，就进入Servlet标准生命周期的第二个阶段，即“service”阶段。在“service”阶段中，每一次Http请求到来，容器都会启动一个请求线程，通过service()方法，委派到doGet()或者doPost()这些方法，完成Http请求的处理。在初始化流程中，SpringMVC巧妙的运用依赖注入读取参数，并最终建立一个与容器上下文相关联的Spring子">
+<meta name="keywords" content="源码">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Spring MVC源码剖析（4）：DispatcherServlet请求转发的实现">
+<meta property="og:url" content="http:&#x2F;&#x2F;congsheng.wang&#x2F;2020&#x2F;01&#x2F;10&#x2F;Spring-MVC%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90%EF%BC%884%EF%BC%89%EF%BC%9ADispatcherServlet%E8%AF%B7%E6%B1%82%E8%BD%AC%E5%8F%91%E7%9A%84%E5%AE%9E%E7%8E%B0&#x2F;index.html">
+<meta property="og:site_name" content="个人博客">
+<meta property="og:description" content="SpringMVC完成初始化流程之后，就进入Servlet标准生命周期的第二个阶段，即“service”阶段。在“service”阶段中，每一次Http请求到来，容器都会启动一个请求线程，通过service()方法，委派到doGet()或者doPost()这些方法，完成Http请求的处理。在初始化流程中，SpringMVC巧妙的运用依赖注入读取参数，并最终建立一个与容器上下文相关联的Spring子">
+<meta property="og:locale" content="zh-CN">
+<meta property="og:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;6f250-203718_HPiY_118997.jpg">
+<meta property="og:updated_time" content="2020-01-10T13:10:25.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http:&#x2F;&#x2F;image.winrains.cn&#x2F;2019&#x2F;11&#x2F;6f250-203718_HPiY_118997.jpg">
+
+<link rel="canonical" href="http://congsheng.wang/2020/01/10/Spring-MVC%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90%EF%BC%884%EF%BC%89%EF%BC%9ADispatcherServlet%E8%AF%B7%E6%B1%82%E8%BD%AC%E5%8F%91%E7%9A%84%E5%AE%9E%E7%8E%B0/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome: false,
+    isPost: true
+  };
+</script>
+
+  <title>Spring MVC源码剖析（4）：DispatcherServlet请求转发的实现 | 个人博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-meta">
+
+    <div>
+      <a href="/" class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">个人博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+        <p class="site-subtitle">congsheng的博客</p>
+  </div>
+
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+</div>
+
+
+<nav class="site-nav">
+  
+  <ul id="menu" class="menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-fw fa-home"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-fw fa-user"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-fw fa-tags"></i>标签<span class="badge">156</span></a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-fw fa-th"></i>分类<span class="badge">94</span></a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-fw fa-archive"></i>归档<span class="badge">984</span></a>
+
+  </li>
+      <li class="menu-item menu-item-search">
+        <a role="button" class="popup-trigger"><i class="fa fa-search fa-fw"></i>搜索
+        </a>
+      </li>
+  </ul>
+
+</nav>
+  <div class="site-search">
+    <div class="popup search-popup">
+    <div class="search-header">
+  <span class="search-icon">
+    <i class="fa fa-search"></i>
+  </span>
+  <div class="search-input-container">
+    <input autocomplete="off" autocorrect="off" autocapitalize="none"
+           placeholder="搜索..." spellcheck="false"
+           type="text" id="search-input">
+  </div>
+  <span class="popup-btn-close">
+    <i class="fa fa-times-circle"></i>
+  </span>
+</div>
+<div id="search-result"></div>
+
+</div>
+<div class="search-pop-overlay"></div>
+
+  </div>
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content">
+            
+
+  <div class="posts-expand">
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block " lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://congsheng.wang/2020/01/10/Spring-MVC%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90%EF%BC%884%EF%BC%89%EF%BC%9ADispatcherServlet%E8%AF%B7%E6%B1%82%E8%BD%AC%E5%8F%91%E7%9A%84%E5%AE%9E%E7%8E%B0/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="congsheng.wang">
+      <meta itemprop="description" content="trouble is a friend">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="个人博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Spring MVC源码剖析（4）：DispatcherServlet请求转发的实现
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-calendar-o"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-01-10 21:10:25" itemprop="dateCreated datePublished" datetime="2020-01-10T21:10:25+08:00">2020-01-10</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-folder-o"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Spring%E6%8A%80%E6%9C%AF/" itemprop="url" rel="index">
+                    <span itemprop="name">Spring技术</span>
+                  </a>
+                </span>
+                  ，
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Spring%E6%8A%80%E6%9C%AF/Spring-MVC/" itemprop="url" rel="index">
+                    <span itemprop="name">Spring MVC</span>
+                  </a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>SpringMVC完成初始化流程之后，就进入Servlet标准生命周期的第二个阶段，即“service”阶段。在“service”阶段中，每一次Http请求到来，容器都会启动一个请求线程，通过service()方法，委派到doGet()或者doPost()这些方法，完成Http请求的处理。<br>在初始化流程中，SpringMVC巧妙的运用依赖注入读取参数，并最终建立一个与容器上下文相关联的Spring子上下文。这个子上下文，就像Struts2中xwork容器一样，为接下来的Http处理流程中各种编程元素提供了容身之所。如果说将Spring上下文关联到Servlet容器中，是SpringMVC框架的第一个亮点，那么在请求转发流程中，SpringMVC对各种处理环节编程元素的抽象，就是另外一个独具匠心的亮点。<br>Struts2采取的是一种完全和Web容器隔离和解耦的事件机制。诸如Action对象、Result对象、Interceptor对象，这些都是完全脱离Servlet容器的编程元素。Struts2将数据流和事件处理完全剥离开来，从Http请求中读取数据后，下面的事件处理流程就只依赖于这些数据，而完全不知道有Web环境的存在。<br>反观SpringMVC，无论HandlerMapping对象、HandlerAdapter对象还是View对象，这些核心的接口所定义的方法中，HttpServletRequest和HttpServletResponse对象都是直接作为方法的参数出现的。这也就意味着，框架的设计者，直接将SpringMVC框架和容器绑定到了一起。或者说，整个SpringMVC框架，都是依托着Servlet容器元素来设计的。下面就来看一下，源码中是如何体现这一点的。</p>
+<a id="more"></a>
+
+<h2 id="1-请求转发的入口"><a href="#1-请求转发的入口" class="headerlink" title="1.请求转发的入口**"></a>1.请求转发的入口**</h2><p>就像任何一个注册在容器中的Servlet一样，DispatcherServlet也是通过自己的service()方法来接收和转发Http请求到具体的doGet()或doPost()这些方法的。以一次典型的GET请求为例，经过HttpServlet基类中service()方法的委派，请求会被转发到doGet()方法中。doGet()方法，在DispatcherServlet的父类FrameworkServlet类中被覆写。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">@Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">protected final void <span class="keyword">do</span><span class="constructor">Get(HttpServletRequest <span class="params">request</span>, HttpServletResponse <span class="params">response</span>)</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">        throws ServletException, IOException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    process<span class="constructor">Request(<span class="params">request</span>, <span class="params">response</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>可以看到，这里只是简单的转发到processRequest()这个方法。</p>
+<figure class="highlight kotlin"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">protected</span> <span class="keyword">final</span> void processRequest(HttpServletRequest request, HttpServletResponse response)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">        throws ServletException, IOException &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    long startTime = System.currentTimeMillis();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    Throwable failureCause = <span class="literal">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// Expose current LocaleResolver and request as LocaleContext.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">    LocaleContext previousLocaleContext = LocaleContextHolder.getLocaleContext();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    LocaleContextHolder.setLocaleContext(buildLocaleContext(request), <span class="keyword">this</span>.threadContextInheritable);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// Expose current RequestAttributes to current thread.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    RequestAttributes previousRequestAttributes = RequestContextHolder.getRequestAttributes();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    ServletRequestAttributes requestAttributes = <span class="literal">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (previousRequestAttributes == <span class="literal">null</span> || previousRequestAttributes.getClass().equals(ServletRequestAttributes<span class="class">.<span class="keyword">class</span>)) </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        requestAttributes = new ServletRequestAttributes(request);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        RequestContextHolder.setRequestAttributes(requestAttributes, <span class="keyword">this</span>.threadContextInheritable);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (logger.isTraceEnabled()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">        logger.trace(<span class="string">"Bound request context to thread: "</span> + request);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">        doService(request, response);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">catch</span> (ServletException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">        failureCause = ex;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> ex;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">catch</span> (IOException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">        failureCause = ex;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> ex;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">catch</span> (Throwable ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">        failureCause = ex;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throw</span> new NestedServletException(<span class="string">"Request processing failed"</span>, ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">finally</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// Clear request attributes and reset thread-bound context.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">        LocaleContextHolder.setLocaleContext(previousLocaleContext, <span class="keyword">this</span>.threadContextInheritable);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (requestAttributes != <span class="literal">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">            RequestContextHolder.setRequestAttributes(previousRequestAttributes, <span class="keyword">this</span>.threadContextInheritable);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">            requestAttributes.requestCompleted();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (logger.isTraceEnabled()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">            logger.trace(<span class="string">"Cleared thread-bound request context: "</span> + request);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (logger.isDebugEnabled()) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (failureCause != <span class="literal">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">this</span>.logger.debug(<span class="string">"Could not complete request"</span>, failureCause);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">this</span>.logger.debug(<span class="string">"Successfully completed request"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">49</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">50</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">51</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (<span class="keyword">this</span>.publishEvents) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">52</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// Whether or not we succeeded, publish an event.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">53</span></pre></td><td class="code"><pre><span class="line">            long processingTime = System.currentTimeMillis() - startTime;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">54</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">this</span>.webApplicationContext.publishEvent(</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">55</span></pre></td><td class="code"><pre><span class="line">                    new ServletRequestHandledEvent(<span class="keyword">this</span>,</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">56</span></pre></td><td class="code"><pre><span class="line">                            request.getRequestURI(), request.getRemoteAddr(),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">57</span></pre></td><td class="code"><pre><span class="line">                            request.getMethod(), getServletConfig().getServletName(),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">58</span></pre></td><td class="code"><pre><span class="line">                            WebUtils.getSessionId(request), getUsernameForRequest(request),</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">59</span></pre></td><td class="code"><pre><span class="line">                            processingTime, failureCause));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">60</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">61</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">62</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>代码有点长，理解的要点是以doService()方法为区隔，前一部分是将当前请求的Locale对象和属性，分别设置到LocaleContextHolder和RequestContextHolder这两个抽象类中的ThreadLocal对象中，也就是分别将这两个东西和请求线程做了绑定。在doService()处理结束后，再恢复回请求前的LocaleContextHolder和RequestContextHolder，也即解除线程绑定。每次请求处理结束后，容器上下文都发布了一个ServletRequestHandledEvent事件，你可以注册监听器来监听该事件。<br>可以看到，processRequest()方法只是做了一些线程安全的隔离，真正的请求处理，发生在doService()方法中。点开FrameworkServlet类中的doService()方法。</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">protected</span> <span class="keyword">abstract</span> <span class="keyword">void</span> doService(HttpServletRequest request, HttpServletResponse response)</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">throws</span> Exception;</span></pre></td></tr></table></figure>
+
+<p>又是一个抽象方法，这也是SpringMVC类设计中的惯用伎俩：父类抽象处理流程，子类给予具体的实现。真正的实现是在DispatcherServlet类中。<br>让我们接着看DispatcherServlet类中实现的doService()方法。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">@Override</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">protected void <span class="keyword">do</span><span class="constructor">Service(HttpServletRequest <span class="params">request</span>, HttpServletResponse <span class="params">response</span>)</span> throws Exception &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (logger.is<span class="constructor">DebugEnabled()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">        String requestUri = urlPathHelper.get<span class="constructor">RequestUri(<span class="params">request</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">        logger.debug(<span class="string">"DispatcherServlet with name '"</span> + get<span class="constructor">ServletName()</span> + <span class="string">"' processing "</span> + request.get<span class="constructor">Method()</span> +</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">                <span class="string">" request for ["</span> + requestUri + <span class="string">"]"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// Keep a snapshot of the request attributes in case of an include,</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// to be able to restore the original attributes after the include.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    Map&lt;String, Object&gt; attributesSnapshot = null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (<span class="module-access"><span class="module"><span class="identifier">WebUtils</span>.</span></span>is<span class="constructor">IncludeRequest(<span class="params">request</span>)</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">        logger.debug(<span class="string">"Taking snapshot of request attributes before include"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">        attributesSnapshot = <span class="keyword">new</span> HashMap&lt;String, Object&gt;<span class="literal">()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        Enumeration&lt;?&gt; attrNames = request.get<span class="constructor">AttributeNames()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">while</span> (attrNames.has<span class="constructor">MoreElements()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            String attrName = (String) attrNames.next<span class="constructor">Element()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (this.cleanupAfterInclude<span class="operator"> || </span>attrName.starts<span class="constructor">With(<span class="string">"org.springframework.web.servlet"</span>)</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">                attributesSnapshot.put(attrName, request.get<span class="constructor">Attribute(<span class="params">attrName</span>)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">    <span class="comment">// Make framework objects available to handlers and view objects.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">    request.set<span class="constructor">Attribute(WEB_APPLICATION_CONTEXT_ATTRIBUTE, <span class="params">getWebApplicationContext</span>()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">    request.set<span class="constructor">Attribute(LOCALE_RESOLVER_ATTRIBUTE, <span class="params">this</span>.<span class="params">localeResolver</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">    request.set<span class="constructor">Attribute(THEME_RESOLVER_ATTRIBUTE, <span class="params">this</span>.<span class="params">themeResolver</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    request.set<span class="constructor">Attribute(THEME_SOURCE_ATTRIBUTE, <span class="params">getThemeSource</span>()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">    FlashMap inputFlashMap = this.flashMapManager.retrieve<span class="constructor">AndUpdate(<span class="params">request</span>, <span class="params">response</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">if</span> (inputFlashMap != null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">        request.set<span class="constructor">Attribute(INPUT_FLASH_MAP_ATTRIBUTE, Collections.<span class="params">unmodifiableMap</span>(<span class="params">inputFlashMap</span>)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">    request.set<span class="constructor">Attribute(OUTPUT_FLASH_MAP_ATTRIBUTE, <span class="params">new</span> FlashMap()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">    request.set<span class="constructor">Attribute(FLASH_MAP_MANAGER_ATTRIBUTE, <span class="params">this</span>.<span class="params">flashMapManager</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">do</span><span class="constructor">Dispatch(<span class="params">request</span>, <span class="params">response</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">    finally &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// Restore the original attribute snapshot, in case of an include.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (attributesSnapshot != null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">            restore<span class="constructor">AttributesAfterInclude(<span class="params">request</span>, <span class="params">attributesSnapshot</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>几个requet.setAttribute()方法的调用，将前面在初始化流程中实例化的对象设置到http请求的属性中，供下一步处理使用，其中有容器的上下文对象、本地化解析器等SpringMVC特有的编程元素。不同于Struts2中的ValueStack，SpringMVC的数据并没有从HttpServletRequest对象中抽离出来再存进另外一个编程元素，这也跟SpringMVC的设计思想有关。因为从一开始，SpringMVC的设计者就认为，不应该将请求处理过程和Web容器完全隔离。<br>所以，你可以看到，真正发生请求转发的方法doDispatch()中，它的参数是HttpServletRequest和HttpServletResponse对象。这给我们传递的意思也很明确，从request中能获取到一切请求的数据，从response中，我们又可以往服务器端输出任何响应，Http请求的处理，就应该围绕这两个对象来设计。我们不妨可以将SpringMVC这种设计方案，是从Struts2的过度设计中吸取教训，而向Servlet编程的一种回归和简化。</p>
+<h2 id="2-请求转发的抽象描述"><a href="#2-请求转发的抽象描述" class="headerlink" title="2.请求转发的抽象描述"></a><strong>2.请求转发的抽象描述</strong></h2><p>接下来让我们看看doDispatch()这个整个请求转发流程中最核心的方法。DispatcherServlet所接收的Http请求，经过层层转发，最终都是汇总到这个方法中来进行最后的请求分发和处理。doDispatch()这个方法的内容，就是SpringMVC整个框架的精华所在。它通过高度抽象的接口，描述出了一个MVC（Model-View-Controller）设计模式的实现方案。Model、View、Controller三种层次的编程元素，在SpringMVC中都有大量的实现类，各种处理细节也是千差万别。但是，它们最后都是由，也都能由doDispatch()方法来统一描述，这就是接口和抽象的威力，万变不离其宗。<br>先来看一下doDispatch()方法的庐山真面目。</p>
+<figure class="highlight reasonml"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line">protected void <span class="keyword">do</span><span class="constructor">Dispatch(HttpServletRequest <span class="params">request</span>, HttpServletResponse <span class="params">response</span>)</span> throws Exception &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line">    HttpServletRequest processedRequest = request;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line">    HandlerExecutionChain mappedHandler = null;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line">    <span class="built_in">int</span> interceptorIndex = -<span class="number">1</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line">        ModelAndView mv;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">        boolean errorView = <span class="literal">false</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">try</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">            processedRequest = check<span class="constructor">Multipart(<span class="params">request</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// Determine handler for the current request.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">            mappedHandler = get<span class="constructor">Handler(<span class="params">processedRequest</span>, <span class="params">false</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (mappedHandler<span class="operator"> == </span>null<span class="operator"> || </span>mappedHandler.get<span class="constructor">Handler()</span><span class="operator"> == </span>null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">                no<span class="constructor">HandlerFound(<span class="params">processedRequest</span>, <span class="params">response</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">                return;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// Determine handler adapter for the current request.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">            HandlerAdapter ha = get<span class="constructor">HandlerAdapter(<span class="params">mappedHandler</span>.<span class="params">getHandler</span>()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// Process last-modified header, if supported by the handler.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">            String <span class="keyword">method</span> = request.get<span class="constructor">Method()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">            boolean isGet = <span class="string">"GET"</span>.equals(<span class="keyword">method</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (isGet<span class="operator"> || </span><span class="string">"HEAD"</span>.equals(<span class="keyword">method</span>)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">                long lastModified = ha.get<span class="constructor">LastModified(<span class="params">request</span>, <span class="params">mappedHandler</span>.<span class="params">getHandler</span>()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (logger.is<span class="constructor">DebugEnabled()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">                    String requestUri = urlPathHelper.get<span class="constructor">RequestUri(<span class="params">request</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">                    logger.debug(<span class="string">"Last-Modified value for ["</span> + requestUri + <span class="string">"] is: "</span> + lastModified);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">                <span class="keyword">if</span> (<span class="keyword">new</span> <span class="constructor">ServletWebRequest(<span class="params">request</span>, <span class="params">response</span>)</span>.check<span class="constructor">NotModified(<span class="params">lastModified</span>)</span><span class="operator"> &amp;&amp; </span>isGet) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">                    return;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// Apply preHandle methods of registered interceptors.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">            HandlerInterceptor<span class="literal">[]</span> interceptors = mappedHandler.get<span class="constructor">Interceptors()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (interceptors != null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">                for (<span class="built_in">int</span> i = <span class="number">0</span>; i &lt; interceptors.length; i++) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">                    HandlerInterceptor interceptor = interceptors<span class="literal">[<span class="identifier">i</span>]</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">                    <span class="keyword">if</span> (!interceptor.pre<span class="constructor">Handle(<span class="params">processedRequest</span>, <span class="params">response</span>, <span class="params">mappedHandler</span>.<span class="params">getHandler</span>()</span>)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">                        trigger<span class="constructor">AfterCompletion(<span class="params">mappedHandler</span>, <span class="params">interceptorIndex</span>, <span class="params">processedRequest</span>, <span class="params">response</span>, <span class="params">null</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">                        return;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">                    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">                    interceptorIndex = i;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// Actually invoke the handler.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line">            mv = ha.handle(processedRequest, response, mappedHandler.get<span class="constructor">Handler()</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// Do we need view name translation?</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (mv != null<span class="operator"> &amp;&amp; </span>!mv.has<span class="constructor">View()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line">                mv.set<span class="constructor">ViewName(<span class="params">getDefaultViewName</span>(<span class="params">request</span>)</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">49</span></pre></td><td class="code"><pre><span class="line">            <span class="comment">// Apply postHandle methods of registered interceptors.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">50</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (interceptors != null) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">51</span></pre></td><td class="code"><pre><span class="line">                for (<span class="built_in">int</span> i = interceptors.length - <span class="number">1</span>; i &gt;= <span class="number">0</span>; i--) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">52</span></pre></td><td class="code"><pre><span class="line">                    HandlerInterceptor interceptor = interceptors<span class="literal">[<span class="identifier">i</span>]</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">53</span></pre></td><td class="code"><pre><span class="line">                    interceptor.post<span class="constructor">Handle(<span class="params">processedRequest</span>, <span class="params">response</span>, <span class="params">mappedHandler</span>.<span class="params">getHandler</span>()</span>, mv);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">54</span></pre></td><td class="code"><pre><span class="line">                &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">55</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">56</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">57</span></pre></td><td class="code"><pre><span class="line">        catch (ModelAndViewDefiningException ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">58</span></pre></td><td class="code"><pre><span class="line">            logger.debug(<span class="string">"ModelAndViewDefiningException encountered"</span>, ex);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">59</span></pre></td><td class="code"><pre><span class="line">            mv = ex.get<span class="constructor">ModelAndView()</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">60</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">61</span></pre></td><td class="code"><pre><span class="line">        catch (Exception ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">62</span></pre></td><td class="code"><pre><span class="line">            Object handler = (mappedHandler != null ? mappedHandler.get<span class="constructor">Handler()</span> : null);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">63</span></pre></td><td class="code"><pre><span class="line">            mv = process<span class="constructor">HandlerException(<span class="params">processedRequest</span>, <span class="params">response</span>, <span class="params">handler</span>, <span class="params">ex</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">64</span></pre></td><td class="code"><pre><span class="line">            errorView = (mv != null);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">65</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">66</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// Did the handler return a view to render?</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">67</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (mv != null<span class="operator"> &amp;&amp; </span>!mv.was<span class="constructor">Cleared()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">68</span></pre></td><td class="code"><pre><span class="line">            render(mv, processedRequest, response);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">69</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (errorView) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">70</span></pre></td><td class="code"><pre><span class="line">                <span class="module-access"><span class="module"><span class="identifier">WebUtils</span>.</span></span>clear<span class="constructor">ErrorRequestAttributes(<span class="params">request</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">71</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">72</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">73</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">74</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (logger.is<span class="constructor">DebugEnabled()</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">75</span></pre></td><td class="code"><pre><span class="line">                logger.debug(<span class="string">"Null ModelAndView returned to DispatcherServlet with name '"</span> + get<span class="constructor">ServletName()</span> +</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">76</span></pre></td><td class="code"><pre><span class="line">                        <span class="string">"': assuming HandlerAdapter completed request handling"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">77</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">78</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">79</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// Trigger after-completion for successful outcome.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">80</span></pre></td><td class="code"><pre><span class="line">        trigger<span class="constructor">AfterCompletion(<span class="params">mappedHandler</span>, <span class="params">interceptorIndex</span>, <span class="params">processedRequest</span>, <span class="params">response</span>, <span class="params">null</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">81</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">82</span></pre></td><td class="code"><pre><span class="line">    catch (Exception ex) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">83</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// Trigger after-completion for thrown exception.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">84</span></pre></td><td class="code"><pre><span class="line">        trigger<span class="constructor">AfterCompletion(<span class="params">mappedHandler</span>, <span class="params">interceptorIndex</span>, <span class="params">processedRequest</span>, <span class="params">response</span>, <span class="params">ex</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">85</span></pre></td><td class="code"><pre><span class="line">        throw ex;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">86</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">87</span></pre></td><td class="code"><pre><span class="line">    catch (Error err) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">88</span></pre></td><td class="code"><pre><span class="line">        ServletException ex = <span class="keyword">new</span> <span class="constructor">NestedServletException(<span class="string">"Handler processing failed"</span>, <span class="params">err</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">89</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// Trigger after-completion for thrown exception.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">90</span></pre></td><td class="code"><pre><span class="line">        trigger<span class="constructor">AfterCompletion(<span class="params">mappedHandler</span>, <span class="params">interceptorIndex</span>, <span class="params">processedRequest</span>, <span class="params">response</span>, <span class="params">ex</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">91</span></pre></td><td class="code"><pre><span class="line">        throw ex;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">92</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">93</span></pre></td><td class="code"><pre><span class="line">    finally &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">94</span></pre></td><td class="code"><pre><span class="line">        <span class="comment">// Clean up any resources used by a multipart request.</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">95</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (processedRequest != request) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">96</span></pre></td><td class="code"><pre><span class="line">            cleanup<span class="constructor">Multipart(<span class="params">processedRequest</span>)</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">97</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">98</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">99</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>真是千呼万唤始出来，犹抱琵琶半遮面。我们在第一篇<a href="http://my.oschina.net/lichhao/blog/99039" target="_blank" rel="noopener">《SpringMVC源码剖析（一）- 从抽象和接口说起》</a>中所描述的各种编程元素，依次出现在该方法中。HandlerMapping、HandlerAdapter、View这些接口的设计，我们在第一篇中已经讲过。现在我们来重点关注一下HandlerExecutionChain这个对象。<br>从上面的代码中，很明显可以看出一条线索，整个方法是围绕着如何获取HandlerExecutionChain对象，执行HandlerExecutionChain对象得到相应的视图对象，再对视图进行渲染这条主线来展开的。HandlerExecutionChain对象显得异常重要。<br>因为Http请求要进入SpringMVC的处理体系，必须由HandlerMapping接口的实现类映射Http请求，得到一个封装后的HandlerExecutionChain对象。再由HandlerAdapter接口的实现类来处理这个HandlerExecutionChain对象所包装的处理对象，来得到最后渲染的视图对象。<br>视图对象是用ModelAndView对象来描述的，名字已经非常直白，就是数据和视图，其中的数据，由HttpServletRequest的属性得到，视图就是由HandlerExecutionChain封装的处理对象处理后得到。当然HandlerExecutionChain中的拦截器列表HandlerInterceptor，会在处理过程的前后依次被调用，为处理过程留下充足的扩展点。<br>所有的SpringMVC框架元素，都是围绕着HandlerExecutionChain这个执行链来发挥效用。我们来看看，HandlerExecutionChain类的代码。</p>
+<figure class="highlight kotlin"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">package</span> org.springframework.web.servlet;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">2</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> java.util.ArrayList;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">3</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> java.util.Arrays;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">4</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> java.util.List;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">5</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> org.springframework.util.CollectionUtils;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">6</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">HandlerExecutionChain</span> </span>&#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">7</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> <span class="keyword">final</span> Object handler;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">8</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> HandlerInterceptor[] interceptors;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">9</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> List&lt;HandlerInterceptor&gt; interceptorList;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">10</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> HandlerExecutionChain(Object handler) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">11</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">this</span>(handler, <span class="literal">null</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">12</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">13</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> HandlerExecutionChain(Object handler, HandlerInterceptor[] interceptors) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">14</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (handler instanceof HandlerExecutionChain) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">15</span></pre></td><td class="code"><pre><span class="line">            HandlerExecutionChain originalChain = (HandlerExecutionChain) handler;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">16</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">this</span>.handler = originalChain.getHandler();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">17</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">this</span>.interceptorList = new ArrayList&lt;HandlerInterceptor&gt;();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">18</span></pre></td><td class="code"><pre><span class="line">            CollectionUtils.mergeArrayIntoCollection(originalChain.getInterceptors(), <span class="keyword">this</span>.interceptorList);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">19</span></pre></td><td class="code"><pre><span class="line">            CollectionUtils.mergeArrayIntoCollection(interceptors, <span class="keyword">this</span>.interceptorList);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">20</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">21</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">else</span> &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">22</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">this</span>.handler = handler;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">23</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">this</span>.interceptors = interceptors;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">24</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">25</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">26</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> Object getHandler() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">27</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> <span class="keyword">this</span>.handler;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">28</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">29</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> void addInterceptor(HandlerInterceptor interceptor) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">30</span></pre></td><td class="code"><pre><span class="line">        initInterceptorList();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">31</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">this</span>.interceptorList.add(interceptor);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">32</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">33</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> void addInterceptors(HandlerInterceptor[] interceptors) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">34</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (interceptors != <span class="literal">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">35</span></pre></td><td class="code"><pre><span class="line">            initInterceptorList();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">36</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">this</span>.interceptorList.addAll(Arrays.asList(interceptors));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">37</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">38</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">39</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">private</span> void initInterceptorList() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">40</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (<span class="keyword">this</span>.interceptorList == <span class="literal">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">41</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">this</span>.interceptorList = new ArrayList&lt;HandlerInterceptor&gt;();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">42</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">43</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (<span class="keyword">this</span>.interceptors != <span class="literal">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">44</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">this</span>.interceptorList.addAll(Arrays.asList(<span class="keyword">this</span>.interceptors));</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">45</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">this</span>.interceptors = <span class="literal">null</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">46</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">47</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">48</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> HandlerInterceptor[] getInterceptors() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">49</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (<span class="keyword">this</span>.interceptors == <span class="literal">null</span> &amp;&amp; <span class="keyword">this</span>.interceptorList != <span class="literal">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">50</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">this</span>.interceptors = <span class="keyword">this</span>.interceptorList.toArray(new HandlerInterceptor[<span class="keyword">this</span>.interceptorList.size()]);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">51</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">52</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> <span class="keyword">this</span>.interceptors;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">53</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">54</span></pre></td><td class="code"><pre><span class="line">    <span class="meta">@Override</span></span></pre></td></tr><tr><td class="gutter"><pre><span class="line">55</span></pre></td><td class="code"><pre><span class="line">    <span class="keyword">public</span> String toString() &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">56</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (<span class="keyword">this</span>.handler == <span class="literal">null</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">57</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">return</span> <span class="string">"HandlerExecutionChain with no handler"</span>;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">58</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">59</span></pre></td><td class="code"><pre><span class="line">        StringBuilder sb = new StringBuilder();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">60</span></pre></td><td class="code"><pre><span class="line">        sb.append(<span class="string">"HandlerExecutionChain with handler ["</span>).append(<span class="keyword">this</span>.handler).append(<span class="string">"]"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">61</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">if</span> (!CollectionUtils.isEmpty(<span class="keyword">this</span>.interceptorList)) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">62</span></pre></td><td class="code"><pre><span class="line">            sb.append(<span class="string">" and "</span>).append(<span class="keyword">this</span>.interceptorList.size()).append(<span class="string">" interceptor"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">63</span></pre></td><td class="code"><pre><span class="line">            <span class="keyword">if</span> (<span class="keyword">this</span>.interceptorList.size() &gt; <span class="number">1</span>) &#123;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">64</span></pre></td><td class="code"><pre><span class="line">                sb.append(<span class="string">"s"</span>);</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">65</span></pre></td><td class="code"><pre><span class="line">            &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">66</span></pre></td><td class="code"><pre><span class="line">        &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">67</span></pre></td><td class="code"><pre><span class="line">        <span class="keyword">return</span> sb.toString();</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">68</span></pre></td><td class="code"><pre><span class="line">    &#125;</span></pre></td></tr><tr><td class="gutter"><pre><span class="line">69</span></pre></td><td class="code"><pre><span class="line">&#125;</span></pre></td></tr></table></figure>
+
+<p>一个拦截器列表，一个执行对象，这个类的内容十分的简单，它蕴含的设计思想，却十分的丰富。<br>1.拦截器组成的列表，在执行对象被调用的前后，会依次执行。这里可以看成是一个的AOP环绕通知，拦截器可以对处理对象随心所欲的进行处理和增强。这里明显是吸收了Struts2中拦截器的设计思想。这种AOP环绕式的扩展点设计，也几乎成为所有框架必备的内容。<br>2.实际的处理对象，即handler对象，是由Object对象来引用的。</p>
+<figure class="highlight aspectj"><table><tr><td class="gutter"><pre><span class="line">1</span></pre></td><td class="code"><pre><span class="line"><span class="keyword">private</span> <span class="keyword">final</span> Object <span class="keyword">handler</span>;</span></pre></td></tr></table></figure>
+
+<p>之所以要用一个java世界最基础的Object对象引用来引用这个handler对象，是因为连特定的接口也不希望绑定在这个handler对象上，从而使handler对象具有最大程度的选择性和灵活性。<br>我们常说，一个框架最高层次的抽象是接口，但是这里SpringMVC更进了一步。在最后的处理对象上面，SpringMVC没有对它做任何的限制，只要是java世界中的对象，都可以用来作为最后的处理对象，来生成视图。极端一点来说，你甚至可以将另外一个MVC框架集成到SpringMVC中来，也就是为什么SpringMVC官方文档中，居然还有集成其他表现层框架的内容。这一点，在所有表现层框架中，是独领风骚，冠绝群雄的。<br><img src="http://image.winrains.cn/2019/11/6f250-203718_HPiY_118997.jpg" alt="img"></p>
+<h2 id="3-结语"><a href="#3-结语" class="headerlink" title="3.结语"></a><strong>3.结语</strong></h2><p>SpringMVC的成功，源于它对开闭原则的运用和遵守。也正因此，才使得整个框架具有如此强大的描述和扩展能力。这也许和SpringMVC出现和兴起的时间有关，正是经历了Struts1到Struts2这些Web开发领域MVC框架的更新换代，它的设计者才能站在前人的肩膀上。知道了如何将事情做的糟糕之后，你或许才知道如何将事情做得好。<br>希望在这个系列里面分享的SpringMVC源码阅读经验，能帮助读者们从更高的层次来审视SpringMVC框架的设计，也希望这里所描述的一些基本设计思想，能在你更深入的了解SpringMVC的细节时，对你有帮助。哲学才是唯一的、最终的武器，在一个框架的设计上，尤其是如此。经常地体会一个框架设计者的设计思想，对你更好的使用它，是有莫大的益处的。</p>
+<blockquote>
+<p>作者：相见欢</p>
+<p>来源：<a href="https://my.oschina.net/lichhao/blog/104943" target="_blank" rel="noopener">https://my.oschina.net/lichhao/blog/104943</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/%E6%BA%90%E7%A0%81/" rel="tag"># 源码</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/01/10/Spring-MVC%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90%EF%BC%883%EF%BC%89%EF%BC%9ADispatcherServlet%E7%9A%84%E5%88%9D%E5%A7%8B%E5%8C%96%E6%B5%81%E7%A8%8B/" rel="prev" title="Spring MVC源码剖析（3）：DispatcherServlet的初始化流程">
+      <i class="fa fa-chevron-left"></i> Spring MVC源码剖析（3）：DispatcherServlet的初始化流程
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/01/10/Spring-MVC%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90%EF%BC%885%EF%BC%89%EF%BC%9A%E6%B6%88%E6%81%AF%E8%BD%AC%E6%8D%A2%E5%99%A8HttpMessageConverter/" rel="next" title="Spring MVC源码剖析（5）：消息转换器HttpMessageConverter">
+      Spring MVC源码剖析（5）：消息转换器HttpMessageConverter <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+  </div>
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let activeClass = CONFIG.comments.activeClass;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#1-请求转发的入口"><span class="nav-number">1.</span> <span class="nav-text">1.请求转发的入口**</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#2-请求转发的抽象描述"><span class="nav-number">2.</span> <span class="nav-text">2.请求转发的抽象描述</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#3-结语"><span class="nav-number">3.</span> <span class="nav-text">3.结语</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">congsheng.wang</p>
+  <div class="site-description" itemprop="description">trouble is a friend</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">984</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">94</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">156</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-user"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">congsheng.wang</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> 强力驱动 v4.0.0
+  </div>
+  <span class="post-meta-divider">|</span>
+  <div class="theme-info">主题 – <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> v7.6.0
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+<script src="/js/utils.js"></script><script src="/js/motion.js"></script>
+<script src="/js/schemes/pisces.js"></script>
+<script src="/js/next-boot.js"></script>
+
+
+
+  
+
+
+
+
+  <script src="/js/local-search.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
